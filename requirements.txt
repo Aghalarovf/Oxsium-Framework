@@ -1,0 +1,13 @@
+# Recommended Python version: 3.11 or 3.12
+
+Flask>=3.0,<4.0
+Flask-Cors>=4.0,<6.0
+Flask-Limiter>=3.8,<4.0
+ldap3>=2.9,<3.0
+python-dotenv>=1.0,<2.0
+
+# Remote protocol support
+pywinrm>=0.4.3,<1.0
+requests-ntlm>=1.2,<2.0
+paramiko>=3.4,<4.0
+impacket>=0.12.0,<1.0
