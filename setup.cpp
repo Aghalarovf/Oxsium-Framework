@@ -385,9 +385,9 @@ static bool create_virtual_environment(const fs::path& root) {
     info("Creating virtual environment " + ansi::CYAN() + "oxsium" + ansi::RST() + " ...");
     bullet(ansi::DIM() + interp + " -m venv " + venv_quoted + ansi::RST());
 
-    /* cmd /c ensures the freshly-updated PATH from the Python installer
-       is visible even inside the current console session.                */
-    const std::string cmd = "cmd /c " + interp + " -m venv " + venv_quoted;
+    /* system() already goes through the Windows shell; avoid adding an
+       extra cmd /c layer because it can break quoted executable paths.   */
+    const std::string cmd = interp + " -m venv " + venv_quoted;
     if (run(cmd) != 0) {
         err("Failed to create virtual environment.");
         bullet("Command was: " + cmd);
