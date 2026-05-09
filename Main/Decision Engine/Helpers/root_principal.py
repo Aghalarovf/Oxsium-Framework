@@ -6,6 +6,9 @@ import sys
 from pathlib import Path
 
 
+PORT = 5100
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  Read Database
 # ─────────────────────────────────────────────────────────────────────────────
@@ -58,7 +61,7 @@ def _read_field(filepath: Path, list_key: str, field: str) -> list:
         print(f"[root_principal] {filepath.name} not found: {exc}", file=sys.stderr)
         return []
 
-def start_api_server(port=5100, host="localhost", base_dir=None):
+def start_api_server(port=PORT, host="localhost", base_dir=None):
     try:
         from flask import Flask, jsonify, request
     except ImportError:
@@ -194,7 +197,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Root principal helper API")
     parser.add_argument("mode", nargs="?", choices=["server", "test"], default="server", help="Run mode: 'server' (default) or 'test'")
-    parser.add_argument("-p", "--port", type=int, default=5100, help="Port to listen on (default: 5100)")
+    parser.add_argument("-p", "--port", type=int, default=PORT, help="Port to listen on (default: 5100)")
     parser.add_argument("-i", "--ip-address", dest="ip_address", default="127.0.0.1",
                         help="IP address/interface to bind to (default: 127.0.0.1). Use 0.0.0.0 to expose on all interfaces.")
     args = parser.parse_args()

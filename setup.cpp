@@ -734,7 +734,7 @@ static std::string start_py_template() {
         "def get_default_connection_port() -> int:\n"
         "    return _load_port_from_module(CONNECTION_PY, \"PORT\", 5000)\n\n"
         "def get_default_decision_port() -> int:\n"
-        "    return _load_port_from_module(DECISION_PY, \"PORT\", 5001)\n\n"
+        "    return _load_port_from_module(DECISION_PY, \"PORT\", 5100)\n\n"
         "class _SilentHandler(http.server.SimpleHTTPRequestHandler):\n"
         "    \"\"\"Konsola log yazmayan sade HTTP handler.\"\"\"\n"
         "    def log_message(self, format, *args):\n"
