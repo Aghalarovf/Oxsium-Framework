@@ -354,6 +354,155 @@ static std::string python_command(const fs::path& root) {
 
 /* ── virtual environment ──────────────────────────────────────────────── */
 
+/* ------------------------------------------------------------------ *
+ *  diagnose_venv_failure()                                            *
+ *  Called after `python -m venv` returns a non-zero exit code.       *
+ *  Checks every likely cause and prints a labelled explanation so    *
+ *  the user knows exactly what went wrong without reading logs.      *
+ * ------------------------------------------------------------------ */
+static void diagnose_venv_failure(const fs::path& interp_path,
+                                  const fs::path& venv_dir,
+                                  int             exit_code)
+{
+    std::cout << "\n"
+              << ansi::ERR_TAG()
+              << "  +-- Diagnostic Report ---------------------------------------+"
+              << ansi::RST() << "\n\n";
+
+    /* 1 ── interpreter reachable? ─────────────────────────────────── */
+    bool interp_ok = false;
+    if (interp_path == fs::path("python") || interp_path == fs::path("py -3")) {
+        interp_ok = command_ok(interp_path.string() + " --version");
+    } else {
+        interp_ok = fs::exists(interp_path);
+    }
+
+    if (!interp_ok) {
+        err("Interpreter not found or not executable.");
+        bullet("Path checked : " + ansi::PATH_CLR() + interp_path.string() + ansi::RST());
+        bullet("Python may have been installed but is not yet visible in this");
+        bullet("process's PATH.  Open a NEW terminal and re-run setup.exe.");
+    } else {
+        ok("Interpreter exists  : " + interp_path.string());
+    }
+
+    /* 2 ── path contains characters Windows cmd mishandles ───────── *
+     *  The main culprit seen in the log:                              *
+     *    "The filename, directory name, or volume label syntax is     *
+     *     incorrect."                                                 *
+     *  This happens when the fully-quoted command still has a path    *
+     *  segment that ends with a backslash immediately before the      *
+     *  closing double-quote  (e.g.  "C:\foo\"  →  shell sees  \")    *
+     *  OR when the path contains parentheses / special shell chars.   */
+    {
+        const std::string p = venv_dir.string();
+
+        /* Trailing backslash-before-quote is the classic trigger */
+        bool trailing_bs   = (!p.empty() && p.back() == '\\');
+
+        /* Characters that confuse cmd.exe inside a quoted argument */
+        bool bad_chars     = (p.find('(')  != std::string::npos ||
+                              p.find(')')  != std::string::npos ||
+                              p.find('!')  != std::string::npos ||
+                              p.find('^')  != std::string::npos ||
+                              p.find('&')  != std::string::npos ||
+                              p.find('%')  != std::string::npos);
+
+        /* Double-quote already in path name (very unusual, but check) */
+        bool embedded_quote = (p.find('"') != std::string::npos);
+
+        if (trailing_bs || bad_chars || embedded_quote) {
+            err("Destination path contains characters that break cmd.exe quoting:");
+            if (trailing_bs)    bullet("Trailing backslash before closing quote  →  \\\"");
+            if (bad_chars)      bullet("Shell-special character  ( ) ! ^ & %  in path");
+            if (embedded_quote) bullet("Embedded double-quote in path name");
+            bullet("Path : " + ansi::PATH_CLR() + p + ansi::RST());
+            bullet("Fix  : move the project to a path without these characters,");
+            bullet("       e.g.  C:\\OxsiumFramework\\  (no spaces, no parens).");
+        } else {
+            ok("Destination path looks safe for cmd.exe quoting.");
+        }
+
+        /* Space in path — not fatal when properly quoted, but flag it */
+        if (p.find(' ') != std::string::npos) {
+            warn("Destination path contains spaces — this is allowed but can");
+            bullet("cause problems with some Python venv builds on older Windows.");
+            bullet("If the error persists, try:  C:\\OxsiumFramework\\oxsium");
+        }
+    }
+
+    /* 3 ── target directory already exists but is broken ─────────── */
+    if (fs::exists(venv_dir)) {
+        bool has_pyvenv_cfg = fs::exists(venv_dir / "pyvenv.cfg");
+        if (!has_pyvenv_cfg) {
+            warn("Directory already exists but has no pyvenv.cfg — it may be");
+            bullet("a leftover from a previous failed attempt.");
+            bullet("Delete it and re-run:  rmdir /s /q \"" + venv_dir.string() + "\"");
+        }
+    }
+
+    /* 4 ── disk space (rough heuristic via GetDiskFreeSpaceEx) ──────── */
+#ifdef _WIN32
+    {
+        ULARGE_INTEGER free_bytes{};
+        std::wstring wpath(venv_dir.wstring());
+        if (GetDiskFreeSpaceExW(wpath.c_str(), &free_bytes, nullptr, nullptr)) {
+            const unsigned long long free_mb = free_bytes.QuadPart / (1024ULL * 1024ULL);
+            if (free_mb < 150ULL) {
+                err("Low disk space: " + std::to_string(free_mb) + " MB free.");
+                bullet("Python virtual environments need at least 150 MB.");
+            } else {
+                ok("Disk space OK  : " + std::to_string(free_mb) + " MB free.");
+            }
+        }
+    }
+#endif
+
+    /* 5 ── ensurepip available in this Python build? ─────────────── */
+    {
+        std::string check_interp;
+        if (interp_path == fs::path("python") || interp_path == fs::path("py -3"))
+            check_interp = interp_path.string();
+        else
+            check_interp = quote(interp_path);
+
+        if (!command_ok(check_interp + " -c \"import ensurepip\"")) {
+            err("The ensurepip module is missing from this Python build.");
+            bullet("On some stripped / embedded distributions venv cannot install pip.");
+            bullet("Install the full Python 3.12 from https://www.python.org/downloads/");
+        } else {
+            ok("ensurepip module  : present.");
+        }
+    }
+
+    /* 6 ── exit code hint ─────────────────────────────────────────── */
+    std::cout << "\n";
+    warn("venv exit code was " + std::to_string(exit_code) + ".  Common meanings:");
+    if (exit_code == 1)
+        bullet("General Python error — see the venv output above for the traceback.");
+    else if (exit_code == 2)
+        bullet("Bad command-line arguments passed to python.exe.");
+
+#ifdef _WIN32
+    /* Windows-specific: NTSTATUS / Win32 error mapped through CRT */
+    else if (exit_code == 0xC0000135 || exit_code == -1073741515)
+        bullet("DLL not found — Python install may be incomplete or corrupted.");
+    else if (exit_code == 0xC0000005 || exit_code == -1073741819)
+        bullet("Access violation — possible antivirus interference or corrupt install.");
+#endif
+
+    else {
+        bullet("Uncommon code — run the command manually in a cmd window to see");
+        bullet("the full error output:  " + ansi::CYAN() +
+               quote(interp_path) + " -m venv " + quote(venv_dir) + ansi::RST());
+    }
+
+    std::cout << "\n"
+              << ansi::ERR_TAG()
+              << "  +------------------------------------------------------------+"
+              << ansi::RST() << "\n\n";
+}
+
 static bool create_virtual_environment(const fs::path& root) {
     if (fs::exists(venv_python(root))) {
         ok("Virtual environment already exists.");
@@ -371,8 +520,10 @@ static bool create_virtual_environment(const fs::path& root) {
         interp = quote(interp_path);        // full path, always works
     } else if (py_launcher_exists()) {
         interp = "py -3";
+        interp_path = fs::path("py -3");
     } else if (python_exists()) {
         interp = "python";
+        interp_path = fs::path("python");
     } else {
         err("No Python interpreter found \u2014 cannot create virtual environment.");
         return false;
@@ -388,9 +539,12 @@ static bool create_virtual_environment(const fs::path& root) {
     /* system() already goes through the Windows shell; avoid adding an
        extra cmd /c layer because it can break quoted executable paths.   */
     const std::string cmd = interp + " -m venv " + venv_quoted;
-    if (run(cmd) != 0) {
+    const int rc = run(cmd);
+    if (rc != 0) {
         err("Failed to create virtual environment.");
         bullet("Command was: " + cmd);
+        /* ── NEW: detailed diagnostic ── */
+        diagnose_venv_failure(interp_path, venv_dir, rc);
         return false;
     }
     ok("Virtual environment created.");
