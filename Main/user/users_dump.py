@@ -909,12 +909,7 @@ def _build_user_admin_ctx(
 def get_domain_users(ip: str, domain: str, username: str,
                      password: str, config,
                      proto_output_path: str | None = None) -> dict:
-    """
-    AD istifadəçilərini LDAP ilə çəkir və admins_check qaydalarını tətbiq edir.
 
-    proto_output_path verilmiş  və  proto_bridge + domain_users_pb2 mövcuddursa,
-    nəticə həmin yola binary protobuf formatında yazılır.
-    """
     auth_type = "SIMPLE"
     if _is_ntlm_hash(password):
         password  = f"00000000000000000000000000000000:{password}"
