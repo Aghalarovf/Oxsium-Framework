@@ -1,6 +1,23 @@
 import json
 import os
+import sys
+from pathlib import Path
 from typing import Optional
+
+# Config import etmə
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+try:
+    from connect.config import Config
+except ImportError:
+    # Əgər connect config-inə çata bilmə, dəfault istifadə etməli
+    class Config:
+        DOMAIN_OBJECT_DIR = Path(__file__).parent.parent.parent / "Main" / "Domain Object"
+        DOMAIN_ACES_PARQUET = DOMAIN_OBJECT_DIR / "domain_aces.parquet"
+        DOMAIN_EXTENDED_RIGHTS_JSON = DOMAIN_OBJECT_DIR / "domain_extended_rights.json"
+        DOMAIN_DANGEROUS_ACE_JSON = DOMAIN_OBJECT_DIR / "domain_dangerous_ace.json"
 
 from .constants import (
     DANGEROUS_RIGHTS,
@@ -19,6 +36,7 @@ from .backends import (
 )
 from .parsers import _build_sid_map, _fetch_object_sd, _parse_dacl_to_records, _build_guid_map
 from .collector import AclCollector
+
 
 
 def _write_acls_to_parquet(acl_result: dict, output_path: str) -> str:
@@ -127,9 +145,15 @@ def collect_all_aces_to_parquet(
     password: str,
     config,
     acl_filter: Optional[AclFilterConfig] = None,
-    output_dir: str = ".",
-    filename: str = "domain_aces.parquet",
+    output_dir: Optional[str] = None,
+    filename: Optional[str] = None,
 ) -> dict:
+    # Config-dən default-ləri oxu
+    if output_dir is None:
+        output_dir = str(Config.DOMAIN_OBJECT_DIR)
+    if filename is None:
+        filename = "domain_aces.parquet"
+
 
     _no_filter = AclFilterConfig(
         exclude_inherited          = False,
@@ -190,10 +214,16 @@ def check_sensitive_template_acls(
     password: str,
     config,
     templates: list[str] | None = None,
-    output_dir: str = ".",
-    filename: str = "domain_template_acls.json",
+    output_dir: Optional[str] = None,
+    filename: Optional[str] = None,
     resolve_guids: bool = False,
 ) -> dict:
+    # Config-dən default-ləri oxu
+    if output_dir is None:
+        output_dir = str(Config.DOMAIN_OBJECT_DIR)
+    if filename is None:
+        filename = "domain_template_acls.json"
+
     
     try:
         parser = ImpacketParser()
@@ -333,9 +363,15 @@ def deep_scan_domain_acls(
     password: str,
     config,
     acl_filter: Optional[AclFilterConfig] = None,
-    output_dir: str = ".",
-    filename: str = "domain_deep_scan.parquet",
+    output_dir: Optional[str] = None,
+    filename: Optional[str] = None,
 ) -> dict:
+    # Config-dən default-ləri oxu
+    if output_dir is None:
+        output_dir = str(Config.DOMAIN_OBJECT_DIR)
+    if filename is None:
+        filename = "domain_deep_scan.parquet"
+
     _no_filter = AclFilterConfig(
         exclude_inherited          = False,
         exclude_default            = False,
@@ -382,10 +418,18 @@ def deep_scan_domain_acls(
 
 def dangerous_ace(
     acl_result: dict,
-    output_dir: str = ".",
-    dangerous_filename: str  = "domain_dangerous_ace.json",
-    extended_filename:  str  = "domain_extended_rights.json",
+    output_dir: Optional[str] = None,
+    dangerous_filename: Optional[str] = None,
+    extended_filename: Optional[str] = None,
 ) -> dict:
+    # Config-dən default-ləri oxu
+    if output_dir is None:
+        output_dir = str(Config.DOMAIN_OBJECT_DIR)
+    if dangerous_filename is None:
+        dangerous_filename = "domain_dangerous_ace.json"
+    if extended_filename is None:
+        extended_filename = "domain_extended_rights.json"
+
     
     if not acl_result.get("success"):
         return {

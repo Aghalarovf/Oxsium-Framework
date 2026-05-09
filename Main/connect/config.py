@@ -1,5 +1,6 @@
 import os
 import logging
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -7,6 +8,30 @@ load_dotenv()
 
 
 class Config:
+    # ── Project root və data directories ──────────────────────────────────
+    # PROJECT_ROOT = /Main (connect/config.py-dən iki səviyyə yuxarı)
+    PROJECT_ROOT = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+    # Domain Object qovluğunun yolu environment variable-dən və ya default-dən oxunur
+    # DOMAIN_OBJECT_DIR={PROJECT_ROOT}/Domain Object = /Main/Domain Object
+    DOMAIN_OBJECT_DIR = Path(
+        os.getenv(
+            "DOMAIN_OBJECT_DIR",
+            str(PROJECT_ROOT / "Domain Object")
+        )
+    )
+    
+    # ACL output files
+    DOMAIN_ACES_PARQUET = DOMAIN_OBJECT_DIR / "domain_aces.parquet"
+    DOMAIN_ACES_JSON = DOMAIN_OBJECT_DIR / "domain_aces.json"
+    DOMAIN_EXTENDED_RIGHTS_JSON = DOMAIN_OBJECT_DIR / "domain_extended_rights.json"
+    DOMAIN_DANGEROUS_ACE_JSON = DOMAIN_OBJECT_DIR / "domain_dangerous_ace.json"
+    
+    # Legacy paths (compatibility)
+    DOMAIN_USERS_JSON = DOMAIN_OBJECT_DIR / "domain_users.json"
+    DOMAIN_COMPUTERS_JSON = DOMAIN_OBJECT_DIR / "domain_computers.json"
+    DOMAIN_GROUPS_JSON = DOMAIN_OBJECT_DIR / "domain_groups.json"
+
     PROTO_PORTS: dict[str, int] = {
         "kerberos": 88,
         "winrm":  5985,

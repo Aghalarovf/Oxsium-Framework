@@ -1,20 +1,3 @@
-"""
-connection.py — Flask application entry point.
-
-All business logic lives in the `connect/` package:
-  connect/config.py        Config class & logging
-  connect/utils.py         Validation & LDAP string helpers
-  connect/network.py       TCP port probing
-  connect/ldap_core.py     LDAP environment collection & enumeration fallback
-  connect/protocols.py     Protocol connect functions + PROTOCOL_HANDLERS
-  connect/shell.py         Shell command runners & PowerShell profile helpers
-  connect/tools.py         External tool runners (C inventory, SMB checker)
-  connect/saved_users.py   Saved-user JSON persistence
-  connect/flask_helpers.py Flask decorators & shared request parsing
-  connect/connection_fast.py  Fast-connect strategy
-  connect/connection_deep.py  Deep-connect defaults & env enrichment
-"""
-
 import os
 import sys
 import json
@@ -22,16 +5,26 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+# ── sys.path setup: Main qovluğu əlavə etməli ────────────────────────────────────
+_PROJECT_ROOT = Path(__file__).parent.parent  # /Main
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+# ── Config import ────────────────────────────────────────────────────────────────
+from connect.config import Config, logger
 
-DOMAIN_OBJECT_DIR = Path(PROJECT_ROOT) / "Domain Object"
+# ── Config-dən paths oxunur ──────────────────────────────────────────────────────
+PROJECT_ROOT = Config.PROJECT_ROOT
+DOMAIN_OBJECT_DIR = Config.DOMAIN_OBJECT_DIR
+DOMAIN_ACES_PARQUET = Config.DOMAIN_ACES_PARQUET
+DOMAIN_ACES_JSON = Config.DOMAIN_ACES_JSON
+DOMAIN_EXTENDED_RIGHTS_JSON = Config.DOMAIN_EXTENDED_RIGHTS_JSON
+DOMAIN_DANGEROUS_ACE_JSON = Config.DOMAIN_DANGEROUS_ACE_JSON
+DOMAIN_USERS_JSON = Config.DOMAIN_USERS_JSON
+DOMAIN_COMPUTERS_JSON = Config.DOMAIN_COMPUTERS_JSON
+DOMAIN_GROUPS_JSON = Config.DOMAIN_GROUPS_JSON
+
+# Legacy paths (backward compatibility)
 LEGACY_DOMAIN_USERS_JSON = Path(PROJECT_ROOT) / "domain_users.json"
 LEGACY_DOMAIN_COMPUTERS_JSON = Path(PROJECT_ROOT) / "domain_computers.json"
 LEGACY_DOMAIN_OUS_JSON = Path(PROJECT_ROOT) / "domain_ous.json"
@@ -39,14 +32,13 @@ LEGACY_DOMAIN_GROUPS_JSON = Path(PROJECT_ROOT) / "domain_groups.json"
 LEGACY_DOMAIN_TRUSTS_JSON = Path(PROJECT_ROOT) / "domain_trusts.json"
 LEGACY_DOMAIN_GPOS_JSON = Path(PROJECT_ROOT) / "domain_gpos.json"
 LEGACY_DOMAIN_ACES_JSON = Path(PROJECT_ROOT) / "domain_aces.json"
-DOMAIN_ACES_PARQUET = DOMAIN_OBJECT_DIR / "domain_aces.parquet"
-DOMAIN_ACES_JSON = DOMAIN_OBJECT_DIR / "domain_aces.json"
-DOMAIN_EXTENDED_RIGHTS_JSON = DOMAIN_OBJECT_DIR / "domain_extended_rights.json"
-DOMAIN_DANGEROUS_ACE_JSON = DOMAIN_OBJECT_DIR / "domain_dangerous_ace.json"
-DOMAIN_USERS_JSON = DOMAIN_OBJECT_DIR / "domain_users.json"
-DOMAIN_COMPUTERS_JSON = DOMAIN_OBJECT_DIR / "domain_computers.json"
-DOMAIN_GROUPS_JSON = DOMAIN_OBJECT_DIR / "domain_groups.json"
 
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+# ── Main package imports ──────────────────────────────────────────────────────────
 from user import users_dump as users
 from computer import computers
 from group import groups
@@ -57,7 +49,7 @@ from trust import trusts
 from acl import AclFilterConfig, get_domain_acls
 from acl.constants import _DEFAULT_TRUSTEE_RIDS, _DEFAULT_TRUSTEE_SIDS
 
-from connect.config        import Config, logger
+# ── Connect package imports ───────────────────────────────────────────────────────
 from connect.utils         import validate_ip, validate_domain, validate_username
 from connect.network       import _tcp_probe, check_port
 from connect.ldap_core     import (
@@ -78,6 +70,7 @@ from connect.flask_helpers import (
 from connect.connection_fast import run_connect_strategy
 from connect.connection_deep import apply_deep_defaults, enrich_with_env_probe
 from connect.dcsync        import _read_dcsync_history, run_dcsync_tool, save_kerberos_key
+
 
 
 # ---------------------------------------------------------------------------

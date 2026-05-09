@@ -49,7 +49,7 @@ from .backends import (
 )
 
 # ── Public API ────────────────────────────────────────────────────────────────
-from .api import get_domain_acls, check_sensitive_template_acls, dangerous_ace
+from .api import get_domain_acls, check_sensitive_template_acls, dangerous_ace, collect_all_aces_to_parquet, deep_scan_domain_acls
 
 # ── Köhnə kodu qırmamaq üçün açıq __all__ ────────────────────────────────────
 __all__ = [
@@ -105,4 +105,6 @@ __all__ = [
     "get_domain_acls",
     "check_sensitive_template_acls",
     "dangerous_ace",
+    "collect_all_aces_to_parquet",
+    "deep_scan_domain_acls",
 ]

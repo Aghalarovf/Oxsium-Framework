@@ -1,5 +1,11 @@
 *.json
 *.parquet
+
+# Environment and configuration
+.env
+.env.local
+.env.*.local
+
 # Python cache
 __pycache__/
 **/__pycache__/
