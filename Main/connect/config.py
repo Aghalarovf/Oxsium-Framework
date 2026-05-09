@@ -27,7 +27,6 @@ class Config:
     DOMAIN_EXTENDED_RIGHTS_JSON = DOMAIN_OBJECT_DIR / "domain_extended_rights.json"
     DOMAIN_DANGEROUS_ACE_JSON = DOMAIN_OBJECT_DIR / "domain_dangerous_ace.json"
     
-    # Legacy paths (compatibility)
     DOMAIN_USERS_JSON = DOMAIN_OBJECT_DIR / "domain_users.json"
     DOMAIN_COMPUTERS_JSON = DOMAIN_OBJECT_DIR / "domain_computers.json"
     DOMAIN_GROUPS_JSON = DOMAIN_OBJECT_DIR / "domain_groups.json"
