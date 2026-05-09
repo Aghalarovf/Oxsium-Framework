@@ -1,0 +1,33 @@
+
+
+:root {
+    --bg-deep:    #080b0f;
+    --bg-base:    #0c1016;
+    --bg-panel:   #101520;
+    --bg-card:    #141a24;
+    --bg-input:   #0d1219;
+    --border:     #1e2d3d;
+    --border-hi:  #2a3f55;
+    --accent:     #00d4ff;
+    --accent-dim: #007899;
+    --accent-glow:#00d4ff22;
+    --green:      #00ff88;
+    --green-dim:  #009944;
+    --red:        #ff4455;
+    --amber:      #ffaa00;
+    --amber-dim:  #7a5000;
+    --text-pri:   #d0e8f0;
+    --text-sec:   #6a8aa0;
+    --text-dim:   #3a5060;
+    --text-hi:    #ffffff;
+    --mono:       'Share Tech Mono', monospace;
+    --head:       'Rajdhani', sans-serif;
+    --ui:         'Space Mono', monospace;
+    --sidebar-w:  210px;
+    --right-w:    260px;
+    --radius:     6px;
+    --radius-sm:  4px;
+    --bg-alt:     #0f1520;
+    --bg-hover:   #141b27;
+    --bg-selected:#0e2231;
+}

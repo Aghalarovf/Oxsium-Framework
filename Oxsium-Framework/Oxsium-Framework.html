@@ -1,0 +1,1661 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oxsium Framework</title>
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="css/variables.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/topbar.css">
+<link rel="stylesheet" href="css/sidebar.css">
+<link rel="stylesheet" href="css/panels.css">
+<link rel="stylesheet" href="css/forms.css">
+<link rel="stylesheet" href="css/buttons.css">
+<link rel="stylesheet" href="css/users.css">
+<link rel="stylesheet" href="css/ous.css">
+<link rel="stylesheet" href="css/gpos.css">
+<link rel="stylesheet" href="css/groups.css">
+<link rel="stylesheet" href="css/trusts.css">
+<link rel="stylesheet" href="css/computers.css">
+<link rel="stylesheet" href="css/acl.css">
+<link rel="stylesheet" href="css/decision_tree.css">
+<link rel="stylesheet" href="css/modals.css">
+<link rel="stylesheet" href="css/misc.css">
+
+</head>
+<body>
+
+<!-- ── TOP BAR ── -->
+<header class="topbar">
+  <div class="topbar-logo">
+    <div class="logo-icon">
+      <img src="assets/favicon.png" alt="Oxsium Logo" class="logo-img">
+    </div>
+    <span class="logo-name"><span>Oxsium</span><span class="logo-sub">Framework</span></span>
+    <span class="logo-version">v2.1</span>
+  </div>
+
+  <nav class="main-nav">
+    <button class="main-tab active" data-tab="connect" onclick="switchMainTab('connect', this)">
+      <span class="tab-dot"></span> Connect
+    </button>
+    <button class="main-tab" data-tab="decision-engine" onclick="openDecisionEnginePage()" title="Open the Decision Engine page in a separate window">
+      <span class="tab-dot"></span> Decision Engine
+    </button>
+    <button class="main-tab disabled" data-tab="powershell" title="Coming Soon ..." aria-disabled="true" disabled>
+      <span class="tab-dot"></span> PowerShell
+    </button>
+    <button class="main-tab disabled" data-tab="enumeration" title="Coming Soon ..." aria-disabled="true" disabled>
+      <span class="tab-dot"></span> Enumeration
+    </button>
+    <button class="main-tab disabled" data-tab="reconnaissance" title="Coming Soon ..." aria-disabled="true" disabled>
+      <span class="tab-dot"></span> Reconnaissance
+    </button>
+  </nav>
+
+  <div class="conn-badge">
+    <div class="conn-dot" id="top-conn-dot"></div>
+    <span class="conn-label" id="top-conn-label">DISCONNECTED</span>
+  </div>
+</header>
+
+<!-- ── MAIN LAYOUT ── -->
+<div class="layout">
+
+  <!-- LEFT SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">Objects</div>
+
+      <div class="nav-item" id="nav-users" onclick="switchTab('users')">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="5" r="3" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+        Users
+        <span class="nav-count" id="nav-users-count">—</span>
+      </div>
+
+      <div class="nav-item" id="nav-computers" onclick="switchTab('computers')">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="4" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M5 4V3M11 4V3M4 8h2M8 8h4M4 11h4" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+        Computers
+        <span class="nav-count" id="nav-computers-count">—</span>
+      </div>
+
+      <div class="nav-item" id="nav-ous" onclick="switchTab('ous')">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
+          <path d="M8 2L2 5v6l6 3 6-3V5L8 2z" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M8 2v9M2 5l6 3 6-3" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
+        </svg>
+        OUs
+        <span class="nav-count" id="nav-ous-count">—</span>
+      </div>
+
+      <div class="nav-item" id="nav-gpo" onclick="switchTab('gpo')">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="2" width="12" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/>
+          <rect x="2" y="10" width="12" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M8 6v4" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
+        </svg>
+        GPOs
+        <span class="nav-count" id="nav-gpo-count">—</span>
+      </div>
+
+      <div class="nav-item" id="nav-groups" onclick="switchTab('groups')">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="4" r="2" stroke="currentColor" stroke-width="1.2"/>
+          <circle cx="3" cy="12" r="1.5" stroke="currentColor" stroke-width="1.2"/>
+          <circle cx="13" cy="12" r="1.5" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M8 6v2M6 8H3M10 8h3" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
+        </svg>
+        Groups
+        <span class="nav-count" id="nav-groups-count">—</span>
+      </div>
+
+      <div class="nav-item" id="nav-trusts" onclick="switchTab('trusts')">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
+          <path d="M4 8h8M4 4l8 8M12 4L4 12" stroke="currentColor" stroke-width="1.2"/>
+          <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+        Trusts
+        <span class="nav-count" id="nav-trusts-count">—</span>
+      </div>
+
+      <div class="nav-item" id="nav-acl" onclick="switchTab('acl')">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M5 6h6M5 8h6M5 10h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+        Access Control List
+        <span class="nav-count" id="nav-acl-count">—</span>
+      </div>
+    </div>
+
+    <!-- Attack Modules — yalnız Users seçildikdə görünür -->
+    <div class="sidebar-section sidebar-attacks" id="sidebar-attacks" style="display:none;">
+      <div class="sidebar-section-title" style="display:flex;align-items:center;gap:6px;">
+        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" style="color:var(--red)">
+          <path d="M4 1L1 7h6L4 1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+        </svg>
+        Assessment Toolkit
+      </div>
+      <div id="sidebar-attacks-body"></div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-version">Oxsium Framework © 2025</div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="main" id="main-content">
+    <!-- CONNECT TAB -->
+    <div id="tab-connect" class="connect-wrap fade-in" data-tab="connect">
+      <div class="section-title">Connection Setup</div>
+      <div class="section-sub">Configure and establish connection to the target Active Directory environment</div>
+
+      <!-- MODE TOGGLE -->
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="mode-remote" onclick="switchMode('remote')">
+          ⬡ Remote
+        </button>
+        <span class="mode-btn-shell" title="Coming Soon ...">
+          <button class="mode-btn disabled" id="mode-local" disabled aria-disabled="true" tabindex="-1">
+            ◎ Local Session
+          </button>
+        </span>
+      </div>
+
+      <!-- REMOTE CONNECT -->
+      <div id="remote-form">
+        <!-- Credentials -->
+        <div class="connect-card">
+          <div class="card-title">Target Credentials</div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Domain</label>
+              <input class="form-input" id="f-domain" type="text" placeholder="CORP.local" autocomplete="off" spellcheck="false">
+              <span class="field-error" id="err-domain">Domain is required</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Target IP / Hostname</label>
+              <input class="form-input" id="f-ip" type="text" placeholder="192.168.1.10" autocomplete="off" spellcheck="false">
+              <span class="field-error" id="err-ip">IP or hostname is required</span>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Domain Controller (Optional)</label>
+              <input class="form-input" id="f-dc" type="text" placeholder="dc01.corp.local or 192.168.1.5" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="form-group">
+              <label class="form-label">NTLM Hash (Optional)</label>
+              <div class="input-wrap">
+                <input class="form-input" id="f-hash" type="password" placeholder="aad3b435b51404eeaad3b435b51404ee:..." autocomplete="off" spellcheck="false" oninput="updateAuthInputLockState('hash')" onchange="updateAuthInputLockState('hash')">
+                <button class="eye-btn" onclick="toggleHash()" title="Show/hide" type="button">
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                    <path d="M1 8C1 8 3.5 3 8 3s7 5 7 5-2.5 5-7 5S1 8 1 8z" stroke="currentColor" stroke-width="1.3"/>
+                    <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
+                  </svg>
+                </button>
+              </div>
+              <span class="field-error" id="err-hash">Password or NTLM hash is required</span>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Username</label>
+              <input class="form-input" id="f-user" type="text" placeholder="administrator" autocomplete="off" spellcheck="false">
+              <span class="field-error" id="err-user">Username is required</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Password</label>
+              <div class="input-wrap">
+                <input class="form-input" id="f-pass" type="password" placeholder="••••••••••" autocomplete="off" oninput="updateAuthInputLockState('pass')" onchange="updateAuthInputLockState('pass')">
+                <button class="eye-btn" onclick="togglePass()" title="Show/hide" type="button">
+                  <svg id="eye-icon" width="15" height="15" viewBox="0 0 16 16" fill="none">
+                    <path d="M1 8C1 8 3.5 3 8 3s7 5 7 5-2.5 5-7 5S1 8 1 8z" stroke="currentColor" stroke-width="1.3"/>
+                    <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
+                  </svg>
+                </button>
+              </div>
+              <span class="field-error" id="err-pass">Password or NTLM hash is required</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Protocol -->
+        <div class="connect-card">
+          <div class="card-title">Connection Protocol</div>
+
+          <div class="protocol-grid">
+            <button class="proto-btn selected proto-winrm" id="proto-winrm" onclick="selectProto('winrm')" type="button">
+              <span class="proto-name">WinRM</span>
+              <span class="proto-port">5985 / 5986</span>
+            </button>
+
+            <button class="proto-btn proto-psexec" id="proto-psexec" onclick="selectProto('psexec')" type="button">
+              <span class="proto-name">PSExec</span>
+              <span class="proto-port">445</span>
+            </button>
+
+            <button class="proto-btn proto-smb" id="proto-smb" onclick="selectProto('smb')" type="button">
+              <span class="proto-name">SMB</span>
+              <span class="proto-port">445</span>
+            </button>
+
+            <button class="proto-btn proto-ssh" id="proto-ssh" onclick="selectProto('ssh')" type="button">
+              <span class="proto-name">SSH</span>
+              <span class="proto-port">22</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="action-row">
+          <button class="btn-secondary" id="btn-connect-fast" onclick="handleConnectClick(event, 'fast')" type="button">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 1v6M5 4l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M2 10c0 2.2 1.8 4 4 4h4c2.2 0 4-1.8 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <span id="btn-connect-fast-text">FAST CONNECT</span>
+          </button>
+          <button class="btn-primary" id="btn-connect-deep" onclick="handleConnectClick(event, 'deep')" type="button">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 1v6M5 4l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M2 10c0 2.2 1.8 4 4 4h4c2.2 0 4-1.8 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <span id="btn-connect-deep-text">DEEP CONNECT</span>
+          </button>
+          <button class="btn-danger" id="btn-disconnect" onclick="doDisconnect()" type="button" style="display: none;">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 1v6M5 4l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" transform="rotate(180 8 8)"/>
+              <path d="M2 10c0 2.2 1.8 4 4 4h4c2.2 0 4-1.8 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" transform="rotate(180 8 8)"/>
+            </svg>
+            <span id="btn-disconnect-text">DISCONNECT</span>
+          </button>
+          <button class="btn-secondary" onclick="clearForm()" type="button">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M2 7a5 5 0 1 1 5 5" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M2 4v3h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            </svg>
+            Reset
+          </button>
+          <button class="btn-secondary" onclick="testConn()" type="button">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M7 2a5 5 0 1 0 0 10A5 5 0 0 0 7 2z" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M7 5v2.5l1.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            </svg>
+            Test
+          </button>
+        </div>
+
+        <div class="enum-progress-wrap" id="enum-progress-wrap" style="display:none;">
+          <div class="enum-progress-head">
+            <span class="enum-progress-label" id="enum-progress-label">Deep enumeration in progress...</span>
+            <span class="enum-progress-percent" id="enum-progress-percent">0%</span>
+          </div>
+          <div class="enum-progress-bar">
+            <div class="enum-progress-fill" id="enum-progress-fill"></div>
+          </div>
+        </div>
+
+        <div class="saved-users-wrap">
+          <button class="btn-secondary btn-saved-users" type="button" onclick="toggleSavedUsers()">
+            Saved Users
+          </button>
+          <div class="saved-users-list" id="saved-users-list" style="display:none;">
+            <div class="saved-users-title">Last Successful Connections</div>
+            <div class="saved-users-scroll" id="saved-users-scroll">
+              <div class="saved-user-empty">No saved users yet.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LOCAL CONNECT -->
+      <div id="local-form" style="display:none;">
+        <div class="local-card">
+          <div class="local-icon">
+            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+              <circle cx="13" cy="9" r="4" stroke="#00ff88" stroke-width="1.5"/>
+              <path d="M5 22c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="#00ff88" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="local-title">Local Session Connect</div>
+          <div class="local-desc">
+            Attach to the current Windows session without credentials. Requires an active domain-joined session with appropriate privileges. The Python API backend must be running locally.
+          </div>
+          <div class="action-row" style="justify-content: center; gap: 12px;">
+            <button class="btn-green" onclick="doLocalConnect()" type="button">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+                <path d="M7.5 1v5.5M5 4l2.5-3L10 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                <path d="M2 9c0 2.2 1.8 4 4 4h3c2.2 0 4-1.8 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              Attach Local Session
+            </button>
+            <button id="btn-local-disconnect" class="btn-secondary" onclick="doDisconnect()" type="button">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M3 7h8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                <path d="M7 3v8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              Disconnect
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- LOG TERMINAL -->
+      <div style="margin-top: 20px;">
+        <div class="log-terminal" id="log-terminal">
+          <div class="log-header">
+            <div class="log-dot r"></div>
+            <div class="log-dot y"></div>
+            <div class="log-dot g"></div>
+            <div class="log-title-bar">connection.log</div>
+          </div>
+          <div class="log-line log-info">
+            <span class="log-time">[00:00:00]</span>
+            <span class="log-msg">Oxsium Framework v2.1 initialized. Awaiting connection...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ POWERSHELL TAB ══════════ -->
+    <div id="tab-powershell" class="powershell-wrap fade-in" style="display:none;">
+      <div class="section-title">PowerShell Shell</div>
+      <div class="section-sub">Interactive remote PowerShell console. Use WinRM or Local session for commands.</div>
+
+      <div class="shell-panel">
+        <div class="shell-header">
+          <div class="shell-meta">
+            <div class="shell-title">Interactive Web Shell</div>
+            <div class="shell-desc">Send PowerShell commands to the connected endpoint and view live output here.</div>
+          </div>
+          <button class="btn-secondary" onclick="clearShellOutput()">Clear</button>
+        </div>
+
+        <div class="shell-terminal" id="shell-terminal">
+          <div class="shell-line shell-warn">Session not started. Connect first and then open the PowerShell tab.</div>
+        </div>
+
+        <div class="shell-input-row">
+          <input id="shell-input" class="shell-input" type="text" placeholder="Enter PowerShell command and press Enter" onkeydown="handleShellKey(event)" autocomplete="off" spellcheck="false" disabled>
+          <button class="btn-primary" id="btn-shell-send" onclick="sendShellCommand()" disabled>Send</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-enumeration" class="enumeration-wrap fade-in" style="display:none;">
+
+      <!-- In-tab deep enumeration progress -->
+      <div id="enum-tab-progress" class="enum-tab-progress" style="display:none;">
+        <div class="enum-tab-spin-wrap">
+          <div class="enum-tab-spinner"></div>
+        </div>
+        <div class="enum-tab-progress-label" id="enum-tab-progress-label">Enumerating domain objects...</div>
+        <div class="enum-tab-bar-row">
+          <div class="enum-tab-bar">
+            <div class="enum-tab-bar-fill" id="enum-tab-bar-fill"></div>
+          </div>
+          <span class="enum-tab-pct" id="enum-tab-pct">0%</span>
+        </div>
+        <div class="enum-tab-module" id="enum-tab-module">Initializing...</div>
+      </div>
+
+      <div class="enumeration-panel" id="enumeration-panel">
+        <div class="enumeration-placeholder" id="enumeration-placeholder">
+          <div class="enumeration-placeholder-title">Connect to unlock Enumeration</div>
+          <div class="enumeration-placeholder-copy">Enumeration modules appear here once a Local or Remote session is connected.</div>
+
+          <div class="enum-proto-panel" id="enum-proto-panel" style="display:none;">
+            <div class="enum-proto-head">
+              <div class="enum-proto-title">Protocol Hierarchy</div>
+              <button class="btn-secondary enum-proto-scan-btn" id="btn-enum-proto-scan" type="button" onclick="runToolsEnumeration()">Scan</button>
+            </div>
+            <div class="enum-proto-list">
+            <div class="enum-proto-row" onclick="openSecurityStatusPanel('kerberos')" role="button" tabindex="0">
+              <span class="enum-proto-name">Kerberos</span>
+              <span class="enum-proto-value dim" id="enum-stat-kerb">—</span>
+            </div>
+            <div class="enum-proto-row" onclick="openSecurityStatusPanel('ntlm')" role="button" tabindex="0">
+              <span class="enum-proto-name">NTLM</span>
+              <span class="enum-proto-value dim" id="enum-stat-ntlm">—</span>
+            </div>
+            <div class="enum-proto-row" onclick="openSecurityStatusPanel('smb')" role="button" tabindex="0">
+              <span class="enum-proto-name">SMB</span>
+              <span class="enum-proto-value dim" id="enum-stat-smb">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">DNS</span>
+              <span class="enum-proto-value dim" id="enum-stat-dns">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">RPC</span>
+              <span class="enum-proto-value dim" id="enum-stat-rpc">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">Telnet</span>
+              <span class="enum-proto-value dim" id="enum-stat-telnet">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">FTP</span>
+              <span class="enum-proto-value dim" id="enum-stat-ftp">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">SSH</span>
+              <span class="enum-proto-value dim" id="enum-stat-ssh">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">SMTP</span>
+              <span class="enum-proto-value dim" id="enum-stat-smtp">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">IMAP</span>
+              <span class="enum-proto-value dim" id="enum-stat-imap">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">POP3</span>
+              <span class="enum-proto-value dim" id="enum-stat-pop3">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">LDAP</span>
+              <span class="enum-proto-value dim" id="enum-stat-ldap">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">HTTP / HTTPS</span>
+              <span class="enum-proto-value dim" id="enum-stat-http">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">TFTP</span>
+              <span class="enum-proto-value dim" id="enum-stat-tftp">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">SNMP</span>
+              <span class="enum-proto-value dim" id="enum-stat-snmp">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">NTP</span>
+              <span class="enum-proto-value dim" id="enum-stat-ntp">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">DHCP (Client / Server)</span>
+              <span class="enum-proto-value dim" id="enum-stat-dhcp">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">RADIUS</span>
+              <span class="enum-proto-value dim" id="enum-stat-radius">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">RDP</span>
+              <span class="enum-proto-value dim" id="enum-stat-rdp">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">MySQL</span>
+              <span class="enum-proto-value dim" id="enum-stat-mysql">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">MSSQL</span>
+              <span class="enum-proto-value dim" id="enum-stat-mssql">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">PostgreSQL</span>
+              <span class="enum-proto-value dim" id="enum-stat-postgresql">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">Oracle TNS</span>
+              <span class="enum-proto-value dim" id="enum-stat-oracle">—</span>
+            </div>
+            <div class="enum-proto-row">
+              <span class="enum-proto-name">MongoDB</span>
+              <span class="enum-proto-value dim" id="enum-stat-mongodb">—</span>
+            </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <div class="misc-panel" id="misc-panel" style="display:none;">
+        <div class="misc-misconfig-panel">
+            <div class="misc-misconfig-head">
+              <div class="misc-misconfig-title">Miscellaneous Misconfiguration</div>
+              <button class="btn-secondary misc-scan-btn" id="btn-misc-scan" type="button" onclick="runMiscManualScan()">Manual Scan</button>
+            </div>
+            <div class="misc-misconfig-tabs" id="misc-misconfig-tabs">
+              <button class="misc-tab-item active" type="button" onclick="selectMiscMisconfig('noPAC', this)"><span class="misc-tab-name">noPAC</span><span class="misc-tab-value">-</span></button>
+              <button class="misc-tab-item" type="button" onclick="selectMiscMisconfig('PrintNightmare', this)"><span class="misc-tab-name">PrintNightmare</span><span class="misc-tab-value">-</span></button>
+              <button class="misc-tab-item" type="button" onclick="selectMiscMisconfig('PetitPotam', this)"><span class="misc-tab-name">PetitPotam</span><span class="misc-tab-value">-</span></button>
+              <button class="misc-tab-item" type="button" onclick="selectMiscMisconfig('NTLM Relayx', this)"><span class="misc-tab-name">NTLM Relayx</span><span class="misc-tab-value">-</span></button>
+              <button class="misc-tab-item" type="button" onclick="selectMiscMisconfig('SpoolSample/PrinterBug', this)"><span class="misc-tab-name">SpoolSample/PrinterBug</span><span class="misc-tab-value">-</span></button>
+            </div>
+            <div class="misc-misconfig-actions">
+              <div class="misc-selected">Selected: <strong id="misc-selected-name">noPAC</strong></div>
+            </div>
+        </div>
+      </div>
+      <div class="cred-panel" id="cred-panel" style="display:none;">
+        <div class="cred-harvest-panel">
+          <div class="cred-harvest-head">
+            <div class="cred-harvest-title">Credential Harvesting</div>
+            <button class="btn-secondary cred-scan-btn" id="btn-cred-scan" type="button" onclick="runCredentialHarvestScan()">Scan</button>
+          </div>
+          <div class="cred-harvest-tabs" id="cred-harvest-tabs">
+            <button class="cred-tab-item active" type="button" onclick="selectCredentialHarvesting('SAM & SYSTEM Dumping', this)">
+              <span class="cred-tab-name">SAM & SYSTEM Dumping</span>
+            </button>
+            <button class="cred-tab-item" type="button" onclick="selectCredentialHarvesting('LSASS Dumping', this)">
+              <span class="cred-tab-name">LSASS Dumping</span>
+            </button>
+            <button class="cred-tab-item" type="button" onclick="selectCredentialHarvesting('NTDS.dit Extraction', this)">
+              <span class="cred-tab-name">NTDS.dit Extraction</span>
+            </button>
+            <button class="cred-tab-item" type="button" onclick="selectCredentialHarvesting('Windows Credential Manager', this)">
+              <span class="cred-tab-name">Windows Credential Manager</span>
+            </button>
+          </div>
+          <div class="cred-selected">Selected: <strong id="cred-selected-name">SAM & SYSTEM Dumping</strong></div>
+        </div>
+      </div>
+      <div class="cert-panel" id="cert-panel" style="display:none;">
+        <div class="cert-misconfig-panel">
+          <div class="cert-misconfig-head">
+            <div class="cert-misconfig-title">Certificate Server Misconfiguration</div>
+            <button class="btn-secondary cert-scan-btn" id="btn-cert-scan" type="button" onclick="runCertificateMisconfigScan()">Scan</button>
+          </div>
+          <div class="cert-misconfig-tabs" id="cert-misconfig-tabs">
+            <button class="cert-tab-item active" type="button" onclick="selectCertificateMisconfig('ESC1 - Misconfigured Template', this)">
+              <span class="cert-tab-name">ESC1 - Misconfigured Template</span>
+            </button>
+            <button class="cert-tab-item" type="button" onclick="selectCertificateMisconfig('ESC2 - Any Purpose EKU', this)">
+              <span class="cert-tab-name">ESC2 - Any Purpose EKU</span>
+            </button>
+            <button class="cert-tab-item" type="button" onclick="selectCertificateMisconfig('ESC3 - Certificate Request Agent', this)">
+              <span class="cert-tab-name">ESC3 - Certificate Request Agent</span>
+            </button>
+            <button class="cert-tab-item" type="button" onclick="selectCertificateMisconfig('ESC4 - Template ACL Abuse', this)">
+              <span class="cert-tab-name">ESC4 - Template ACL Abuse</span>
+            </button>
+            <button class="cert-tab-item" type="button" onclick="selectCertificateMisconfig('ESC6 - CA Flag Abuse', this)">
+              <span class="cert-tab-name">ESC6 - CA Flag Abuse</span>
+            </button>
+            <button class="cert-tab-item" type="button" onclick="selectCertificateMisconfig('ESC8 - NTLM Relay to Web Enrollment', this)">
+              <span class="cert-tab-name">ESC8 - NTLM Relay to Web Enrollment</span>
+            </button>
+          </div>
+          <div class="cert-selected">Selected: <strong id="cert-selected-name">ESC1 - Misconfigured Template</strong></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-reconnaissance" class="reconnaissance-wrap fade-in" style="display:none;">
+      <div class="reconnaissance-panel" id="reconnaissance-panel">
+        <div class="recon-host-panel" id="reconnaissance-placeholder">
+          <div class="recon-host-title">Host / Port Enumeration</div>
+          <div class="recon-host-grid">
+            <div class="form-group">
+              <label class="form-label" for="recon-target-ip">Target IP / Target Subnet</label>
+              <input class="form-input" id="recon-target-ip" type="text" placeholder="IP Regex input">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="recon-port-range">Specific Port or Range</label>
+              <input class="form-input" id="recon-port-range" type="text" placeholder="1-65535 input">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="recon-delay">Delay</label>
+              <input class="form-input" id="recon-delay" type="number" placeholder="int input">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="recon-thread">Thread</label>
+              <input class="form-input" id="recon-thread" type="number" placeholder="int input">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="recon-interface">Interface</label>
+              <select class="form-input" id="recon-interface">
+                <option value="auto">Auto (Default)</option>
+                <option value="eth0">eth0</option>
+                <option value="wlan0">wlan0</option>
+                <option value="tun0">tun0</option>
+                <option value="lo">lo</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="recon-source-port">Source Port</label>
+              <input class="form-input" id="recon-source-port" type="number" placeholder="1-65535">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="recon-min-rate">Min rate</label>
+              <input class="form-input" id="recon-min-rate" type="number" placeholder="int input">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="recon-stats-every">Stats Every</label>
+              <input class="form-input" id="recon-stats-every" type="number" placeholder="int input">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="recon-host-timeout">Host Timeout</label>
+              <input class="form-input" id="recon-host-timeout" type="number" placeholder="int input">
+            </div>
+          </div>
+          <div class="recon-check-grid">
+            <label class="recon-check"><input type="checkbox" id="recon-scan-without-ping"> Scan Without Ping</label>
+            <label class="recon-check"><input type="checkbox" id="recon-scan-without-ports"> Scan Without Ports</label>
+            <label class="recon-check"><input type="checkbox" id="recon-ack-scan"> ACK Scan</label>
+            <label class="recon-check"><input type="checkbox" id="recon-syn-scan"> SYN Scan</label>
+            <label class="recon-check"><input type="checkbox" id="recon-tcp-handshake-scan"> TCP Handshake Scan</label>
+            <label class="recon-check"><input type="checkbox" id="recon-udp-scan"> UDP Scan</label>
+            <label class="recon-check"><input type="checkbox" id="recon-null-scan"> Null Scan</label>
+            <label class="recon-check"><input type="checkbox" id="recon-idle-scan"> Idle Scan</label>
+            <label class="recon-check"><input type="checkbox" id="recon-disable-arp-ping"> Disable ARP Ping</label>
+            <label class="recon-check"><input type="checkbox" id="recon-packet-trace"> Packet Trace</label>
+            <label class="recon-check"><input type="checkbox" id="recon-reason"> Reason</label>
+            <label class="recon-check"><input type="checkbox" id="recon-disabled-dns-resolution"> Disabled DNS Resolution</label>
+          </div>
+          <div class="recon-terminal" id="recon-terminal">
+            <div class="recon-terminal-header">
+              <div class="recon-terminal-dot r"></div>
+              <div class="recon-terminal-dot y"></div>
+              <div class="recon-terminal-dot g"></div>
+              <div class="recon-terminal-title">reconnaissance.log</div>
+            </div>
+            <div class="recon-terminal-body" id="recon-terminal-body">
+              <div class="recon-line recon-info">[READY] Results will appear here...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  <div id="tab-users" class="users-wrap fade-in" style="display:none;">
+
+    <!-- Header row -->
+    <div class="users-header">
+      <div class="users-title-row">
+        <div class="section-title">Domain Users</div>
+        <div class="users-meta" id="users-meta">—</div>
+      </div>
+      <div class="users-toolbar">
+        <div class="search-wrap">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon">
+            <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <input class="search-input" id="users-search" placeholder="Search users..." oninput="filterUsers()">
+        </div>
+        <div class="filter-chips" id="filter-chips">
+          <button class="chip active" data-filter="all"     onclick="setFilter('all',this)">All</button>
+          <button class="chip"        data-filter="admin"   onclick="setFilter('admin',this)">
+            <span class="chip-dot" style="background:var(--amber)"></span>Admin
+          </button>
+          <button class="chip"        data-filter="spn"     onclick="setFilter('spn',this)">
+            <span class="chip-dot" style="background:var(--accent)"></span>SPN
+          </button>
+          <button class="chip"        data-filter="asrep"   onclick="setFilter('asrep',this)">
+            <span class="chip-dot" style="background:var(--red)"></span>AS-REP
+          </button>
+          <button class="chip"        data-filter="disabled" onclick="setFilter('disabled',this)">
+            <span class="chip-dot" style="background:var(--text-dim)"></span>Disabled
+          </button>
+          <button class="chip"        data-filter="nopwd" onclick="setFilter('nopwd',this)">
+            <span class="chip-dot" style="background:#ff4455"></span>NoPwd
+          </button>
+          <button class="chip"        data-filter="dcsync" onclick="setFilter('dcsync',this)">
+            <span class="chip-dot" style="background:linear-gradient(90deg,#ffcc33,#ff8a00)"></span>DCSync
+          </button>
+          <button class="chip"        data-filter="delegation" onclick="setFilter('delegation',this)">
+            <span class="chip-dot" style="background:#00bfff"></span>Delegation
+          </button>
+          <button class="chip"        data-filter="encryption" onclick="setFilter('encryption',this)">
+            <span class="chip-dot" style="background:#8e44ad"></span>Encryption
+          </button>
+        </div>
+        <button class="btn-secondary" onclick="loadUsers()" style="margin-left:auto;height:34px;padding:0 14px;font-size:11px;">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M1 6a5 5 0 1 1 5 5" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M1 3v3h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Split view -->
+    <div class="users-split" id="users-split">
+
+      <!-- User table -->
+      <div class="users-table-wrap" id="users-table-wrap">
+        <div class="u-table-head">
+          <div class="u-col u-col-name">Username</div>
+          <div class="u-col u-col-sid">SID</div>
+          <div class="u-col u-col-flag u-center" title="Admin">ADM</div>
+          <div class="u-col u-col-flag u-center" title="SPN Set">SPN</div>
+          <div class="u-col u-col-flag u-center" title="AS-REP Roastable">ASP</div>
+          <div class="u-col u-col-flag u-center" title="Account Status">STAT</div>
+          <div class="u-col u-col-flag u-center" title="Password Not Required">NP</div>
+          <div class="u-col u-col-flag u-center" title="DCSync Rights">DCS</div>
+          <div class="u-col u-col-flag u-center" title="Delegation">DG</div>
+          <div class="u-col u-col-flag u-center" title="Encryption Supported">ENC</div>
+        </div>
+        <div class="u-table-body" id="u-table-body">
+          <!-- rows injected by JS -->
+          <div class="u-empty" id="u-empty">
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
+              <circle cx="18" cy="12" r="7" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M4 32c0-7.7 6.3-14 14-14s14 6.3 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <p>Connect to a domain first</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detail panel -->
+      <div class="user-detail" id="user-detail" style="display:none;">
+        <div class="detail-header">
+          <div class="detail-avatar" id="d-avatar">—</div>
+          <div>
+            <div class="detail-name" id="d-name">—</div>
+            <div class="detail-dn" id="d-dn">—</div>
+          </div>
+          <button class="detail-close" onclick="closeDetail()">✕</button>
+        </div>
+        <div class="detail-body" id="detail-body">
+          <!-- injected -->
+        </div>
+      </div>
+
+      <!-- DCSync Console overlay (covers users-split only) -->
+      <div class="dcsync-overlay" id="dcsync-overlay" style="display:none;">
+        <div class="dcsync-panel">
+
+          <!-- Panel header -->
+          <div class="dcsync-panel-header">
+            <div class="dcsync-panel-avatar">DS</div>
+            <div class="dcsync-panel-title-wrap">
+              <div class="dcsync-panel-title">DCSync Console</div>
+              <div class="dcsync-panel-sub">Replication credential extraction workflow</div>
+            </div>
+            <button class="dcsync-panel-close" onclick="closeDCSyncPanel()">✕</button>
+          </div>
+
+          <div class="dcsync-panel-body">
+
+            <!-- CONNECTION -->
+            <div class="dcsync-section-label">Connection</div>
+            <div class="dcsync-grid-2">
+              <div class="dcsync-field-group">
+                <label class="dcsync-label">Domain Name</label>
+                <input class="dcsync-input" id="dcs-domain" type="text" placeholder="domain.local" autocomplete="off">
+              </div>
+              <div class="dcsync-field-group">
+                <label class="dcsync-label">Target IP</label>
+                <input class="dcsync-input" id="dcs-ip" type="text" placeholder="192.168.1.1" autocomplete="off">
+              </div>
+              <div class="dcsync-field-group">
+                <label class="dcsync-label">Domain Controller IP</label>
+                <input class="dcsync-input" id="dcs-dc" type="text" placeholder="WIN-DC.domain.local" autocomplete="off">
+              </div>
+              <div class="dcsync-field-group">
+                <label class="dcsync-label">Username</label>
+                <input class="dcsync-input" id="dcs-user" type="text" placeholder="Administrator" autocomplete="off">
+              </div>
+              <div class="dcsync-field-group">
+                <label class="dcsync-label">Password</label>
+                <input class="dcsync-input" id="dcs-pass" type="password" placeholder="••••••••" autocomplete="off">
+              </div>
+              <div class="dcsync-field-group">
+                <label class="dcsync-label">Hashes</label>
+                <input class="dcsync-input" id="dcs-hash" type="text" placeholder="LMHASH:NTHASH or NTHASH" autocomplete="off">
+              </div>
+            </div>
+
+            <!-- KERBEROS KEY -->
+            <div class="dcsync-field-group" style="margin-top:4px;">
+              <label class="dcsync-label">Kerberos Key</label>
+              <div class="dcsync-key-row">
+                <button class="dcsync-file-btn" onclick="document.getElementById('dcs-key-file').click()">Choose Key File</button>
+                <span class="dcsync-key-hint" id="dcs-key-hint">Optional. Select a local file containing the key.</span>
+                <input type="file" id="dcs-key-file" style="display:none;" onchange="onDCSyncKeyFile(this)">
+              </div>
+              <input class="dcsync-input" id="dcs-key" type="text" placeholder="Paste key value (optional)" autocomplete="off" style="margin-top:6px;">
+            </div>
+
+            <!-- COLLECTION -->
+            <div class="dcsync-section-label" style="margin-top:8px;">Collection</div>
+            <div class="dcsync-check-grid">
+              <label class="dcsync-check-item">
+                <input type="checkbox" id="dcs-col-system">
+                <span class="dcsync-check-box"></span>
+                <span class="dcsync-check-lbl">SYSTEM</span>
+              </label>
+              <label class="dcsync-check-item">
+                <input type="checkbox" id="dcs-col-sam">
+                <span class="dcsync-check-box"></span>
+                <span class="dcsync-check-lbl">SAM</span>
+              </label>
+              <label class="dcsync-check-item">
+                <input type="checkbox" id="dcs-col-security">
+                <span class="dcsync-check-box"></span>
+                <span class="dcsync-check-lbl">SECURITY</span>
+              </label>
+              <label class="dcsync-check-item">
+                <input type="checkbox" id="dcs-col-ntds" checked>
+                <span class="dcsync-check-box"></span>
+                <span class="dcsync-check-lbl">NTDS</span>
+              </label>
+              <label class="dcsync-check-item">
+                <input type="checkbox" id="dcs-col-pwdhist">
+                <span class="dcsync-check-box"></span>
+                <span class="dcsync-check-lbl">Password History</span>
+              </label>
+            </div>
+
+            <!-- MODE -->
+            <div class="dcsync-section-label" style="margin-top:8px;">Mode</div>
+            <div class="dcsync-radio-stack">
+              <label class="dcsync-radio-item" id="dcs-mode-ntlm-wrap">
+                <input type="radio" name="dcs-mode" id="dcs-mode-ntlm" value="ntlm" onchange="dcsyncModeChange()">
+                <span class="dcsync-radio-box"></span>
+                <span class="dcsync-radio-lbl">Only NTLM Hashes</span>
+              </label>
+              <label class="dcsync-radio-item" id="dcs-mode-both-wrap">
+                <input type="radio" name="dcs-mode" id="dcs-mode-both" value="both" checked onchange="dcsyncModeChange()">
+                <span class="dcsync-radio-box"></span>
+                <span class="dcsync-radio-lbl">NTLM Hash and Kerberos Keys</span>
+              </label>
+            </div>
+
+            <!-- DUMP SELECTION -->
+            <div class="dcsync-section-label" style="margin-top:8px;">Dump Selection</div>
+            <div class="dcsync-radio-grid">
+              <label class="dcsync-radio-item" id="dcs-dump-full-wrap">
+                <input type="radio" name="dcs-dump" id="dcs-dump-full" value="full" checked onchange="dcsyncDumpChange()">
+                <span class="dcsync-radio-box"></span>
+                <span class="dcsync-radio-lbl">Full Dump (All NTDS)</span>
+              </label>
+              <label class="dcsync-radio-item" id="dcs-dump-user-wrap">
+                <input type="radio" name="dcs-dump" id="dcs-dump-user" value="user" onchange="dcsyncDumpChange()">
+                <span class="dcsync-radio-box"></span>
+                <span class="dcsync-radio-lbl">Specific User</span>
+              </label>
+            </div>
+            <div id="dcs-specific-user-row" style="display:none;margin-top:6px;">
+              <input class="dcsync-input" id="dcs-specific-user" type="text" placeholder="e.g. krbtgt or DOMAIN\\user" autocomplete="off">
+            </div>
+
+            <!-- RESULT -->
+            <div class="dcsync-section-label" style="margin-top:8px;">Result</div>
+            <div class="dcsync-result-status" id="dcs-result-status">Waiting for execution…</div>
+            <div class="dcsync-result-box" id="dcs-result-box"></div>
+
+          </div><!-- /body -->
+
+          <!-- Footer -->
+          <div class="dcsync-panel-footer">
+            <button class="dcsync-run-btn" id="dcs-run-btn" onclick="runDCSyncExec()">Run DCSync</button>
+            <button class="dcsync-hist-btn" onclick="loadDCSyncHistory()">History</button>
+          </div>
+
+        </div>
+      </div>
+
+    </div><!-- /users-split -->
+
+    <!-- Loading overlay -->
+    <div class="users-loading" id="users-loading" style="display:none;">
+      <div class="loading-ring"></div>
+      <span>Enumerating users…</span>
+    </div>
+
+  </div><!-- /tab-users -->
+
+  <!-- COMPUTERS TAB -->
+  <div id="tab-computers" class="computers-wrap fade-in" style="display:none;">
+
+    <!-- Header row -->
+    <div class="computers-header">
+      <div class="computers-title-row">
+        <div class="section-title">Domain Computers</div>
+        <div class="computers-meta" id="computers-meta">—</div>
+      </div>
+      <div class="computers-toolbar">
+        <div class="search-wrap">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon">
+            <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <input class="search-input" id="computers-search" placeholder="Search computers..." oninput="filterComputers()">
+        </div>
+        <div class="filter-chips" id="comp-filter-chips">
+          <button class="chip active" data-filter="all" onclick="setComputerFilter('all',this)">All</button>
+          <button class="chip" data-filter="unconstrained" onclick="setComputerFilter('unconstrained',this)">
+            <span class="chip-dot" style="background:var(--red)"></span>Unconstrained
+          </button>
+          <button class="chip" data-filter="constrained" onclick="setComputerFilter('constrained',this)">
+            <span class="chip-dot" style="background:var(--amber)"></span>Constrained
+          </button>
+          <button class="chip" data-filter="rbcd" onclick="setComputerFilter('rbcd',this)">
+            <span class="chip-dot" style="background:var(--amber)"></span>RBCD
+          </button>
+          <button class="chip" data-filter="dc" onclick="setComputerFilter('dc',this)">
+            <span class="chip-dot" style="background:var(--accent)"></span>DC
+          </button>
+          <button class="chip" data-filter="legacy_os" onclick="setComputerFilter('legacy_os',this)">
+            <span class="chip-dot" style="background:var(--green)"></span>OS Legacy
+          </button>
+          <button class="chip" data-filter="laps" onclick="setComputerFilter('laps',this)">
+            <span class="chip-dot" style="background:#00ff88"></span>LAPS
+          </button>
+        </div>
+        <button class="btn-secondary" onclick="loadComputers()" style="margin-left:auto;height:34px;padding:0 14px;font-size:11px;">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M1 6a5 5 0 1 1 5 5" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M1 3v3h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Split view -->
+    <div class="computers-split" id="computers-split">
+
+      <!-- Computer table -->
+      <div class="computers-table-wrap" id="computers-table-wrap">
+        <div class="c-table-head">
+          <div class="c-col c-col-name">Computer Name</div>
+          <div class="c-col c-col-os">OS</div>
+          <div class="c-col c-col-flag u-center" title="Server">SRV</div>
+          <div class="c-col c-col-flag u-center" title="Has SPN">SPN</div>
+          <div class="c-col c-col-flag u-center" title="Status">STAT</div>
+          <div class="c-col c-col-flag u-center" title="Resource-based constrained delegation">RBCD</div>
+        </div>
+        <div class="c-table-body" id="c-table-body">
+          <!-- rows injected by JS -->
+          <div class="c-empty" id="c-empty">
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
+              <rect x="6" y="8" width="24" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M10 28h16M14 24h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <p>Connect to a domain first</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detail panel -->
+      <div class="computer-detail" id="computer-detail" style="display:none;">
+        <div class="detail-header">
+          <div class="detail-avatar" id="cd-avatar">?</div>
+          <div>
+            <div class="detail-name" id="cd-name">—</div>
+            <div class="detail-dn" id="cd-dn">—</div>
+          </div>
+          <button class="detail-close" onclick="closeComputerDetail()">✕</button>
+        </div>
+        <div class="detail-body" id="computer-detail-body">
+          <!-- injected -->
+        </div>
+      </div>
+
+    </div><!-- /computers-split -->
+
+    <!-- Loading overlay -->
+    <div class="computers-loading" id="computers-loading" style="display:none;">
+      <div class="loading-ring"></div>
+      <span>Enumerating computers…</span>
+    </div>
+
+  </div><!-- /tab-computers -->
+
+  <div id="tab-ous" class="ous-wrap fade-in" style="display:none;">
+
+    <!-- Header row -->
+    <div class="ous-header">
+      <div class="ous-title-row">
+        <div class="section-title">Organizational Units</div>
+        <div class="ous-meta" id="ous-meta">—</div>
+      </div>
+      <div class="ous-toolbar">
+        <div class="search-wrap">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon">
+            <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <input class="search-input" id="ous-search" placeholder="Search OUs..." oninput="filterOUs()">
+        </div>
+        <div class="filter-chips" id="ou-filter-chips">
+          <button class="chip active" data-filter="all" onclick="setOUFilter('all',this)">All</button>
+          <button class="chip" data-filter="linked-gpo" onclick="setOUFilter('linked-gpo',this)">
+            <span class="chip-dot" style="background:var(--accent)"></span>Linked GPOs
+          </button>
+          <button class="chip" data-filter="inheritance" onclick="setOUFilter('inheritance',this)">
+            <span class="chip-dot" style="background:var(--amber)"></span>Inheritance
+          </button>
+          <button class="chip" data-filter="permissions" onclick="setOUFilter('permissions',this)">
+            <span class="chip-dot" style="background:var(--red)"></span>Permissions
+          </button>
+        </div>
+        <button class="btn-secondary" onclick="loadOUs()" style="margin-left:auto;height:34px;padding:0 14px;font-size:11px;">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M1 6a5 5 0 1 1 5 5" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M1 3v3h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Split view -->
+    <div class="ous-split" id="ous-split">
+
+      <!-- OUs table -->
+      <div class="ous-table-wrap" id="ous-table-wrap">
+        <div class="o-table-head">
+          <div class="o-col o-col-name">OU Name</div>
+          <div class="o-col o-col-path">Path</div>
+          <div class="o-col o-col-desc">Description</div>
+          <div class="o-col o-col-objcount">Object Count</div>
+          <div class="o-col o-col-inherit">Inheritance</div>
+          <div class="o-col o-col-managed">Managed By</div>
+        </div>
+        <div class="o-table-body" id="o-table-body">
+          <!-- rows injected by JS -->
+          <div class="o-empty" id="o-empty">
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
+              <path d="M7 10c0-1 1-2 2-2h18c1 0 2 1 2 2v6h-3V9H9v16h8v3H9c-1 0-2-1-2-2V10Z" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <p>Connect to a domain first</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detail panel -->
+      <div class="ou-detail" id="ou-detail" style="display:none;">
+        <div class="detail-header">
+          <div class="detail-avatar" id="od-avatar" style="background:var(--accent)">⊡</div>
+          <div>
+            <div class="detail-name" id="od-name">—</div>
+            <div class="detail-dn" id="od-dn">—</div>
+          </div>
+          <button class="detail-close" onclick="closeOUDetail()">✕</button>
+        </div>
+        <div class="detail-body" id="ou-detail-body">
+          <!-- injected -->
+        </div>
+      </div>
+
+    </div><!-- /ous-split -->
+
+    <!-- Bottom status bar -->
+    <div class="ou-status-bar" id="ou-status-bar" style="display:none;">
+      <div class="ou-sb-item">
+        <span class="ou-sb-label">OU Name</span>
+        <span class="ou-sb-value" id="ou-sb-name">—</span>
+      </div>
+      <div class="ou-sb-sep"></div>
+      <div class="ou-sb-item">
+        <span class="ou-sb-label">Path</span>
+        <span class="ou-sb-value ou-sb-path" id="ou-sb-path">—</span>
+      </div>
+      <div class="ou-sb-sep"></div>
+      <div class="ou-sb-item">
+        <span class="ou-sb-label">Description</span>
+        <span class="ou-sb-value" id="ou-sb-desc">—</span>
+      </div>
+      <div class="ou-sb-sep"></div>
+      <div class="ou-sb-item">
+        <span class="ou-sb-label">Object Count</span>
+        <span class="ou-sb-value accent" id="ou-sb-objcount">—</span>
+      </div>
+      <div class="ou-sb-sep"></div>
+      <div class="ou-sb-item">
+        <span class="ou-sb-label">Inheritance</span>
+        <span class="ou-sb-value" id="ou-sb-inherit">—</span>
+      </div>
+      <div class="ou-sb-sep"></div>
+      <div class="ou-sb-item">
+        <span class="ou-sb-label">Managed By</span>
+        <span class="ou-sb-value" id="ou-sb-managed">—</span>
+      </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div class="ous-loading" id="ous-loading" style="display:none;">
+      <div class="loading-ring"></div>
+      <span>Enumerating OUs…</span>
+    </div>
+
+  </div><!-- /tab-ous -->
+
+  <div id="tab-gpo" class="gpos-wrap fade-in" style="display:none;">
+
+    <!-- Header row -->
+    <div class="gpos-header">
+      <div class="gpos-title-row">
+        <div class="section-title">Group Policy Objects</div>
+        <div class="gpos-meta" id="gpos-meta">—</div>
+      </div>
+      <div class="gpos-toolbar">
+        <div class="search-wrap">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon">
+            <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <input class="search-input" id="gpo-search" placeholder="Search GPOs..." oninput="filterGPOs()">
+        </div>
+        <div class="filter-chips" id="gpo-filter-chips">
+          <button class="chip active" data-filter="all" onclick="setGPOFilter('all',this)">All</button>
+          <button class="chip" data-filter="vulnerable" onclick="setGPOFilter('vulnerable',this)">
+            <span class="chip-dot" style="background:var(--red)"></span>Vulnerable
+          </button>
+          <button class="chip" data-filter="links" onclick="setGPOFilter('links',this)">
+            <span class="chip-dot" style="background:var(--accent)"></span>Links
+          </button>
+          <button class="chip" data-filter="settings" onclick="setGPOFilter('settings',this)">
+            <span class="chip-dot" style="background:var(--amber)"></span>Settings
+          </button>
+        </div>
+        <button class="btn-secondary" onclick="loadGPOs()" style="margin-left:auto;height:34px;padding:0 14px;font-size:11px;">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M1 6a5 5 0 1 1 5 5" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M1 3v3h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Split view -->
+    <div class="gpos-split" id="gpos-split">
+
+      <!-- GPOs table -->
+      <div class="gpos-table-wrap" id="gpos-table-wrap">
+        <div class="g-table-head">
+          <div class="g-col g-col-name">GPO Name</div>
+          <div class="g-col g-col-display">Display Name</div>
+          <div class="g-col g-col-status">Version</div>
+          <div class="g-col g-col-owner">Modified</div>
+        </div>
+        <div class="g-table-body" id="g-table-body">
+          <!-- rows injected by JS -->
+          <div class="g-empty" id="g-empty">
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
+              <path d="M7 10c0-1 1-2 2-2h18c1 0 2 1 2 2v6h-3V9H9v16h8v3H9c-1 0-2-1-2-2V10Z" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <p>Connect to a domain first</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detail panel -->
+      <div class="gpo-detail" id="gpo-detail" style="display:none;">
+        <div class="detail-header">
+          <div class="detail-avatar" id="gd-avatar" style="background:var(--accent)">⊡</div>
+          <div>
+            <div class="detail-name" id="gd-name">—</div>
+            <div class="detail-dn" id="gd-dn">—</div>
+          </div>
+          <button class="detail-close" onclick="closeGPODetail()">✕</button>
+        </div>
+        <div class="detail-body" id="gpo-detail-body">
+          <!-- injected -->
+        </div>
+      </div>
+
+    </div><!-- /gpos-split -->
+
+    <!-- Loading overlay -->
+    <div class="gpos-loading" id="gpos-loading" style="display:none;">
+      <div class="loading-ring"></div>
+      <span>Enumerating GPOs…</span>
+    </div>
+
+  </div><!-- /tab-gpo -->
+
+  <div id="tab-groups" class="groups-wrap fade-in" style="display:none;">
+    <div class="groups-header">
+      <div class="groups-title-row">
+        <div class="section-title">Domain Groups</div>
+        <div class="groups-meta" id="groups-meta">—</div>
+      </div>
+      <div class="groups-toolbar">
+        <div class="search-wrap">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon">
+            <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <input class="search-input" id="groups-search" placeholder="Search groups..." oninput="filterGroups()">
+        </div>
+        <div class="filter-chips" id="groups-filter-chips">
+          <button class="chip active" onclick="setGroupFilter('all', this)">All</button>
+          <button class="chip" onclick="setGroupFilter('privileged', this)">
+            <span class="chip-dot" style="background:var(--amber)"></span>Privileged
+          </button>
+          <button class="chip" onclick="setGroupFilter('empty', this)">
+            <span class="chip-dot" style="background:var(--text-dim)"></span>Empty
+          </button>
+          <button class="chip" onclick="setGroupFilter('nested', this)">
+            <span class="chip-dot" style="background:var(--accent)"></span>Nested
+          </button>
+        </div>
+        <button class="btn-secondary" onclick="loadGroups()" style="margin-left:auto;height:34px;padding:0 14px;font-size:11px;">
+          Refresh
+        </button>
+        <button class="btn-secondary" onclick="loadAllGroupMembers()" style="height:34px;padding:0 14px;font-size:11px;">
+          All Member
+        </button>
+      </div>
+    </div>
+
+    <div class="groups-split" id="groups-split">
+      <div class="groups-table-wrap" id="groups-table-wrap">
+        <div class="gr-table-head">
+          <div class="gr-col gr-col-name">Group</div>
+          <div class="gr-col gr-col-type">Type</div>
+          <div class="gr-col gr-col-members">Members</div>
+          <div class="gr-col gr-col-protected">Protected</div>
+        </div>
+        <div class="gr-table-body" id="gr-table-body">
+          <div class="gr-empty" id="gr-empty"><p>Connect to a domain first</p></div>
+        </div>
+      </div>
+
+      <div class="group-detail" id="group-detail" style="display:none;">
+        <div class="detail-header">
+          <div class="detail-avatar" id="grd-avatar">GR</div>
+          <div>
+            <div class="detail-name" id="grd-name">—</div>
+            <div class="detail-dn" id="grd-dn">—</div>
+          </div>
+          <button class="detail-close" onclick="closeGroupDetail()">✕</button>
+        </div>
+        <div class="detail-body" id="group-detail-body"></div>
+      </div>
+    </div>
+
+    <div class="groups-loading" id="groups-loading" style="display:none;">
+      <div class="loading-ring"></div>
+      <span>Enumerating groups...</span>
+    </div>
+  </div><!-- /tab-groups -->
+
+  <div id="tab-trusts" class="trusts-wrap fade-in" style="display:none;">
+    <div class="trusts-header">
+      <div class="trusts-title-row">
+        <div class="section-title">Domain Trusts</div>
+        <div class="trusts-meta" id="trusts-meta">—</div>
+      </div>
+      <div class="trusts-toolbar">
+        <div class="search-wrap">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon">
+            <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <input class="search-input" id="trusts-search" placeholder="Search trusts..." oninput="filterTrusts()">
+        </div>
+        <div class="filter-chips" id="trusts-filter-chips">
+          <button class="chip active" data-filter="all" onclick="setTrustFilter('all',this)">All</button>
+          <button class="chip" data-filter="inbound" onclick="setTrustFilter('inbound',this)">
+            <span class="chip-dot" style="background:var(--green)"></span>Inbound
+          </button>
+          <button class="chip" data-filter="outbound" onclick="setTrustFilter('outbound',this)">
+            <span class="chip-dot" style="background:var(--accent)"></span>Outbound
+          </button>
+          <button class="chip" data-filter="transitive" onclick="setTrustFilter('transitive',this)">
+            <span class="chip-dot" style="background:var(--amber)"></span>Transitive
+          </button>
+          <button class="chip" data-filter="forest" onclick="setTrustFilter('forest',this)">
+            <span class="chip-dot" style="background:var(--red)"></span>Forest
+          </button>
+        </div>
+        <button class="btn-secondary" onclick="loadTrusts()" style="margin-left:auto;height:34px;padding:0 14px;font-size:11px;">
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <div class="trusts-split" id="trusts-split">
+      <div class="trusts-table-wrap" id="trusts-table-wrap">
+        <div class="tr-table-head">
+          <div class="tr-col tr-col-name">Name</div>
+          <div class="tr-col tr-col-partner">Partner</div>
+          <div class="tr-col tr-col-direction">Direction</div>
+          <div class="tr-col tr-col-type">Type</div>
+        </div>
+        <div class="tr-table-body" id="tr-table-body">
+          <div class="tr-empty" id="tr-empty"><p>Connect to a domain first</p></div>
+        </div>
+      </div>
+
+      <div class="trust-detail" id="trust-detail" style="display:none;">
+        <div class="detail-header">
+          <div class="detail-avatar" id="trd-avatar">TR</div>
+          <div>
+            <div class="detail-name" id="trd-name">—</div>
+            <div class="detail-dn" id="trd-dn">—</div>
+          </div>
+          <button class="detail-close" onclick="closeTrustDetail()">✕</button>
+        </div>
+        <div class="detail-body" id="trust-detail-body"></div>
+      </div>
+    </div>
+
+    <div class="trusts-loading" id="trusts-loading" style="display:none;">
+      <div class="loading-ring"></div>
+      <span>Enumerating trusts...</span>
+    </div>
+  </div><!-- /tab-trusts -->
+
+  <div id="tab-acl" class="acl-wrap fade-in" style="display:none;">
+    <div class="acl-header">
+      <div class="acl-title-row">
+        <div class="section-title">Access Control List</div>
+        <div class="acl-meta" id="acl-meta">—</div>
+      </div>
+      <div class="acl-toolbar">
+        <div class="search-wrap">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon">
+            <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <input class="search-input" id="acl-search" placeholder="Search ACLs..." oninput="filterACLs()">
+        </div>
+        <div class="filter-chips" id="acl-filter-chips">
+          <button class="chip active" data-filter="all" onclick="setACLFilter('all', this)">All</button>
+          <button class="chip" data-filter="dangerous" onclick="setACLFilter('dangerous', this)">
+            <span class="chip-dot" style="background:var(--red)"></span>Dangerous ACEs
+          </button>
+          <button class="chip" data-filter="extended-rights" onclick="setACLFilter('extended-rights', this)">
+            <span class="chip-dot" style="background:var(--amber)"></span>Extended Rights
+          </button>
+        </div>
+        <button class="btn-secondary" onclick="loadACLs()" style="margin-left:auto;height:34px;padding:0 14px;font-size:11px;">
+          Refresh
+        </button>
+      </div>
+
+      <div class="acl-advanced-filters">
+        <div class="search-wrap">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon">
+            <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <input class="search-input" id="acl-target-search" placeholder="Filter Target..." oninput="filterACLs()">
+        </div>
+
+        <div class="search-wrap">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" class="search-icon">
+            <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <input class="search-input" id="acl-principal-search" placeholder="Filter Principal..." oninput="filterACLs()">
+        </div>
+
+        <div class="acl-object-filter-wrap">
+          <div class="acl-object-filter-title">Objects</div>
+          <div class="acl-object-filter-scroll" id="acl-object-filter-scroll">
+            <button class="chip active" type="button" data-obj-filter="all" onclick="setACLObjectFilter('all', this)">All</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="acl-split" id="acl-split">
+      <div class="acl-table-wrap" id="acl-table-wrap">
+        <div class="acl-table-head">
+          <div class="acl-col acl-col-target">Target</div>
+          <div class="acl-col acl-col-principal">Principal</div>
+          <div class="acl-col acl-col-rights acl-col-rights-head">
+            <span>Rights</span>
+            <button
+              id="acl-rights-sort-btn"
+              class="acl-sort-btn"
+              type="button"
+              title="Sort by risk severity (critical to simple)"
+              onclick="setACLRightsSort(this)">
+              ↓
+            </button>
+          </div>
+          <div class="acl-col acl-col-type">Type</div>
+        </div>
+        <div class="acl-table-body" id="acl-table-body">
+          <div class="acl-empty" id="acl-empty"><p>Connect to a domain first</p></div>
+        </div>
+      </div>
+
+      <div class="acl-detail" id="acl-detail" style="display:none;">
+        <div class="detail-header">
+          <div class="detail-avatar" id="ad-avatar">AC</div>
+          <div>
+            <div class="detail-name" id="ad-name">—</div>
+            <div class="detail-dn" id="ad-dn">—</div>
+          </div>
+          <button class="detail-close" onclick="closeACLDetail()">✕</button>
+        </div>
+        <div class="detail-body" id="acl-detail-body"></div>
+      </div>
+    </div>
+
+    <div class="acl-loading" id="acl-loading" style="display:none;">
+      <div class="loading-ring"></div>
+      <span>Enumerating ACL entries...</span>
+    </div>
+  </div><!-- /tab-acl -->
+
+  </main>
+
+  <!-- RIGHT PANEL -->
+  <aside class="right-panel">
+    <div class="panel-header">Environment Status</div>
+
+    <div class="stat-block">
+      <div class="stat-label">Connection</div>
+      <div class="stat-value" id="stat-conn">OFFLINE</div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Domain</div>
+      <div class="stat-value dim" id="stat-domain">—</div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Domain Controller</div>
+      <div class="stat-value dim" id="stat-dc">—</div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Session User</div>
+      <div class="stat-value dim" id="stat-user">—</div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Protocol</div>
+      <div class="stat-value dim" id="stat-proto">—</div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">OS Version</div>
+      <div class="stat-value dim" id="stat-os">—</div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Domain Level</div>
+      <div class="stat-value dim" id="stat-level">—</div>
+    </div>
+
+    <div class="panel-header" style="margin-top: 4px;">Object Counts</div>
+
+    <div class="stat-grid">
+      <div class="stat-mini">
+        <div class="stat-mini-label">Users</div>
+        <div class="stat-mini-val" id="cnt-users">—</div>
+      </div>
+      <div class="stat-mini">
+        <div class="stat-mini-label">Computers</div>
+        <div class="stat-mini-val" id="cnt-comp">—</div>
+      </div>
+      <div class="stat-mini">
+        <div class="stat-mini-label">Groups</div>
+        <div class="stat-mini-val" id="cnt-groups">—</div>
+      </div>
+      <div class="stat-mini">
+        <div class="stat-mini-label">OUs</div>
+        <div class="stat-mini-val" id="cnt-ous">—</div>
+      </div>
+      <div class="stat-mini">
+        <div class="stat-mini-label">GPOs</div>
+        <div class="stat-mini-val" id="cnt-gpos">—</div>
+      </div>
+      <div class="stat-mini">
+        <div class="stat-mini-label">Trusts</div>
+        <div class="stat-mini-val" id="cnt-trusts">—</div>
+      </div>
+    </div>
+
+    <div class="security-proto-scroll" aria-label="Security protocol status list">
+      <div class="security-proto-item" onclick="openSecurityStatusPanel('kerberos')" role="button" tabindex="0">
+        <div class="stat-label">Kerberos</div>
+        <div class="stat-value dim" id="stat-kerb">—</div>
+      </div>
+
+      <div class="security-proto-item" onclick="openSecurityStatusPanel('ntlm')" role="button" tabindex="0">
+        <div class="stat-label">NTLM</div>
+        <div class="stat-value dim" id="stat-ntlm">—</div>
+      </div>
+
+      <div class="security-proto-item" onclick="openSecurityStatusPanel('smb')" role="button" tabindex="0">
+        <div class="stat-label">SMB</div>
+        <div class="stat-value dim" id="stat-smb">—</div>
+      </div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">API Backend</div>
+      <div class="stat-value dim" id="stat-api">—</div>
+      <div class="progress-bar"><div class="progress-fill" id="api-ping-bar"></div></div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">Latency</div>
+      <div class="stat-value dim" id="stat-latency">—</div>
+    </div>
+  </aside>
+</div>
+
+<!-- STATUS BAR -->
+<div class="statusbar">
+  <div class="statusbar-item">
+    <span class="s-label">STATUS:</span>
+    <span class="s-val" id="sb-status">IDLE</span>
+  </div>
+  <div class="statusbar-item">
+    <span class="s-label">PROTO:</span>
+    <span class="s-val" id="sb-proto">—</span>
+  </div>
+  <div class="statusbar-item">
+    <span class="s-label">API:</span>
+    <span class="s-val" id="sb-api">localhost:5000</span>
+  </div>
+  <div class="statusbar-item statusbar-right">
+    <span class="s-label">SESSION:</span>
+    <span class="s-val" id="sb-time">—</span>
+  </div>
+</div>
+
+<!-- TOAST CONTAINER -->
+<div class="toast-container" id="toasts"></div>
+
+<div class="status-modal-backdrop" id="status-modal-backdrop" style="display:none;" onclick="closeSecurityStatusPanel()">
+  <div class="status-modal" onclick="event.stopPropagation()">
+    <div class="status-modal-head">
+      <div class="status-modal-title" id="status-modal-title">Security Status</div>
+      <button class="status-modal-close" type="button" onclick="closeSecurityStatusPanel()">✕</button>
+    </div>
+    <div class="status-modal-body" id="status-modal-body"></div>
+  </div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="JavaScript/00-global.js"></script>
+<script src="JavaScript/01-core.js"></script>
+<script src="JavaScript/02-ui-shell.js"></script>
+<script src="JavaScript/03-objects-users.js"></script>
+<script src="JavaScript/04-object-computers.js"></script>
+<script src="JavaScript/11-objects-ous.js"></script>
+<script src="JavaScript/08-objects-gpos.js"></script>
+<script src="JavaScript/09-objects-groups.js"></script>
+<script src="JavaScript/07-objects-trusts.js"></script>
+<script src="JavaScript/10-objects-acl.js"></script>
+<script src="decision_engine/decision_engine_rights.js"></script>
+<script src="decision_engine/decision_engine_state.js"></script>
+<script src="decision_engine/decision_engine_roots.js"></script>
+<script src="decision_engine/decision_engine_data.js"></script>
+<script src="decision_engine/edge_rules.js"></script>
+<script src="decision_engine/decision_engine_render.js"></script>
+<script src="decision_engine/decision_engine_view.js"></script>
+<script src="JavaScript/06-pentest.js"></script>
+
+<script>
+// ── ACL dangerous row highlighter ───────────────────────────────────────────
+
+
+const _ACL_DANGER_RIGHTS = new Set([
+    'genericall', 'writedacl', 'writeowner'
+]);
+
+function _aclMarkDangerousRow(row) {
+  if (aclFilter === 'extended-rights') return;
+    if (row.classList.contains('dangerous')) return; // artiq islenib
+    const rightsCell = row.querySelector('.acl-cell-rights');
+    if (!rightsCell) return;
+    const text = rightsCell.textContent.toLowerCase();
+    const isDangerous = [..._ACL_DANGER_RIGHTS].some(r => text.includes(r));
+    if (isDangerous) row.classList.add('dangerous');
+}
+
+// Movcud row-lari da islet (ilk yuklenme)
+function _aclMarkAllDangerous() {
+  if (aclFilter === 'extended-rights') return;
+    document.querySelectorAll('#acl-table-body .acl-row').forEach(_aclMarkDangerousRow);
+}
+
+// MutationObserver — yeni row-lar elave olunanda avtomatik islet
+const _aclObserver = new MutationObserver((mutations) => {
+  if (aclFilter === 'extended-rights') return;
+    for (const m of mutations) {
+        for (const node of m.addedNodes) {
+            if (node.nodeType !== 1) continue;
+            if (node.classList && node.classList.contains('acl-row')) {
+                _aclMarkDangerousRow(node);
+            } else {
+                node.querySelectorAll && node.querySelectorAll('.acl-row').forEach(_aclMarkDangerousRow);
+            }
+        }
+    }
+});
+
+// acl-table-body hazir oldugda observer-i baslatmaq ucun
+function _aclStartObserver() {
+    const body = document.getElementById('acl-table-body');
+    if (body) {
+        _aclObserver.observe(body, { childList: true, subtree: true });
+        _aclMarkAllDangerous(); // ilk defe movcud row-lari da tara
+    } else {
+        // DOM heze hazir deyil, bir az goze
+        requestAnimationFrame(_aclStartObserver);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', _aclStartObserver);
+// ─────────────────────────────────────────────────────────────────────────────
+</script>
+</body>

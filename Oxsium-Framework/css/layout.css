@@ -1,0 +1,69 @@
+
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background: var(--bg-deep);
+    color: var(--text-pri);
+    font-family: var(--mono);
+    font-size: 13px;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* SCANLINE OVERLAY */
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
+    pointer-events: none;
+    z-index: 9999;
+}
+
+/* BODY LAYOUT */
+.layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* MAIN CONTENT */
+.main {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--bg-deep);
+    padding: 20px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+
+/* Bottom status bar */
+.statusbar {
+    height: 26px;
+    background: var(--bg-base);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 20px;
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.5px;
+}
+
+.statusbar-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.statusbar-item .s-label { color: var(--text-dim); }
+.statusbar-item .s-val   { color: var(--text-sec); }
+.statusbar-item .s-val.ok   { color: var(--green); }
+.statusbar-item .s-val.warn { color: var(--amber); }
+
+.statusbar-right { margin-left: auto; }

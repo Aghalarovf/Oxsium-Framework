@@ -1,0 +1,135 @@
+/* ============================================================
+   forms.css — form-row, form-group, form-label, form-input,
+               input-wrap, eye-btn, saved-users
+   ============================================================ */
+
+/* Form layout */
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.form-row.single { grid-template-columns: 1fr; }
+.form-row.triple { grid-template-columns: 1fr 1fr 1fr; }
+
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+
+.form-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-family: var(--head);
+    font-weight: 600;
+}
+
+.form-input {
+    height: 36px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-pri);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 0 12px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    outline: none;
+}
+
+.form-input::placeholder { color: var(--text-dim); }
+
+.form-input:focus {
+    border-color: var(--accent-dim);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.form-input.error { border-color: var(--red); }
+
+.form-input:disabled,
+.form-input[readonly] {
+    opacity: 0.55;
+    cursor: not-allowed;
+    background: color-mix(in srgb, var(--bg-input) 85%, #7f8b99 15%);
+    border-color: color-mix(in srgb, var(--border) 80%, #7f8b99 20%);
+    color: color-mix(in srgb, var(--text-pri) 70%, #8a95a3 30%);
+}
+
+/* Password wrapper */
+.input-wrap { position: relative; }
+.input-wrap .form-input { padding-right: 38px; width: 100%; }
+
+.eye-btn {
+    position: absolute;
+    right: 10px; top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    transition: color 0.15s;
+}
+
+.eye-btn:hover { color: var(--text-sec); }
+
+.input-wrap.auth-locked .eye-btn,
+.eye-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+    color: var(--text-dim);
+}
+
+/* Field error hint */
+.field-error { font-size: 10px; color: var(--red); margin-top: 3px; display: none; }
+.field-error.show { display: block; }
+
+/* Search input */
+.search-wrap { position: relative; flex-shrink: 0; }
+
+.search-icon {
+    position: absolute;
+    left: 10px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-dim);
+    pointer-events: none;
+}
+
+.search-input {
+    height: 34px;
+    width: 220px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-pri);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 0 12px 0 30px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.search-input::placeholder { color: var(--text-dim); }
+
+.search-input:focus {
+    border-color: var(--accent-dim);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* Saved users */
+.saved-users-wrap { margin-top: 10px; }
+
+.saved-users-list { margin-top: 8px; border: 1px solid var(--border); background: var(--bg-input); border-radius: 4px; padding: 8px; }
+.saved-users-title { font-family: var(--head); font-size: 10px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-sec); margin-bottom: 6px; }
+.saved-users-scroll { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
+
+.saved-user-item { border: 1px solid var(--border); background: var(--bg-panel); border-radius: 3px; padding: 8px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.saved-user-item:hover { border-color: var(--accent-dim); background: #142033; }
+
+.saved-user-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 3px; }
+.saved-user-name  { font-family: var(--head); font-size: 12px; font-weight: 700; color: var(--text-hi); letter-spacing: 0.4px; }
+.saved-user-proto { font-size: 10px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
+.saved-user-meta  { font-size: 10px; color: var(--text-sec); line-height: 1.45; word-break: break-word; }
+.saved-user-empty { font-size: 11px; color: var(--text-dim); padding: 8px; text-align: center; }
+
+/* Enumeration output box */
+.enumeration-output { margin-top: 14px; border: 1px solid rgba(0, 212, 255, 0.25); background: rgba(0, 0, 0, 0.45); padding: 10px; }
+.enum-output-title  { font-family: var(--head); font-size: 11px; letter-spacing: 0.08em; color: var(--text-hi); margin-bottom: 8px; }
+.enum-output-pre    { margin: 0; min-height: 180px; max-height: 280px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.45; color: var(--text-hi); background: #000; border: 1px solid rgba(255, 255, 255, 0.08); padding: 10px; white-space: pre-wrap; word-break: break-word; }

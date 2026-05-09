@@ -1,0 +1,127 @@
+/* ============================================================
+   buttons.css — btn-primary, btn-secondary, btn-danger,
+                 btn-green, btn-saved-users, chip, filter-chips
+   ============================================================ */
+
+.btn-primary {
+    flex: 1;
+    height: 42px;
+    background: var(--accent);
+    border: none;
+    border-radius: 4px;
+    color: #000;
+    font-family: var(--head);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.btn-primary:hover    { background: #00eeff; transform: translateY(-1px); }
+.btn-primary:active   { transform: translateY(0); }
+.btn-primary:disabled { background: var(--text-dim); cursor: not-allowed; transform: none; opacity: 0.6; }
+
+.btn-danger {
+    flex: 1;
+    height: 42px;
+    background: var(--red);
+    border: none;
+    border-radius: 4px;
+    color: #fff;
+    font-family: var(--head);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.btn-danger:hover    { background: #ff4d4d; transform: translateY(-1px); }
+.btn-danger:active   { transform: translateY(0); }
+.btn-danger:disabled { background: var(--text-dim); cursor: not-allowed; transform: none; opacity: 0.6; }
+
+.btn-secondary {
+    height: 42px;
+    padding: 0 18px;
+    background: transparent;
+    border: 1px solid var(--border-hi);
+    border-radius: 4px;
+    color: var(--text-sec);
+    font-family: var(--head);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.btn-secondary:hover { border-color: var(--text-sec); color: var(--text-pri); }
+
+.btn-green {
+    height: 42px;
+    padding: 0 32px;
+    background: transparent;
+    border: 1px solid var(--green-dim);
+    border-radius: 4px;
+    color: var(--green);
+    font-family: var(--head);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-green:hover { background: rgba(0,255,136,0.08); border-color: var(--green); }
+
+.btn-saved-users { width: 100%; justify-content: center; letter-spacing: 1.5px; }
+
+/* Filter chips */
+.filter-chips { display: flex; gap: 5px; }
+
+.chip {
+    height: 28px;
+    padding: 0 11px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text-dim);
+    font-family: var(--head);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.12s;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.chip:hover { border-color: var(--border-hi); color: var(--text-sec); }
+
+.chip.active {
+    background: var(--accent-glow);
+    border-color: var(--accent-dim);
+    color: var(--accent);
+}
+
+.chip-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }

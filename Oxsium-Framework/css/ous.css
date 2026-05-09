@@ -1,0 +1,43 @@
+/* ============================================================
+   ous.css — OUs tab styles
+   ============================================================ */
+
+/* ══════════════════════════════════════════
+   OUs TAB
+═══════════════════════════════════════════ */
+.ous-wrap { display: flex; flex-direction: column; gap: 15px; height: 100%; }
+.ous-header { border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+.ous-title-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.ous-meta { font-size: 12px; color: var(--text-dim); }
+.ous-toolbar { display: flex; gap: 10px; align-items: center; }
+.ous-split { display: flex; gap: 15px; flex: 1; overflow: hidden; }
+.ous-table-wrap { flex: 2; overflow-y: auto; }
+
+.o-table-head { display: flex; gap: 12px; padding: 8px 10px; background: var(--bg-alt); border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--text-dim); position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--border); }
+.o-col { padding: 4px 8px; }
+.o-col-name    { flex: 0 0 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o-col-path    { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o-col-desc    { flex: 0 0 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o-col-objcount{ flex: 0 0 90px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o-col-inherit { flex: 0 0 95px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o-col-managed { flex: 0 0 105px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.o-table-body { display: flex; flex-direction: column; gap: 0; }
+.o-row { display: flex; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background-color 0.15s; border-left: 3px solid transparent; }
+.o-row:hover    { background-color: var(--bg-hover); }
+.o-row.selected { background-color: var(--bg-selected); border-left-color: var(--accent); }
+
+.o-cell         { padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.o-cell-name    { flex: 0 0 140px; color: var(--text-hi); font-weight: 500; }
+.o-cell-path    { flex: 1; color: var(--text-sec); }
+.o-cell-desc    { flex: 0 0 120px; color: var(--text-dim); }
+.o-cell-objcount{ flex: 0 0 90px; color: var(--accent); text-align: center; }
+.o-cell-inherit { flex: 0 0 95px; text-align: center; font-weight: 600; }
+.o-cell-inherit.enabled { color: var(--green); }
+.o-cell-inherit.blocked { color: var(--amber); }
+.o-cell-managed { flex: 0 0 105px; color: var(--text-dim); }
+
+.o-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 40px; text-align: center; color: var(--text-dim); font-size: 12px; }
+.ou-detail { flex: 1; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-alt); display: flex; flex-direction: column; overflow: hidden; }
+.ous-loading { position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; gap: 12px; border-radius: 6px; }
+.ous-loading span { color: var(--text-sec); font-size: 11px; }

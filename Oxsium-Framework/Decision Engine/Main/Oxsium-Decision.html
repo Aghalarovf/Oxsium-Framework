@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oxsium Framework — Decision Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="Oxsium-Decision.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+<div class="oxsium-shell">
+
+    <!-- ══ TOPBAR ══ -->
+    <header class="topbar">
+
+        <!-- Left: status / engine info -->
+        <div class="topbar-left">
+            <div class="status-cluster">
+                <div class="status-dot"></div>
+                <span class="status-label">Engine Active</span>
+            </div>
+
+            <div class="topbar-sep"></div>
+            <!-- Root Principal Section -->
+            <div class="root-principal-section">
+                <button class="root-principal-btn" id="root-principal-trigger">
+                    Root Principal
+                </button>
+                <div class="root-principal-dropdown" id="root-principal-dropdown">
+                    <div class="rp-search">
+                        <input type="text" id="rp-search-input" placeholder="Search..." class="rp-search-input">
+                    </div>
+                    <div class="rp-scroll-area" id="rp-scroll-area">
+                        <div class="rp-loading">Loading...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filters Section -->
+            <div class="filters-section">
+                <button class="root-principal-btn" id="filters-trigger">
+                    FILTERS
+                </button>
+                <div class="root-principal-dropdown filters-dropdown" id="filters-dropdown">
+                    <div class="filters-scroll-area" id="filters-scroll-area"></div>
+                </div>
+            </div>
+
+            <!-- Export Button (to the right of Filters) -->
+            <div class="export-section">
+                <button class="root-principal-btn" id="export-btn" title="Export">EXPORT</button>
+            </div>
+
+        </div>
+
+        <!-- Right: action + logo -->
+        <div class="topbar-right">
+            <button class="reset-btn" id="reset-btn" aria-label="Reset" title="Reset">
+                ↺
+            </button>
+            <button class="notifications-btn" id="notifications-btn" aria-label="Notifications" title="Notifications">
+                🔔
+            </button>
+            <button class="settings-btn" id="settings-btn" aria-label="Settings" title="Settings">
+                ⚙
+            </button>
+            
+
+            <button class="run-btn" id="analyze-btn">
+                <span class="btn-icon"></span>
+                Analyze Paths
+            </button>
+
+            <div class="logo-block">
+                <div class="logo-icon-wrap">
+                    <img src="../assets/favicon.png" alt="Oxsium" onerror="this.style.display='none';this.parentElement.innerHTML='<svg viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'#38bdf8\' stroke-width=\'1.5\' width=\'16\' height=\'16\'><path d=\'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5\'/></svg>'">
+                </div>
+                <div class="logo-text-wrap">
+                    <div class="logo-name">Oxsium</div>
+                    <span class="logo-sub">Framework · v2.1</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ══ LEFT PANEL: Attack Paths ══ -->
+    <aside class="panel-left">
+        <div class="panel-header">
+            <div class="panel-title">Attack Paths</div>
+            <div class="panel-stats">
+                <div class="stat-item">
+                    <div class="stat-val blue" id="stat-nodes">—</div>
+                    <div class="stat-lbl">Nodes</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-val" id="stat-hops">—</div>
+                    <div class="stat-lbl">Max Hops</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="scroll-area" id="path-list">
+            <!-- injected by JS -->
+        </div>
+    </aside>
+
+    <!-- ══ CENTER: Graph Viewport ══ -->
+    <main class="graph-viewport">
+        <div class="grid-bg"></div>
+        <div class="graph-label">Decision Graph · <span id="graph-mode">Force Directed</span></div>
+
+        <div id="d3-canvas"></div>
+
+        <div class="graph-legend" id="graph-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:#6366f1;box-shadow:0 0 5px #6366f1"></div>User Account</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#0ea5e9;box-shadow:0 0 5px #0ea5e9"></div>Group / OU</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#10b981;box-shadow:0 0 5px #10b981"></div>Computer</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;box-shadow:0 0 5px #f59e0b"></div>Domain</div>
+        </div>
+
+        <div class="node-tooltip" id="node-tooltip">
+            <div class="tooltip-type" id="tt-type">USER</div>
+            <div class="tooltip-name" id="tt-name">—</div>
+            <div class="tooltip-row">
+                <span class="tooltip-key">Risk Score</span>
+                <span class="tooltip-val" id="tt-score">—</span>
+            </div>
+            <div class="tooltip-row">
+                <span class="tooltip-key">Edges</span>
+                <span class="tooltip-val" id="tt-edges">—</span>
+            </div>
+            <div class="tooltip-row">
+                <span class="tooltip-key">Depth</span>
+                <span class="tooltip-val" id="tt-depth">—</span>
+            </div>
+        </div>
+
+        <!-- Scale controls -->
+        <div class="scale-controls">
+            <div class="scale-header">
+                <span class="scale-title">Graph Scale</span>
+                <span class="scale-value" id="scale-display">100%</span>
+            </div>
+            <input type="range" class="scale-slider" id="scale-slider" min="30" max="200" value="100" step="5">
+            <div class="scale-btns">
+                <button class="scale-btn" id="zoom-in">+</button>
+                <button class="scale-btn" id="zoom-fit">⊡ Fit</button>
+                <button class="scale-btn" id="zoom-out">−</button>
+                <button class="scale-btn" id="zoom-reset">1:1</button>
+            </div>
+        </div>
+    </main>
+
+    <!-- ══ RIGHT PANEL: Detail View ══ -->
+    <aside class="panel-right">
+        <div class="right-header">
+            <div class="right-title">Path Detail</div>
+            <div class="path-detail-name" id="detail-name">Select a path</div>
+            <div class="path-detail-sub" id="detail-sub">Click any path card to inspect</div>
+        </div>
+
+        <!-- Score ring -->
+        <div class="score-section" id="score-section">
+            <div class="score-ring-wrap">
+                <svg viewBox="0 0 60 60">
+                    <circle cx="30" cy="30" r="24" fill="none" stroke="#1a2840" stroke-width="5"/>
+                    <circle id="score-ring" cx="30" cy="30" r="24"
+                        fill="none" stroke="#ef4444" stroke-width="5"
+                        stroke-dasharray="0 150"
+                        stroke-linecap="round"
+                        transform="rotate(-90 30 30)"
+                        style="transition: stroke-dasharray 0.6s ease"/>
+                </svg>
+                <div class="score-ring-val" id="score-num">—</div>
+            </div>
+            <div class="score-meta">
+                <div class="score-meta-row">
+                    <span class="score-meta-key">Severity</span>
+                    <span class="score-meta-val red" id="meta-sev">—</span>
+                </div>
+                <div class="score-meta-row">
+                    <span class="score-meta-key">Hops</span>
+                    <span class="score-meta-val" id="meta-hops">—</span>
+                </div>
+                <div class="score-meta-row">
+                    <span class="score-meta-key">Start Node</span>
+                    <span class="score-meta-val" id="meta-start">—</span>
+                </div>
+                <div class="score-meta-row">
+                    <span class="score-meta-key">Target</span>
+                    <span class="score-meta-val orange" id="meta-target">—</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sparkline -->
+        <div class="sparkline-section">
+            <div class="spark-label">Risk Distribution</div>
+            <div class="sparkline-wrap">
+                <svg id="sparkline-svg" viewBox="0 0 280 40" preserveAspectRatio="none"></svg>
+            </div>
+        </div>
+
+        <!-- Hop list -->
+        <div class="hops-section" id="hops-section">
+            <div class="section-sep">Hop Chain</div>
+            <div id="hop-list">
+                <div style="padding:24px 14px;text-align:center;font-size:9px;color:var(--text-dim);letter-spacing:1px;">
+                    NO PATH SELECTED
+                </div>
+            </div>
+        </div>
+    </aside>
+
+</div>
+
+    <div class="settings-backdrop" id="settings-backdrop" aria-hidden="true"></div>
+    <section class="settings-panel" id="settings-panel" aria-hidden="true" aria-label="Settings panel">
+        <div class="settings-panel-head">
+            <div>
+                <div class="settings-title">Settings</div>
+                <div class="settings-subtitle">Configuration space</div>
+            </div>
+            <button class="settings-close" id="settings-close" aria-label="Close settings">×</button>
+        </div>
+        <div class="settings-panel-body" id="settings-panel-body"></div>
+    </section>
+
+    <!-- Export panel/backdrop (empty content) -->
+    <div class="export-backdrop" id="export-backdrop" aria-hidden="true"></div>
+    <section class="export-panel" id="export-panel" aria-hidden="true" aria-label="Export panel">
+        <div class="export-panel-head">
+            <div>
+                <div class="export-title">Export</div>
+                <div class="export-subtitle">Export options</div>
+            </div>
+            <button class="export-close" id="export-close" aria-label="Close export">×</button>
+        </div>
+        <div class="export-panel-body" id="export-panel-body"></div>
+    </section>
+
+<div class="notifications-popover" id="notifications-popover" aria-hidden="true">
+    <div class="notifications-popover-head">
+        <span class="notifications-popover-title">Notifications</span>
+        <button class="notifications-close" id="notifications-close" aria-label="Close notifications">×</button>
+    </div>
+    <div class="notifications-popover-body" id="notifications-popover-body"></div>
+</div>
+
+<div class="analyze-loading-overlay" id="analyze-loading-overlay" aria-hidden="true">
+    <div class="analyze-loading-card">
+        <div class="analyze-loading-header">
+            <div class="analyze-loading-title">Initializing Engine...</div>
+            <div class="analyze-loading-pct" id="analyze-loading-pct">0%</div>
+        </div>
+        <div class="analyze-loading-subtitle">ACE Graph Engine starting up</div>
+        <div class="analyze-loading-bar-wrap">
+            <div class="analyze-loading-bar" id="analyze-loading-bar"></div>
+        </div>
+    </div>
+</div>
+
+<script src="Oxsium-Decision.js"></script>
+<script src="../Nodes/node_rule.js"></script>
+<script src="../Edges/edge_rules.js"></script>
+<script src="Oxsium-Decision-Graph.js"></script>
+<script src="../Helpers/root_principal.js"></script>
+<script src="../Helpers/filters.js"></script>
+<script src="../Helpers/settings.js"></script>
+<script src="../Helpers/notifications.js"></script>
+<script src="../Helpers/reset.js"></script>
+<script src="../Helpers/export.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,131 @@
+/* ============================================================
+   modals.css — .status-modal, .attack-hint-modal, status-info-card
+   ============================================================ */
+
+/* Status modal backdrop */
+.status-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    background: rgba(8, 12, 20, 0.5);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2.5vh 2.5vw;
+}
+
+.status-modal {
+    width: 80vw;
+    max-width: 1100px;
+    height: 80vh;
+    max-height: 820px;
+    border: 1px solid var(--border-hi);
+    border-radius: 10px;
+    background: linear-gradient(180deg, #101b2a, #0d1521);
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.status-modal-head {
+    height: 56px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.status-modal-title {
+    font-family: var(--head);
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text-hi);
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+}
+
+.status-modal-close {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border-hi);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-pri);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.status-modal-close:hover { border-color: var(--red); color: var(--red); }
+
+.status-modal-body {
+    padding: 20px;
+    overflow: auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+}
+
+.status-info-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(9, 15, 24, 0.7);
+    padding: 14px;
+}
+
+.status-info-card h4 { font-family: var(--head); font-size: 13px; color: var(--accent); margin-bottom: 8px; letter-spacing: 1px; text-transform: uppercase; }
+.status-info-card p, .status-info-card li { font-size: 12px; line-height: 1.5; color: var(--text-pri); }
+.status-info-card ul { margin-left: 16px; display: flex; flex-direction: column; gap: 5px; }
+
+/* Attack hint modal */
+.attack-hint-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10010;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(3, 7, 12, 0.38);
+    backdrop-filter: blur(4px);
+}
+
+.attack-hint-modal.show { display: flex; animation: fade-in 0.14s ease-out; }
+
+.attack-hint-modal-panel {
+    width: 80vw;
+    height: 80vh;
+    border: 1px solid rgba(0,212,255,0.28);
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(10,15,21,0.98), rgba(7,10,14,0.98));
+    box-shadow: 0 24px 48px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,212,255,0.08) inset;
+    overflow: hidden;
+}
+
+.attack-hint-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(90deg, rgba(0,212,255,0.08), transparent 60%);
+}
+
+.attack-hint-modal-title { font-family: var(--head); font-size: 12px; letter-spacing: 0.8px; color: var(--text-hi); text-transform: uppercase; }
+
+.attack-hint-modal-close { border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-sec); width: 24px; height: 24px; border-radius: 6px; cursor: pointer; }
+.attack-hint-modal-close:hover { color: var(--text-hi); border-color: var(--accent-dim); box-shadow: 0 0 10px rgba(0,212,255,0.25); }
+
+.attack-hint-modal-body { height: calc(100% - 45px); }
+
+/* Responsive */
+@media (max-width: 900px) {
+    .status-modal { width: 92vw; height: 86vh; }
+    .status-modal-body { grid-template-columns: 1fr; }
+    .checker-overview-grid, .checker-grid { grid-template-columns: 1fr; }
+    .checker-span-2 { grid-column: auto; }
+}

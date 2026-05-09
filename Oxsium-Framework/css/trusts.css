@@ -1,0 +1,38 @@
+/* ============================================================
+   trusts.css — Trusts tab styles
+   ============================================================ */
+
+/* ══════════════════════════════════════════
+   TRUSTS TAB
+═══════════════════════════════════════════ */
+.trusts-wrap { display: flex; flex-direction: column; gap: 15px; height: 100%; }
+.trusts-header { border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+.trusts-title-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.trusts-meta { font-size: 12px; color: var(--text-dim); }
+.trusts-toolbar { display: flex; gap: 10px; align-items: center; }
+.trusts-split { display: flex; gap: 15px; flex: 1; overflow: hidden; }
+.trusts-table-wrap { flex: 2; overflow-y: auto; }
+.tr-table-head { display: flex; gap: 12px; padding: 8px 10px; background: var(--bg-panel); border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--text-dim); position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--border); }
+.tr-col { padding: 4px 8px; }
+.tr-col-name      { flex: 0 0 150px; }
+.tr-col-partner   { flex: 1; min-width: 0; }
+.tr-col-direction { flex: 0 0 140px; }
+.tr-col-type      { flex: 0 0 180px; }
+.tr-table-body { display: flex; flex-direction: column; gap: 0; }
+.tr-row { display: flex; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background-color 0.15s; border-left: 3px solid transparent; }
+.tr-row:hover    { background-color: var(--bg-panel); }
+.tr-row.selected { background-color: var(--accent-glow); border-left-color: var(--accent); }
+.tr-cell           { padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.tr-cell-name      { flex: 0 0 150px; color: var(--text-hi); font-weight: 500; }
+.tr-cell-partner   { flex: 1; min-width: 0; color: var(--text-sec); }
+.tr-cell-direction { flex: 0 0 140px; color: var(--text-sec); }
+.tr-cell-type      { flex: 0 0 180px; color: var(--text-dim); }
+.tr-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 40px; text-align: center; color: var(--text-dim); font-size: 12px; }
+.trust-detail { flex: 1; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-base); display: flex; flex-direction: column; overflow: hidden; }
+.trusts-loading { position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; gap: 12px; border-radius: 6px; }
+.trusts-loading span { color: var(--text-sec); font-size: 11px; }
+
+#trust-detail-body .detail-row { padding: 10px 8px; min-height: 38px; border: 1px solid rgba(30,45,61,0.5); border-radius: 4px; margin-bottom: 6px; background: rgba(16,21,32,0.45); }
+#trust-detail-body .detail-row:last-child { margin-bottom: 0; }
+#trust-detail-body .d-label { font-size: 11px; }
+#trust-detail-body .d-val   { font-size: 12px; }

@@ -1,0 +1,955 @@
+﻿/* ═══════════════════════════════════════════════════
+   01-core.js
+   Connection lifecycle, stats panel, security
+   checker, deep enumeration, session timer.
+   Depends on: 00-globals.js
+   ═══════════════════════════════════════════════════ */
+
+/* ── Assessment Toolkit config ── */
+const ASSESSMENT_TOOLKITS = {
+  users: [
+    { label: 'Kerberoasting',  color: 'var(--accent)', countClass: 'accent',  countId: 'pt-kerb-count',  action: 'runKerberoasting()' },
+    { label: 'AS-REP Roasting',color: 'var(--red)',    countClass: 'red',     countId: 'pt-asrep-count', action: 'runASREPRoasting()' },
+    { label: 'Silver Ticket',  color: '#a78bfa',       countClass: 'purple',  countId: 'pt-silver-count',action: 'runSilverTicket()' },
+    { label: 'Brute Force',    color: '#fb923c',       countClass: 'orange',  countId: 'pt-brute-count', action: 'runBruteForce()' },
+    { label: 'DCSync',         color: 'var(--amber)',  countClass: 'red',     countId: 'pt-dcsync-count',action: 'runDCSync()' },
+  ],
+  computers: [
+    { label: 'LAPS Password Dumping', color: 'var(--accent)', countClass: 'dim' },
+    { label: 'Spooler Service',       color: 'var(--amber)',  countClass: 'dim' },
+  ],
+  ous: [
+    { label: 'ACE/ACL Abuse', color: 'var(--red)',    countClass: 'dim' },
+    { label: 'GPO Injection',  color: 'var(--accent)', countClass: 'dim' },
+  ],
+  gpo: [
+    { label: 'GPP Decryption',             color: 'var(--amber)', countClass: 'dim' },
+    { label: 'Scheduled Tasks Injection',  color: 'var(--red)',   countClass: 'dim' },
+  ],
+  groups: [
+    { label: 'Group Membership Hijacking', color: 'var(--accent)', countClass: 'dim' },
+    { label: 'DNSAdmins RCE',              color: 'var(--red)',    countClass: 'dim' },
+  ],
+  trusts: [
+    { label: 'Inter-realm Kerberoasting',  color: '#a78bfa',      countClass: 'dim' },
+    { label: 'SID History Injection',      color: 'var(--red)',   countClass: 'dim' },
+  ],
+  acl: [
+    { label: 'GenericAll',                   color: 'var(--red)',    countClass: 'dim' },
+    { label: 'GenericWrite / WriteProperty', color: 'var(--amber)', countClass: 'dim' },
+    { label: 'WriteDACL',                    color: 'var(--accent)', countClass: 'dim' },
+    { label: 'WriteOwner',                   color: '#a78bfa',      countClass: 'dim' },
+    { label: 'AddMember',                    color: '#fb923c',      countClass: 'dim' },
+  ],
+};
+
+function renderAssessmentToolkit(tab) {
+  const body  = document.getElementById('sidebar-attacks-body');
+  if (!body) return;
+  const items = ASSESSMENT_TOOLKITS[tab] || [];
+  body.innerHTML = items.map(item => {
+    const clickAttr = item.action ? ` onclick="${item.action}"` : '';
+    return `
+      <div class="atk-item"${clickAttr}>
+        <span class="atk-dot" style="background:${item.color}"></span>
+        <span class="atk-name">${item.label}</span>
+        <span class="atk-count ${item.countClass || 'dim'}"${
+          item.countId ? ` id="${item.countId}"` : ''}>—</span>
+      </div>`;
+  }).join('');
+}
+
+/* ── Connection state display ── */
+function setConnState(s) {
+  const dot = document.getElementById('top-conn-dot');
+  const lbl = document.getElementById('top-conn-label');
+  const sv  = document.getElementById('stat-conn');
+  const sb  = document.getElementById('sb-status');
+
+  if (s === 'connected') {
+    dot.className = 'conn-dot connected';
+    lbl.textContent = 'CONNECTED';   lbl.className = 'conn-label connected';
+    sv.textContent  = 'ACTIVE';      sv.className  = 'stat-value green';
+    sb.textContent  = 'CONNECTED';   sb.className  = 's-val ok';
+  } else if (s === 'connecting') {
+    dot.className = 'conn-dot connecting';
+    lbl.textContent = 'CONNECTING...'; lbl.className = 'conn-label';
+    sv.textContent  = 'CONNECTING';    sv.className  = 'stat-value amber';
+    sb.textContent  = 'CONNECTING';    sb.className  = 's-val warn';
+  } else if (s === 'error') {
+    dot.className = 'conn-dot error';
+    lbl.textContent = 'AUTH FAILED'; lbl.className = 'conn-label error';
+    sv.textContent  = 'AUTH FAILED'; sv.className  = 'stat-value red';
+    sb.textContent  = 'ERROR';       sb.className  = 's-val';
+  } else {
+    dot.className = 'conn-dot';
+    lbl.textContent = 'DISCONNECTED'; lbl.className = 'conn-label';
+    sv.textContent  = 'OFFLINE';      sv.className  = 'stat-value dim';
+    sb.textContent  = 'IDLE';         sb.className  = 's-val';
+  }
+  updateConnectButtonState();
+  updateModeButtonState();
+  updateShellTabState();
+  updateEnumerationTabState();
+  updateReconnaissanceTabState();
+  refreshEnumerationProtocolPanel();
+}
+
+function setEnvironmentDomainController(value, cls = 'accent') {
+  const el = document.getElementById('stat-dc');
+  if (!el) return;
+  if (!value) { el.textContent = '—'; el.className = 'stat-value dim'; return; }
+  el.textContent = value;
+  el.className   = `stat-value ${cls}`;
+}
+window.setEnvironmentDomainController = setEnvironmentDomainController;
+
+function updateStats(data) {
+  const set = (id, val, cls) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = val || '—';
+    if (cls) el.className = `stat-value ${cls}`;
+  };
+
+  const inferSecurityStatus = (input) => {
+    const proto = String(state.protocol || '').toLowerCase();
+    let kerberos = input?.kerberos_enabled;
+    let ntlm     = input?.ntlm_enabled;
+    let smb      = input?.smb_enabled;
+    if (typeof smb     !== 'boolean' && (proto === 'smb' || proto === 'psexec')) smb = true;
+    if (typeof ntlm    !== 'boolean' && (proto === 'smb' || proto === 'psexec' || proto === 'winrm' || smb === true)) ntlm = true;
+    if (typeof kerberos !== 'boolean') {
+      if (proto === 'ldap' || proto === 'ldaps') kerberos = true;
+      else if (proto === 'local') kerberos = false;
+    }
+    return { kerberos, ntlm, smb };
+  };
+
+  const toStatusText = (value) => {
+    if (value === true)  return { text: 'Enabled',  cls: 'green' };
+    if (value === false) return { text: 'Disabled', cls: 'red' };
+    return { text: 'Unknown', cls: 'dim' };
+  };
+
+  set('stat-domain', data.domain   || state.domain, 'accent');
+  setEnvironmentDomainController('', 'dim');
+  set('stat-user',   data.username,                  'accent');
+  set('stat-proto',  (state.protocol || '').toUpperCase(), 'accent');
+  set('stat-os',     data.os_version, '');
+  set('stat-level',  data.domain_level, '');
+
+  const inferred = inferSecurityStatus(data);
+  const kerb = toStatusText(inferred.kerberos);
+  const ntlm = toStatusText(inferred.ntlm);
+  const smb  = toStatusText(inferred.smb);
+  set('stat-kerb', kerb.text, kerb.cls);
+  set('stat-ntlm', ntlm.text, ntlm.cls);
+  set('stat-smb',  smb.text,  smb.cls);
+  refreshEnumerationProtocolPanel();
+  set('stat-api', 'Reachable', 'green');
+  set('stat-latency', data.latency_ms ? `${data.latency_ms} ms` : '—', '');
+  document.getElementById('sb-proto').textContent = (state.protocol || '').toUpperCase();
+  document.getElementById('api-ping-bar').style.width = '100%';
+
+  const source = (data?.meta?.profile_source || data?.ldap_target) ? 'runtime probe' : 'connect response';
+  const proto  = (state.protocol || '—').toUpperCase();
+  securityStatusMeta = {
+    kerberos: { value: inferred.kerberos, source, protocol: proto },
+    ntlm:     { value: inferred.ntlm,     source, protocol: proto },
+    smb:      { value: inferred.smb,      source, protocol: proto },
+  };
+
+  if (data.counts) {
+    const c = data.counts;
+    const setMini = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) { el.textContent = val ?? 0; el.className = 'stat-mini-val active'; }
+    };
+    setMini('cnt-users',  c.users);
+    setMini('cnt-comp',   c.computers);
+    setMini('cnt-groups', c.groups);
+    setMini('cnt-ous',    c.ous);
+    setMini('cnt-gpos',   c.gpos);
+    setMini('cnt-trusts', c.trusts);
+  }
+}
+
+/* ── Session timer ── */
+function startSessionTimer() {
+  state.sessionStart = Date.now();
+  if (sessionTimerId) { clearInterval(sessionTimerId); sessionTimerId = null; }
+  sessionTimerId = setInterval(() => {
+    if (!state.connected) return;
+    const s   = Math.floor((Date.now() - state.sessionStart) / 1000);
+    const h   = String(Math.floor(s / 3600)).padStart(2, '0');
+    const m   = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+    const sec = String(s % 60).padStart(2, '0');
+    document.getElementById('sb-time').textContent = `${h}:${m}:${sec}`;
+  }, 1000);
+}
+
+/* ── Deep enumeration progress ── */
+function setDeepEnumProgress(percent, label = '') {
+  const wrap = document.getElementById('enum-progress-wrap');
+  const fill = document.getElementById('enum-progress-fill');
+  const ptxt = document.getElementById('enum-progress-percent');
+  const ltxt = document.getElementById('enum-progress-label');
+  if (!wrap || !fill || !ptxt || !ltxt) return;
+  const bounded = Math.max(0, Math.min(100, Number(percent) || 0));
+  wrap.style.display = 'block';
+  fill.style.width   = `${bounded}%`;
+  ptxt.textContent   = `${Math.round(bounded)}%`;
+  if (label) ltxt.textContent = label;
+}
+function resetDeepEnumProgress() {
+  const fill = document.getElementById('enum-progress-fill');
+  const ptxt = document.getElementById('enum-progress-percent');
+  const ltxt = document.getElementById('enum-progress-label');
+  if (fill) fill.style.width   = '0%';
+  if (ptxt) ptxt.textContent   = '0%';
+  if (ltxt) ltxt.textContent   = 'Deep enumeration in progress...';
+}
+function hideDeepEnumProgress() {
+  const wrap = document.getElementById('enum-progress-wrap');
+  if (wrap) wrap.style.display = 'none';
+}
+
+function _showEnumTabProgress() {
+  const wrap  = document.getElementById('enum-tab-progress');
+  const panel = document.getElementById('enumeration-panel');
+  if (wrap)  wrap.style.display  = 'flex';
+  if (panel) panel.style.display = 'none';
+}
+function _hideEnumTabProgress() {
+  const wrap  = document.getElementById('enum-tab-progress');
+  const panel = document.getElementById('enumeration-panel');
+  if (wrap)  wrap.style.display  = 'none';
+  if (panel) panel.style.display = '';
+}
+function _updateEnumTabProgress(pct, moduleName) {
+  const fill  = document.getElementById('enum-tab-bar-fill');
+  const pctEl = document.getElementById('enum-tab-pct');
+  const modEl = document.getElementById('enum-tab-module');
+  const bounded = Math.max(0, Math.min(100, Number(pct) || 0));
+  if (fill)  fill.style.width  = `${bounded}%`;
+  if (pctEl) pctEl.textContent = `${Math.round(bounded)}%`;
+  if (modEl && moduleName) modEl.textContent = moduleName;
+}
+
+/* ── Deep discovery (runs all modules in sequence) ── */
+async function runDeepDiscoveryCounts() {
+  const payload = buildEnumerationPayload();
+  const modules = [
+    { name: 'users.py',               key: 'users',   path: '/api/users',     cntId: 'cnt-users',   navId: 'nav-users-count',     cacheKey: 'users' },
+    { name: 'computers.py',           key: 'computers',path: '/api/computers', cntId: 'cnt-comp',    navId: 'nav-computers-count', cacheKey: 'computers' },
+    { name: 'ous.py',                 key: 'ous',     path: '/api/ous',       cntId: 'cnt-ous',     navId: 'nav-ous-count',       cacheKey: 'ous' },
+    { name: 'gpo.py',                 key: 'gpos',    path: '/api/gpo',       cntId: 'cnt-gpos',    navId: 'nav-gpo-count',       cacheKey: 'gpos' },
+    { name: 'groups.py',              key: 'groups',  path: '/api/groups',    cntId: 'cnt-groups',  navId: 'nav-groups-count',    cacheKey: 'groups' },
+    { name: 'trust.py',               key: 'trusts',  path: '/api/trusts',    cntId: 'cnt-trusts',  navId: 'nav-trusts-count',    cacheKey: 'trusts' },
+    { name: 'acl package',          key: 'acls',    path: '/api/acl',       cntId: null,          navId: 'nav-acl-count',       cacheKey: 'acl' },
+  ];
+
+  const setMini = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = val; el.className = 'stat-mini-val active'; }
+  };
+
+  if (state.deepEnumRunning) return;
+  state.deepEnumRunning = true;
+
+  resetDeepEnumProgress();
+  setDeepEnumProgress(0, 'Deep enumeration in progress...');
+  _showEnumTabProgress();
+  _updateEnumTabProgress(0, 'Initializing...');
+
+  for (let idx = 0; idx < modules.length; idx++) {
+    const ep = modules[idx];
+    try {
+      const resp  = await fetch(`${API_BASE}${ep.path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      const data  = await resp.json();
+      const items = Array.isArray(data[ep.key]) ? data[ep.key] : [];
+      const count = (resp.ok && data.success)
+        ? Number(data.count ?? items.length ?? 0)
+        : 0;
+
+      if (resp.ok && data.success) {
+        if (ep.cacheKey === 'users') {
+          usersData = data.users || [];
+          usersMeta = data.meta  || {};
+          updatePentestCounts();
+        } else if (ep.cacheKey === 'computers') {
+          computersData = data.computers || [];
+          const dcComputer = computersData.find(c => c?.is_domain_controller);
+          const dcDns = dcComputer?.dns_name || dcComputer?.computer_name || '';
+          setEnvironmentDomainController(dcDns, dcDns ? 'accent' : 'dim');
+          const compMeta = document.getElementById('computers-meta');
+          if (compMeta) compMeta.textContent = `${computersData.length} computers · domain: ${(state.domain || '').toUpperCase()}`;
+          if (typeof renderComputers === 'function') renderComputers();
+        } else if (ep.cacheKey === 'ous') {
+          ousData = data.ous || data.organizational_units || [];
+        } else if (ep.cacheKey === 'gpos') {
+          gposData = data.gpos || [];
+        } else if (ep.cacheKey === 'acl') {
+          aclData = data.acls || [];
+        } else if (ep.cacheKey === 'groups') {
+          groupsData = data.groups || [];
+        } else if (ep.cacheKey === 'trusts') {
+          trustsData = data.trusts || [];
+        }
+        enumCacheLoaded[ep.cacheKey] = true;
+      }
+
+      if (ep.cntId) setMini(ep.cntId, count);
+      const navEl = document.getElementById(ep.navId);
+      if (navEl) navEl.textContent = count;
+      addLog(`${ep.name} enumeration finished (${count} objects).`, 'ok');
+    } catch (err) {
+      if (ep.cntId) setMini(ep.cntId, 0);
+      const navEl = document.getElementById(ep.navId);
+      if (navEl) navEl.textContent = 0;
+      enumCacheLoaded[ep.cacheKey] = false;
+      addLog(`${ep.name} enumeration failed: ${err.message || 'request failed'}`, 'err');
+    }
+
+    const percent = Math.round(((idx + 1) / modules.length) * 100);
+    setDeepEnumProgress(percent, `Deep enumeration in progress... ${idx + 1}/${modules.length}`);
+    _updateEnumTabProgress(percent, ep.name);
+  }
+
+  setDeepEnumProgress(100, 'Deep enumeration completed');
+  _updateEnumTabProgress(100, 'Complete ✓');
+  state.deepEnumRunning = false;
+  setTimeout(_hideEnumTabProgress, 1200);
+}
+
+/* ── Connect ── */
+function validate() {
+  let ok = true;
+  [{ id: 'f-domain', err: 'err-domain' }, { id: 'f-ip', err: 'err-ip' }, { id: 'f-user', err: 'err-user' }]
+    .forEach(f => {
+      const el = document.getElementById(f.id);
+      const er = document.getElementById(f.err);
+      if (!el.value.trim()) { el.classList.add('error'); er.classList.add('show'); ok = false; }
+      else { el.classList.remove('error'); er.classList.remove('show'); }
+    });
+
+  const passEl  = document.getElementById('f-pass');
+  const hashEl  = document.getElementById('f-hash');
+  const passErr = document.getElementById('err-pass');
+  const hashErr = document.getElementById('err-hash');
+  const hasPass = !!passEl.value.trim();
+  const hasHash = !!(hashEl?.value || '').trim();
+
+  if (hasPass && hasHash) {
+    passEl.classList.add('error'); hashEl?.classList.add('error');
+    passErr.classList.add('show'); hashErr?.classList.add('show');
+    return false;
+  }
+  if (!hasPass && !hasHash) {
+    passEl.classList.add('error'); hashEl?.classList.add('error');
+    passErr.classList.add('show'); hashErr?.classList.add('show');
+    ok = false;
+  } else {
+    passEl.classList.remove('error'); hashEl?.classList.remove('error');
+    passErr.classList.remove('show'); hashErr?.classList.remove('show');
+  }
+  return ok;
+}
+
+function setBtnLoading(loading, connectMode = 'deep') {
+  const fastBtn = document.getElementById('btn-connect-fast');
+  const deepBtn = document.getElementById('btn-connect-deep');
+  const fastTxt = document.getElementById('btn-connect-fast-text');
+  const deepTxt = document.getElementById('btn-connect-deep-text');
+
+  if (loading) {
+    if (fastBtn) fastBtn.disabled = true;
+    if (deepBtn) deepBtn.disabled = true;
+    if (connectMode === 'fast' && fastTxt) {
+      fastTxt.innerHTML = '<span class="spinner"></span>&nbsp;FAST...';
+      if (deepTxt) deepTxt.textContent = 'DEEP CONNECT';
+    } else {
+      if (deepTxt) deepTxt.innerHTML = '<span class="spinner"></span>&nbsp;DEEP...';
+      if (fastTxt) fastTxt.textContent = 'FAST CONNECT';
+    }
+  } else {
+    updateConnectButtonState();
+  }
+}
+
+function updateConnectButtonState() {
+  const fastBtn        = document.getElementById('btn-connect-fast');
+  const deepBtn        = document.getElementById('btn-connect-deep');
+  const disconnectBtn  = document.getElementById('btn-disconnect');
+  const fastTxt        = document.getElementById('btn-connect-fast-text');
+  const deepTxt        = document.getElementById('btn-connect-deep-text');
+  const localDiscBtn   = document.getElementById('btn-local-disconnect');
+  if (!fastBtn || !deepBtn || !fastTxt || !deepTxt || !disconnectBtn) return;
+
+  if (state.connected) {
+    fastBtn.style.display = 'none'; deepBtn.style.display = 'none';
+    disconnectBtn.style.display = '';
+    disconnectBtn.classList.add('btn-danger');
+    disconnectBtn.classList.remove('btn-secondary');
+  } else {
+    fastBtn.style.display = ''; deepBtn.style.display = '';
+    disconnectBtn.style.display = 'none';
+    fastBtn.disabled = false; deepBtn.disabled = false;
+    fastBtn.classList.remove('btn-danger'); deepBtn.classList.remove('btn-danger');
+    fastBtn.classList.add('btn-secondary'); deepBtn.classList.add('btn-primary');
+    fastTxt.textContent = 'FAST CONNECT'; deepTxt.textContent = 'DEEP CONNECT';
+  }
+  if (localDiscBtn) {
+    const localActive = state.connected && state.protocol === 'local';
+    localDiscBtn.disabled = !localActive;
+    localDiscBtn.classList.toggle('btn-danger',   localActive);
+    localDiscBtn.classList.toggle('btn-secondary', !localActive);
+  }
+}
+
+function updateModeButtonState() {
+  const remoteBtn = document.getElementById('mode-remote');
+  const localBtn  = document.getElementById('mode-local');
+  if (!remoteBtn || !localBtn) return;
+  // Local session mode is intentionally disabled in this build.
+  remoteBtn.disabled = false; remoteBtn.classList.remove('disabled');
+  localBtn.disabled  = true;  localBtn.classList.add('disabled');
+}
+
+function handleConnectClick(event, connectMode = 'deep') {
+  if (event?.preventDefault) event.preventDefault();
+  if (event?.stopPropagation) event.stopPropagation();
+  if (state.connecting) return;
+  if (state.connected && Date.now() < (state.justConnectedUntil || 0)) return;
+  if (state.connected) { doDisconnect(); return; }
+  doConnect(connectMode);
+}
+
+async function doConnect(connectMode = 'deep') {
+  if (state.connecting) return;
+  if (state.connected) {
+    showToast('An active session already exists. Disconnect first.', 'info');
+    addLog('Connect blocked: session is already active.', 'warn');
+    return;
+  }
+  if (!validate()) { addLog('Validation failed — fill all required fields', 'err'); return; }
+
+  const domain   = document.getElementById('f-domain').value.trim();
+  const ip       = document.getElementById('f-ip').value.trim();
+  const dcHost   = (document.getElementById('f-dc')?.value || '').trim();
+  const username = document.getElementById('f-user').value.trim();
+  const password = (document.getElementById('f-pass').value || '').trim();
+  const hash     = (document.getElementById('f-hash')?.value || '').trim();
+
+  state.domain      = domain;
+  state.user        = username;
+  state.connecting  = true;
+
+  setBtnLoading(true, connectMode);
+  setConnState('connecting');
+  addLog(`Initiating ${connectMode.toUpperCase()} ${state.protocol.toUpperCase()} connection to ${ip} (${domain})...`, 'info');
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/connect`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        mode: 'remote', connect_mode: connectMode,
+        skip_counts_probe: connectMode === 'deep',
+        protocol: state.protocol,
+        domain, ip, username, password, hash, dc: dcHost, ldap_host: dcHost,
+      }),
+    });
+    const data = await resp.json();
+
+    if (resp.ok && data.success) {
+      resetSecurityCheckerCacheForSession();
+      state.connected        = true;
+      state.justConnectedUntil = Date.now() + 2000;
+      state.mode    = 'remote';
+      state.ip      = ip;
+      state.domain  = data.domain || domain;
+      state.dc      = dcHost || data.dc || ip;
+      setConnState('connected');
+      addLog(`Connected as ${username}@${state.domain} via ${state.protocol.toUpperCase()}`, 'ok');
+      addLog(`Domain Controller: ${state.dc || 'N/A'}`, 'ok');
+      updateStats(data);
+      runQuickSecurityStatusProbe();
+      probeProtocols();
+      startSessionTimer();
+      state._pass = password || '';
+      state._hash = hash     || '';
+      const savedEntry = { domain, ip, username };
+      if (dcHost)   savedEntry.dc       = dcHost;
+      if (password) savedEntry.password = password;
+      if (hash)     savedEntry.hash     = hash;
+      saveSuccessfulUser(savedEntry);
+      document.getElementById('nav-users-count').textContent = data.counts?.users ?? '-';
+      showToast(`Connected to ${state.domain}`, 'success');
+      state.connectMode = connectMode;
+
+      if (connectMode === 'deep') {
+        addLog('Deep connect: running object discovery checks...', 'info');
+        await runDeepDiscoveryCounts();
+        addLog('Deep connect: object discovery completed.', 'ok');
+      } else {
+        hideDeepEnumProgress();
+        addLog('Fast connect: enumeration deferred — click Enumeration tab to scan.', 'info');
+      }
+    } else {
+      throw new Error(data.error || data.message || 'LDAP Authentication Failed!');
+    }
+  } catch (err) {
+    state.connected = false;
+    setConnState('error');
+    addLog(`Connection failed: ${err.message}`, 'err');
+    showToast(err.message, 'error');
+  } finally {
+    state.connecting = false;
+    setBtnLoading(false, connectMode);
+  }
+}
+
+function doDisconnect() {
+  if (!state.connected) return;
+  addLog('Disconnecting active session...', 'warn');
+  if (sessionTimerId) { clearInterval(sessionTimerId); sessionTimerId = null; }
+  state.connected        = false;
+  state.justConnectedUntil = 0;
+  state.ip               = null;
+  resetSecurityCheckerCacheForSession();
+  hideDeepEnumProgress();
+  resetDeepEnumProgress();
+  setConnState('disconnected');
+  showLoginScreen();
+  showToast('Session disconnected', 'info');
+}
+
+async function doLocalConnect() {
+  if (state.connecting) return;
+  if (state.connected) {
+    showToast('An active session already exists. Disconnect first.', 'info');
+    addLog('Local connect blocked: session is already active.', 'warn');
+    return;
+  }
+  state.connecting = true;
+  setConnState('connecting');
+  addLog('Attaching to local session via Python API...', 'info');
+  try {
+    const resp = await fetch(`${API_BASE}/api/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'local' }),
+    });
+    const data = await resp.json();
+    if (resp.ok && data.success) {
+      resetSecurityCheckerCacheForSession();
+      state.connected        = true;
+      state.justConnectedUntil = Date.now() + 2000;
+      state.mode     = 'local';
+      state.protocol = 'local';
+      state.ip       = '127.0.0.1';
+      state.user     = data.username || state.user;
+      state.domain   = data.domain   || state.domain;
+      state.dc       = data.dc       || state.dc;
+      setConnState('connected');
+      addLog(`Local session attached: ${data.username}`, 'ok');
+      updateStats(data);
+      runQuickSecurityStatusProbe();
+      probeProtocols();
+      startSessionTimer();
+      document.getElementById('nav-users-count').textContent = data.counts?.users ?? '-';
+      showToast('Local session attached', 'success');
+    } else {
+      throw new Error(data.error || data.message || 'Failed to attach session');
+    }
+  } catch (err) {
+    state.connected = false;
+    setConnState('error');
+    addLog(`Local connect failed: ${err.message}`, 'err');
+    showToast(err.message, 'error');
+  } finally {
+    state.connecting = false;
+  }
+}
+
+async function testConn() {
+  if (!validate()) return;
+  const ip     = document.getElementById('f-ip').value.trim();
+  const domain = document.getElementById('f-domain').value.trim();
+  const proto  = state.protocol || 'winrm';
+
+  addLog(`[TEST] ---- Connectivity test started for ${ip} ----`, 'info');
+  addLog(`[TEST] Step 1: Probing host ${ip} via TCP multi-port scan...`, 'info');
+
+  let data;
+  try {
+    const resp = await fetch(`${API_BASE}/api/test`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, protocol: proto, domain }),
+    });
+    data = await resp.json();
+    if (!resp.ok) { addLog(`[TEST] Server error: ${data.error || 'Unknown'}`, 'err'); showToast('Test failed', 'error'); return; }
+  } catch (err) {
+    addLog(`[TEST] Cannot reach API backend: ${err.message}`, 'err');
+    showToast('API backend not running', 'error');
+    return;
+  }
+
+  if (data.host_up) {
+    const via = data.detected_via ? ` (detected via TCP/${data.detected_via})` : '';
+    addLog(`[TEST] Step 1: Host ${ip} is UP${via}`, 'ok');
+  } else {
+    addLog(`[TEST] Step 1: Host ${ip} is UNREACHABLE`, 'err');
+    addLog(`[TEST] ---- Test complete ----`, 'info');
+    showToast('Host unreachable', 'error');
+    return;
+  }
+
+  const protoUpper = (data.protocol || proto).toUpperCase();
+  const portLabel  = `${protoUpper} port ${data.port}`;
+  addLog(`[TEST] Step 2: Checking ${portLabel}...`, 'info');
+  if (data.port_open) {
+    addLog(`[TEST] Step 2: ${portLabel} is OPEN`, 'ok');
+    addLog(`[TEST] ---- Test complete: OK ----`, 'ok');
+    showToast(`${portLabel} is open`, 'success');
+  } else {
+    addLog(`[TEST] Step 2: ${portLabel} is CLOSED or filtered`, 'err');
+    addLog(`[TEST] Hint: Host is up but ${protoUpper} service may be blocked`, 'warn');
+    addLog(`[TEST] ---- Test complete: port closed ----`, 'info');
+    showToast(`${portLabel} is closed`, 'error');
+  }
+}
+
+/* ── Saved users ── */
+async function loadSavedUsers() {
+  try {
+    const resp = await fetch(`${API_BASE}/api/saved-users`, { method: 'GET' });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data.error || 'Failed to load saved users');
+    savedUsersCache = Array.isArray(data.users) ? data.users : [];
+    renderSavedUsers(savedUsersCache);
+  } catch (err) {
+    renderSavedUsers([]);
+    addLog(`Saved users load failed: ${err.message}`, 'err');
+  }
+}
+
+function renderSavedUsers(items) {
+  const scroll = document.getElementById('saved-users-scroll');
+  if (!scroll) return;
+  if (!Array.isArray(items) || items.length === 0) {
+    scroll.innerHTML = '<div class="saved-user-empty">No saved users yet.</div>';
+    return;
+  }
+  scroll.innerHTML = items.map((u, idx) => `
+    <div class="saved-user-item" onclick="applySavedUser(${idx}, event)">
+      <div class="saved-user-top">
+        <span class="saved-user-name">${u.username || '—'}</span>
+        <span class="saved-user-proto">${(u.protocol || 'winrm').toUpperCase()}</span>
+      </div>
+      <div class="saved-user-meta">${u.domain || '—'} @ ${u.ip || '—'}</div>
+      <div class="saved-user-meta">DC: ${u.dc || '—'}</div>
+      <div class="saved-user-meta">Saved: ${u.saved_at || ''}</div>
+    </div>`).join('');
+}
+
+function toggleSavedUsers() {
+  const box = document.getElementById('saved-users-list');
+  if (!box) return;
+  const open = box.style.display === 'block';
+  box.style.display = open ? 'none' : 'block';
+  if (!open) loadSavedUsers();
+}
+
+function applySavedUser(index, event) {
+  if (event?.preventDefault)   event.preventDefault();
+  if (event?.stopPropagation)  event.stopPropagation();
+  const u = savedUsersCache[index];
+  if (!u) return;
+  if (state.connected || state.connecting) { showToast('Disconnect current session first', 'info'); return; }
+  switchMode('remote');
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) { el.value = val || ''; el.classList.remove('error'); }
+  };
+  setVal('f-domain', u.domain);   setVal('f-ip',   u.ip);
+  setVal('f-dc',     u.dc);       setVal('f-user',  u.username);
+  setVal('f-pass',   u.password); setVal('f-hash',  u.hash);
+  ['err-domain','err-ip','err-user','err-pass','err-hash'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('show');
+  });
+  if (u.protocol && ['winrm','psexec','smb','ssh'].includes(u.protocol)) selectProto(u.protocol);
+  updateAuthInputLockState();
+  const box = document.getElementById('saved-users-list');
+  if (box) box.style.display = 'none';
+  showToast(`Loaded saved user: ${u.username || 'unknown'}`, 'success');
+}
+
+async function saveSuccessfulUser(entry) {
+  try {
+    await fetch(`${API_BASE}/api/saved-users/save`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    });
+  } catch (err) {
+    addLog(`Saved user write failed: ${err.message}`, 'warn');
+  }
+}
+
+/* ── Security checker ── */
+function resetSecurityCheckerCacheForSession() {
+  securityCheckerSessionId++;
+  securityCheckerLastResults = { kerberos: null, ntlm: null, smb: null };
+}
+
+function closeSecurityStatusPanel() {
+  const modal = document.getElementById('status-modal-backdrop');
+  if (modal) modal.style.display = 'none';
+}
+
+function levelToClass(level, fallbackValue = null) {
+  const n = String(level || '').toLowerCase();
+  if (n === 'good') return 'green';
+  if (n === 'bad')  return 'red';
+  if (n === 'warn') return 'amber';
+  if (fallbackValue === true)  return 'green';
+  if (fallbackValue === false) return 'red';
+  return 'dim';
+}
+
+function buildCheckerItems(kind, data) {
+  const normalize = (label, entry, extra = '') => ({
+    label,
+    status:  entry?.status  || 'Unknown',
+    level:   entry?.level   || 'unknown',
+    value:   entry?.value,
+    details: entry?.details || '',
+    extra,
+  });
+
+  if (kind === 'kerberos') return [
+    normalize('KDC Port (TCP/88)',         data.kdc_port),
+    normalize('Encryption Types',          data.encryption_types),
+    normalize('Kerberos Armoring (FAST)',  data.kerberos_armoring_fast),
+    normalize('PAC Validation',            data.pac_validation),
+    normalize('Ticket Lifetime',           data.ticket_lifetime, data.ticket_lifetime?.hours ? `${data.ticket_lifetime.hours} hours` : ''),
+  ];
+  if (kind === 'ntlm') return [
+    normalize('NTLM Authentication',  data.ntlm_auth,             data.ntlm_auth?.error || ''),
+    normalize('SMB Port (TCP/445)',   data.smb_port),
+    normalize('NTLM Restriction',     data.ntlm_restriction),
+    normalize('Relay Protection (MIC)', data.relay_protection?.mic),
+    normalize('Relay Protection (EPA)', data.relay_protection?.epa),
+    normalize('LM Hash Storage',      data.lm_hash_storage),
+  ];
+  return [
+    normalize('SMB Signing',    data.smb_signing),
+    normalize('SMB Encryption', data.smb_encryption, data.smb_encryption?.supported === false ? 'SMB encryption unsupported by negotiated dialect' : ''),
+    normalize('Guest Access',   data.guest_access, Array.isArray(data.guest_access?.readable_shares) && data.guest_access.readable_shares.length ? `Readable shares: ${data.guest_access.readable_shares.join(', ')}` : ''),
+    normalize('SMBv1',          data.smbv1),
+    normalize('Share Permissions', data.share_permissions, Array.isArray(data.share_permissions?.sample_shares) && data.share_permissions.sample_shares.length ? `Sample shares: ${data.share_permissions.sample_shares.join(', ')}` : ''),
+  ];
+}
+
+function renderCheckerItems(checkItems = []) {
+  const cards = checkItems.filter(item => item?.label).map(item => {
+    const cls     = levelToClass(item.level, item.value);
+    const details = item.details ? `<p class="checker-line">${escapeHtml(item.details)}</p>` : '<p class="checker-line dim">No additional details from checker.</p>';
+    const extra   = item.extra   ? `<p class="checker-line"><strong>Info:</strong> ${escapeHtml(item.extra)}</p>` : '';
+    return `
+      <div class="status-info-card checker-metric-card">
+        <div class="checker-metric-head">
+          <h4>${escapeHtml(item.label)}</h4>
+          <span class="checker-pill ${cls}">${escapeHtml(item.status || 'Unknown')}</span>
+        </div>
+        <div class="checker-metric-body">${details}${extra}</div>
+      </div>`;
+  });
+  return `<div class="checker-grid checker-span-2">${cards.join('')}</div>`;
+}
+
+function renderCheckerSuccessPanel({ normalized, body, meta, stateText, stateClass, payload, endpoint, data }) {
+  const riskLevel     = data.risk_summary?.level || 'unknown';
+  const riskClass     = levelToClass(riskLevel);
+  const checkItems    = buildCheckerItems(normalized, data);
+  const checkerHtml   = renderCheckerItems(checkItems);
+  const target        = data.target || payload.ip || '—';
+  const totals        = checkItems.reduce((acc, item) => {
+    const cls = levelToClass(item.level, item.value);
+    if      (cls === 'green') acc.good++;
+    else if (cls === 'amber') acc.warn++;
+    else if (cls === 'red')   acc.bad++;
+    else                      acc.unknown++;
+    return acc;
+  }, { good: 0, warn: 0, bad: 0, unknown: 0 });
+
+  body.innerHTML = `
+    <div class="status-info-card checker-overview-card checker-span-2">
+      <h4>Security Overview</h4>
+      <div class="checker-overview-grid">
+        <div class="checker-overview-item"><span class="checker-overview-label">Target</span><span class="checker-overview-value">${escapeHtml(target)}</span></div>
+        <div class="checker-overview-item"><span class="checker-overview-label">Protocol</span><span class="checker-overview-value">${escapeHtml(meta.protocol || '—')}</span></div>
+        <div class="checker-overview-item"><span class="checker-overview-label">Risk</span><span class="checker-pill ${riskClass}">${escapeHtml(data.risk_summary?.status || 'Unknown')}</span></div>
+        <div class="checker-overview-item"><span class="checker-overview-label">Source</span><span class="checker-overview-value">${escapeHtml(meta.source || 'Unknown')}</span></div>
+      </div>
+      <div class="checker-counts">
+        <span class="checker-count-chip green">Good ${totals.good}</span>
+        <span class="checker-count-chip amber">Warn ${totals.warn}</span>
+        <span class="checker-count-chip red">Bad ${totals.bad}</span>
+        <span class="checker-count-chip dim">Unknown ${totals.unknown}</span>
+      </div>
+    </div>
+    <div class="status-info-card">
+      <h4>Current State</h4>
+      <p><strong>Status:</strong> <span class="checker-pill ${stateClass}">${escapeHtml(stateText)}</span></p>
+      <p><strong>Protocol:</strong> ${escapeHtml(meta.protocol || '—')}</p>
+      <p><strong>Detection Source:</strong> ${escapeHtml(meta.source || 'Unknown')}</p>
+    </div>
+    <div class="status-info-card">
+      <h4>Checker Summary</h4>
+      <p><strong>Target:</strong> ${escapeHtml(target)}</p>
+      <p><strong>Risk:</strong> <span class="checker-pill ${riskClass}">${escapeHtml(data.risk_summary?.status || 'Unknown')}</span></p>
+      <p><strong>Endpoint:</strong> ${escapeHtml(endpoint)}</p>
+    </div>
+    ${checkerHtml}
+    <div class="status-info-card checker-span-2">
+      <h4>Raw Output</h4>
+      <details class="checker-raw-details">
+        <summary>Show JSON response</summary>
+        <pre class="checker-raw-pre">${escapeHtml(JSON.stringify(data, null, 2))}</pre>
+      </details>
+    </div>`;
+
+  if (normalized === 'kerberos') {
+    const val = data.kdc_port?.value;
+    const el  = document.getElementById('stat-kerb');
+    if (el) { el.textContent = val === true ? 'Enabled' : val === false ? 'Disabled' : 'Unknown'; el.className = `stat-value ${val === true ? 'green' : val === false ? 'red' : 'dim'}`; }
+  } else if (normalized === 'ntlm') {
+    const val = data.ntlm_auth?.value;
+    const el  = document.getElementById('stat-ntlm');
+    if (el) { el.textContent = val === true ? 'Enabled' : val === false ? 'Disabled' : 'Unknown'; el.className = `stat-value ${val === true ? 'green' : val === false ? 'red' : 'dim'}`; }
+  } else if (normalized === 'smb') {
+    const val = data.smb_signing?.value;
+    const el  = document.getElementById('stat-smb');
+    if (el) { el.textContent = val === true ? 'Enabled' : val === false ? 'Disabled' : 'Unknown'; el.className = `stat-value ${val === true ? 'green' : val === false ? 'red' : 'dim'}`; }
+  }
+  refreshEnumerationProtocolPanel();
+}
+
+function checkerPanelConfig(kind) {
+  return ({
+    kerberos: { title: 'Kerberos Security Panel', intro: '' },
+    ntlm:     { title: 'NTLM Security Panel',     intro: '' },
+    smb:      { title: 'SMB Security Panel',      intro: '' },
+  }[kind] || { title: 'Security Panel', intro: '' });
+}
+
+function securityCheckerEndpoint(kind) {
+  return ({ kerberos: '/api/kerberos-check', ntlm: '/api/ntlm-check', smb: '/api/smb-check' }[kind] || '/api/kerberos-check');
+}
+
+async function openSecurityStatusPanel(kind) {
+  const modal = document.getElementById('status-modal-backdrop');
+  const title = document.getElementById('status-modal-title');
+  const body  = document.getElementById('status-modal-body');
+  if (!modal || !title || !body) return;
+
+  const normalized  = (kind || '').toLowerCase();
+  const cfg         = checkerPanelConfig(normalized);
+  const meta        = securityStatusMeta[normalized] || { value: null, source: 'Unknown', protocol: '—' };
+  const stateText   = meta.value === true ? 'Enabled' : meta.value === false ? 'Disabled' : 'Unknown';
+  const stateClass  = meta.value === true ? 'green'   : meta.value === false ? 'red'       : 'dim';
+
+  title.textContent = cfg.title;
+  modal.style.display = 'flex';
+
+  if (!state.connected) {
+    body.innerHTML = `<div class="status-info-card"><h4>Connection Required</h4><p>Please establish a session first, then run this check again.</p></div>`;
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="status-info-card">
+      <h4>Current State</h4>
+      <p><strong>Status:</strong> <span class="stat-value ${stateClass}" style="font-size:16px;">${escapeHtml(stateText)}</span></p>
+      <p><strong>Protocol:</strong> ${escapeHtml(meta.protocol || '—')}</p>
+      <p><strong>Detection Source:</strong> ${escapeHtml(meta.source || 'Unknown')}</p>
+    </div>
+    <div class="status-info-card">
+      <h4>Live Check</h4>
+      <p>${escapeHtml(cfg.intro)}</p>
+      <p>Checker is running, please wait...</p>
+    </div>`;
+
+  const payload  = buildEnumerationPayload();
+  const endpoint = securityCheckerEndpoint(normalized);
+  const cached   = securityCheckerLastResults[normalized];
+  if (cached && cached._sessionId === securityCheckerSessionId) {
+    renderCheckerSuccessPanel({ normalized, body, meta, stateText, stateClass, payload, endpoint, data: cached });
+    return;
+  }
+
+  try {
+    const resp = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) {
+      body.innerHTML = `<div class="status-info-card"><h4>Current State</h4><p><strong>Status:</strong> <span class="stat-value ${stateClass}" style="font-size:16px;">${escapeHtml(stateText)}</span></p></div><div class="status-info-card"><h4>Checker Failed</h4><p><strong>Error:</strong> ${escapeHtml(data.error || 'Checker request failed')}</p></div>`;
+      return;
+    }
+    data._sessionId = securityCheckerSessionId;
+    securityCheckerLastResults[normalized] = data;
+    renderCheckerSuccessPanel({ normalized, body, meta, stateText, stateClass, payload, endpoint, data });
+  } catch (err) {
+    body.innerHTML = `<div class="status-info-card"><h4>Current State</h4><p><strong>Status:</strong> <span class="stat-value ${stateClass}" style="font-size:16px;">${escapeHtml(stateText)}</span></p></div><div class="status-info-card"><h4>Request Failed</h4><p><strong>Error:</strong> ${escapeHtml(err.message || 'Checker request failed')}</p></div>`;
+  }
+}
+
+/* ── Quick security probe (on connect) ── */
+async function runQuickSecurityStatusProbe() {
+  if (!state.connected) return;
+  const payload = buildEnumerationPayload();
+  try {
+    const resp = await fetch(`${API_BASE}/api/security-status-quick`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) return;
+
+    if (typeof data.kerberos_enabled !== 'boolean') {
+      const targetIp = payload.ip || state.dc;
+      if (targetIp) {
+        try {
+          const kResp = await fetch(`${API_BASE}/api/test`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: targetIp, protocol: 'kerberos' }),
+          });
+          const kData = await kResp.json();
+          if (kResp.ok && kData?.port_open === true)  data.kerberos_enabled = true;
+          else if (kData?.port_open === false)         data.kerberos_enabled = false;
+        } catch (_) {}
+      }
+    }
+
+    updateStats({
+      ...data, domain: state.domain, dc: state.dc, username: state.user,
+      os_version: document.getElementById('stat-os')?.textContent || '—',
+      domain_level: document.getElementById('stat-level')?.textContent || '—',
+      counts: null,
+      meta: { profile_source: data.source || 'quick-port-probe' },
+    });
+    addLog('Quick security status probe completed (connect-time).', 'ok');
+  } catch (_) {
+    addLog('Quick security status probe skipped (backend unavailable).', 'warn');
+  }
+}
