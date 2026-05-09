@@ -1,4 +1,4 @@
-#include <algorithm>
+﻿#include <algorithm>
 #include <cstring>
 #include <cstdlib>
 #include <cmath>
@@ -892,7 +892,7 @@ int main(int argc, char* argv[]) {
     {
         std::filesystem::path p = engineDir;
         while (!p.empty() && p != p.parent_path()) {
-            if (p.filename().string() == "Oxsium-Framework") {
+            if (p.filename().string() == "Main") {
                 oxsiumRoot = p;
                 break;
             }
@@ -913,13 +913,13 @@ int main(int argc, char* argv[]) {
 
     if (oxsiumRoot.empty()) {
         oxsiumRoot = engineDir;
-        std::cerr << "[WARN] Could not locate Oxsium-Framework root automatically.\n"
+        std::cerr << "[WARN] Could not locate Main root automatically.\n"
                   << "       Falling back to exe directory: " << oxsiumRoot << "\n"
                   << "       Use --dangerous / --extended / --users / --computers / --groups\n"
                   << "       to specify file paths explicitly.\n";
     }
 
-    std::cout << "[*] Oxsium-Framework root : " << oxsiumRoot.string() << "\n";
+    std::cout << "[*] Main root : " << oxsiumRoot.string() << "\n";
 
     /* Keep repoRoot as an alias for backward compatibility */
     const std::filesystem::path& repoRoot = oxsiumRoot;
