@@ -110,11 +110,14 @@ def start_api_server(port=5100, host="localhost", base_dir=None):
         if not sid:
             return jsonify({"success": False, "error": "Missing sid"}), 400
 
-        base_path = Path(base_dir or Path(__file__).resolve().parent.parent)
-        engine_exe = base_path / "Engine" / "graph_engine.exe"
-        out_file = base_path / "Engine" / "graph_objects.json"
+        # Use the base_dir from outer scope (start_api_server parameter), or resolve it
+        actual_base = base_dir if base_dir else Path(__file__).resolve().parent.parent
+        actual_base = Path(actual_base).resolve()  # Ensure it's absolute
+        
+        engine_exe = actual_base / "Engine" / "graph_engine.exe"
+        out_file = actual_base / "Engine" / "graph_objects.json"
 
-        print(f"[Analyze] base_path={base_path}")
+        print(f"[Analyze] actual_base={actual_base}")
         print(f"[Analyze] engine_exe={engine_exe} exists={engine_exe.exists()}")
         print(f"[Analyze] out_file={out_file}")
 
@@ -127,17 +130,18 @@ def start_api_server(port=5100, host="localhost", base_dir=None):
             cmd += ["-n", name]
         
         # Always add default Hop-1 filters for vulnerable users (with full paths)
-        domain_obj_path = base_path / "Domain Object" / "domain_users.json"
+        domain_obj_path = actual_base / "Domain Object" / "domain_users.json"
         cmd += ["--hop1-filter", str(domain_obj_path), "kerberoastable", "true"]
         cmd += ["--hop1-filter", str(domain_obj_path), "asrep", "true"]
         cmd += ["--hop1-filter", str(domain_obj_path), "pwd_not_required", "true"]
         
         cmd += ["--out", str(out_file)]
 
-        print(f"[Analyze] Running engine command: {cmd} (cwd={base_path})")
+        print(f"[Analyze] Running engine command from cwd={actual_base}")
+        print(f"[Analyze] Command: {' '.join(cmd)}")
         result = subprocess.run(
             cmd,
-            cwd=str(base_path),
+            cwd=str(actual_base),
             capture_output=True,
             text=True,
         )

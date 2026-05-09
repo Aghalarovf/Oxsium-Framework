@@ -900,6 +900,19 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    /* Strategy 2: Look for parent of "Decision Engine" folder (which contains Main) */
+    if (oxsiumRoot.empty()) {
+        std::filesystem::path p = engineDir;
+        while (!p.empty() && p != p.parent_path()) {
+            if (p.filename().string() == "Decision Engine") {
+                /* Main is the parent of Decision Engine */
+                oxsiumRoot = p.parent_path();
+                break;
+            }
+            p = p.parent_path();
+        }
+    }
+
     if (oxsiumRoot.empty()) {
         std::filesystem::path p = engineDir;
         while (!p.empty() && p != p.parent_path()) {
