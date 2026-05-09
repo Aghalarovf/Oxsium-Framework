@@ -194,8 +194,8 @@ static bool install_via_winget() {
 
     info("Installing Python 3.12 via " + ansi::CYAN() + "winget" + ansi::RST() + " ...");
     std::cout << "\n";
-        // Use cmd.exe to invoke winget to avoid PowerShell parsing edge-cases
-        int rc = run("cmd /c \"winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements\"");
+    int rc = run("winget install -e --id Python.Python.3.12 "
+                 "--accept-package-agreements --accept-source-agreements");
     std::cout << "\n";
     if (rc != 0) {
         warn("winget install failed (exit code " + std::to_string(rc) + "). Trying fallback ...");
@@ -222,7 +222,7 @@ static bool install_via_powershell() {
        2. Run it silently                                           */
     const std::string ps_script =
         "$url  = 'https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe';"
-        "$dest = \"$env:TEMP\\\\python-3.12-installer.exe\";"
+        "$dest = $env:TEMP + '\\python-3.12-installer.exe';"
         "Write-Host '  Downloading ...';"
         "Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing;"
         "Write-Host '  Running installer (silent) ...';"
