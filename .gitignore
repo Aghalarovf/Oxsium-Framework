@@ -1,7 +1,6 @@
 *.json
 *.parquet
 
-# Environment and configuration
 .env
 .env.local
 .env.*.local
@@ -18,6 +17,7 @@ __pycache__/
 .venv/
 venv/
 env/
+oxsium/
 
 # OS/editor
 .DS_Store
