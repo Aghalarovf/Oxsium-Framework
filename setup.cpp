@@ -114,10 +114,15 @@ static void print_success(const fs::path& root) {
         << ansi::RST() << "\n\n";
 
     std::cout << ansi::BOLD() << "  Quick-start commands:" << ansi::RST() << "\n\n";
-    std::cout << "    " << ansi::CYAN()   << "python setup_connect.py"
-              << ansi::RST() << ansi::DIM() << "   =>  start the connection layer\n" << ansi::RST();
-    std::cout << "    " << ansi::CYAN()   << "python setup_decision.py"
-              << ansi::RST() << ansi::DIM() << "  =>  start the Flask decision server\n" << ansi::RST();
+    std::cout << "    " << ansi::CYAN()   << "python start.py"
+              << ansi::RST() << ansi::DIM() << "   =>  start all services (connection + decision + web)\n" << ansi::RST();
+    std::cout << "\n"
+              << "    " << ansi::CYAN()   << "python start.py --connection-port 5000 --decision-port 5001"
+              << ansi::RST() << ansi::DIM() << "\n" << ansi::RST();
+    std::cout << "    " << ansi::DIM() << "=>  specify custom ports\n" << ansi::RST();
+    std::cout << "\n"
+              << "    " << ansi::CYAN()   << "python start.py --http-port 8080"
+              << ansi::RST() << ansi::DIM() << "   =>  use custom HTTP port\n" << ansi::RST();
     std::cout << "\n"
               << ansi::DIM() << "  Virtual env : "
               << ansi::PATH_CLR() << (root / "oxsium").string()
@@ -682,13 +687,18 @@ static bool write_file(const fs::path& path, const std::string& content) {
     return static_cast<bool>(f);
 }
 
-static std::string launcher_template(const std::string& target_relative,
-                                     const std::string& extra_args) {
+static std::string start_py_template() {
     return
         "from __future__ import annotations\n\n"
+        "import argparse\n"
+        "import http.server\n"
         "import os\n"
+        "import socketserver\n"
         "import subprocess\n"
         "import sys\n"
+        "import threading\n"
+        "import time\n"
+        "import webbrowser\n"
         "from pathlib import Path\n\n\n"
         "ROOT = Path(__file__).resolve().parent\n"
         "VENV_PYTHON = (\n"
@@ -696,34 +706,138 @@ static std::string launcher_template(const std::string& target_relative,
         "    / (\"Scripts\" if os.name == \"nt\" else \"bin\")\n"
         "    / (\"python.exe\" if os.name == \"nt\" else \"python\")\n"
         ")\n"
-        "PYTHON = VENV_PYTHON if VENV_PYTHON.exists() else Path(sys.executable)\n"
-        "TARGET = ROOT / \"" + target_relative + "\"\n\n\n"
-        "def main() -> int:\n"
-        "    if not TARGET.exists():\n"
-        "        print(f\"Target not found: {TARGET}\")\n"
+        "PYTHON = VENV_PYTHON if VENV_PYTHON.exists() else Path(sys.executable)\n\n"
+        "CONNECTION_PY = ROOT / \"Main\" / \"connect\" / \"connection.py\"\n"
+        "DECISION_PY = ROOT / \"Main\" / \"Decision Engine\" / \"Helpers\" / \"root_principal.py\"\n"
+        "HTML_FILE = ROOT / \"Main\" / \"Oxsium-Framework.html\"\n\n\n"
+        "def get_default_connection_port():\n"
+        "    try:\n"
+        "        import importlib.util\n"
+        "        spec = importlib.util.spec_from_file_location('connection', CONNECTION_PY)\n"
+        "        module = importlib.util.module_from_spec(spec)\n"
+        "        spec.loader.exec_module(module)\n"
+        "        return getattr(module, 'PORT', 5000)\n"
+        "    except:\n"
+        "        return 5000\n\n"
+        "def get_default_decision_port():\n"
+        "    try:\n"
+        "        import importlib.util\n"
+        "        spec = importlib.util.spec_from_file_location('root_principal', DECISION_PY)\n"
+        "        module = importlib.util.module_from_spec(spec)\n"
+        "        spec.loader.exec_module(module)\n"
+        "        return getattr(module, 'PORT', 5001)\n"
+        "    except:\n"
+        "        return 5001\n\n"
+        "def run_server(port, html_file):\n"
+        "    class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):\n"
+        "        def log_message(self, format, *args):\n"
+        "            pass\n"
+        "\n"
+        "    os.chdir(str(html_file.parent))\n"
+        "    handler = MyHTTPRequestHandler\n"
+        "    with socketserver.TCPServer(('0.0.0.0', port), handler) as httpd:\n"
+        "        print(f'\\n  [HTTP] Server listening on http://127.0.0.1:{port}')\n"
+        "        httpd.serve_forever()\n\n"
+        "def open_browser(url, delay=2):\n"
+        "    def delayed_open():\n"
+        "        time.sleep(delay)\n"
+        "        try:\n"
+        "            webbrowser.open(url, new=1, autoraise=True)\n"
+        "        except:\n"
+        "            pass\n"
+        "    thread = threading.Thread(target=delayed_open, daemon=True)\n"
+        "    thread.start()\n\n"
+        "def main():\n"
+        "    parser = argparse.ArgumentParser(\n"
+        "        description='Start Oxsium Framework services'\n"
+        "    )\n"
+        "    parser.add_argument('--connection-ip', default='0.0.0.0',\n"
+        "                        help='IP for connection service (default: 0.0.0.0)')\n"
+        "    parser.add_argument('--connection-port', type=int, default=None,\n"
+        "                        help='Port for connection service')\n"
+        "    parser.add_argument('--decision-ip', default='0.0.0.0',\n"
+        "                        help='IP for decision server (default: 0.0.0.0)')\n"
+        "    parser.add_argument('--decision-port', type=int, default=None,\n"
+        "                        help='Port for decision server')\n"
+        "    parser.add_argument('--http-port', type=int, default=8000,\n"
+        "                        help='Port for HTTP server (default: 8000)')\n"
+        "    args = parser.parse_args()\n\n"
+        "    conn_port = args.connection_port or get_default_connection_port()\n"
+        "    dec_port = args.decision_port or get_default_decision_port()\n"
+        "    http_port = args.http_port\n\n"
+        "    print('\\n')\n"
+        "    print('  +==================================================+')\n"
+        "    print('  |         Oxsium Framework - Start Services        |')\n"
+        "    print('  +==================================================+')\n"
+        "    print('\\n')\n\n"
+        "    if not CONNECTION_PY.exists():\n"
+        "        print(f'  [ERROR] Connection module not found: {CONNECTION_PY}')\n"
         "        return 1\n"
-        "    return subprocess.call([str(PYTHON), str(TARGET)] + " + extra_args + ", cwd=str(ROOT))\n\n\n"
-        "if __name__ == \"__main__\":\n"
+        "    if not DECISION_PY.exists():\n"
+        "        print(f'  [ERROR] Decision module not found: {DECISION_PY}')\n"
+        "        return 1\n"
+        "    if not HTML_FILE.exists():\n"
+        "        print(f'  [WARN] HTML file not found: {HTML_FILE}')\n\n"
+        "    try:\n"
+        "        print(f'  [CONN] Starting connection service...')\n"
+        "        print(f'         IP: {args.connection_ip}:{conn_port}')\n"
+        "        conn_proc = subprocess.Popen(\n"
+        "            [str(PYTHON), str(CONNECTION_PY),\n"
+        "             '--ip', args.connection_ip,\n"
+        "             '--port', str(conn_port)],\n"
+        "            cwd=str(ROOT)\n"
+        "        )\n\n"
+        "        print(f'  [DEC]  Starting decision server...')\n"
+        "        print(f'         IP: {args.decision_ip}:{dec_port}')\n"
+        "        dec_proc = subprocess.Popen(\n"
+        "            [str(PYTHON), str(DECISION_PY), 'server',\n"
+        "             '--ip', args.decision_ip,\n"
+        "             '--port', str(dec_port)],\n"
+        "            cwd=str(ROOT)\n"
+        "        )\n\n"
+        "        print(f'  [HTTP] Starting HTTP server on port {http_port}...')\n"
+        "        http_thread = threading.Thread(\n"
+        "            target=run_server,\n"
+        "            args=(http_port, HTML_FILE),\n"
+        "            daemon=True\n"
+        "        )\n"
+        "        http_thread.start()\n\n"
+        "        url = f'http://127.0.0.1:{http_port}/Oxsium-Framework.html'\n"
+        "        print(f'  [BROWSER] Will open browser in 2 seconds...')\n"
+        "        print(f'  [URL] {url}\\n')\n"
+        "        open_browser(url, delay=2)\n\n"
+        "        print('  Services are running. Press Ctrl+C to stop.\\n')\n"
+        "        conn_proc.wait()\n"
+        "    except KeyboardInterrupt:\n"
+        "        print('\\n\\n  [STOP] Shutting down services...')\n"
+        "        try:\n"
+        "            conn_proc.terminate()\n"
+        "            dec_proc.terminate()\n"
+        "            conn_proc.wait(timeout=5)\n"
+        "            dec_proc.wait(timeout=5)\n"
+        "        except:\n"
+        "            conn_proc.kill()\n"
+        "            dec_proc.kill()\n"
+        "        print('  [OK] Services stopped.\\n')\n"
+        "        return 0\n"
+        "    except Exception as e:\n"
+        "        print(f'  [ERROR] {e}')\n"
+        "        return 1\n\n"
+        "if __name__ == '__main__':\n"
         "    raise SystemExit(main())\n";
 }
 
 static bool create_launchers(const fs::path& root) {
     bool ok1 = write_file(
-        root / "setup_connect.py",
-        launcher_template("Main/connect/connection.py", "[]")
+        root / "start.py",
+        start_py_template()
     );
-    bool ok2 = write_file(
-        root / "setup_decision.py",
-        launcher_template("Main/Decision Engine/Helpers/root_principal.py", "[\"server\"]")
-    );
-    if (!ok1 || !ok2) {
-        err("Failed to write launcher scripts.");
+    if (!ok1) {
+        err("Failed to write start.py script.");
         return false;
     }
-    ok("setup_connect.py  created");
-    bullet(ansi::DIM() + "=>  Main/connect/connection.py" + ansi::RST());
-    ok("setup_decision.py created");
-    bullet(ansi::DIM() + "=>  Main/Decision Engine/Helpers/root_principal.py  (Flask server)" + ansi::RST());
+    ok("start.py created");
+    bullet(ansi::DIM() + "=>  Unified launcher for connection & decision services" + ansi::RST());
     return true;
 }
 
