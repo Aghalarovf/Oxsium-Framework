@@ -132,6 +132,52 @@ static std::string quote(const fs::path& p) { return '"' + p.string() + '"'; }
 static int  run(const std::string& cmd)      { return std::system(cmd.c_str()); }
 static bool command_ok(const std::string& cmd) { return run(cmd + " >nul 2>&1") == 0; }
 
+#ifdef _WIN32
+/* ── run_direct ───────────────────────────────────────────────────────────
+   Launches  exe  with  args  directly via CreateProcess — no cmd.exe shell
+   in between.  This avoids the "filename/directory/volume label syntax is
+   incorrect" error that cmd.exe raises when a quoted executable path that
+   contains spaces is followed by additional quoted arguments.
+
+   exe   : full path to the executable  (e.g. C:\Program Files\Python312\python.exe)
+   args  : the rest of the command line  (e.g. -m venv C:\some\path)
+   Returns the process exit code, or -1 on launch failure.
+   ──────────────────────────────────────────────────────────────────────── */
+static int run_direct(const fs::path& exe, const std::string& args)
+{
+    /* CreateProcess wants a mutable command-line buffer that begins with
+       the (quoted) executable followed by a space and the arguments.     */
+    std::string cmdline = '"' + exe.string() + '"';
+    if (!args.empty()) { cmdline += ' '; cmdline += args; }
+
+    STARTUPINFOW        si{};
+    PROCESS_INFORMATION pi{};
+    si.cb = sizeof(si);
+
+    std::wstring wcmd(cmdline.begin(), cmdline.end());
+
+    BOOL launched = CreateProcessW(
+        exe.wstring().c_str(),   // lpApplicationName  — bypasses shell lookup
+        wcmd.data(),             // lpCommandLine      — mutable buffer
+        nullptr, nullptr,
+        FALSE,                   // bInheritHandles
+        0,                       // dwCreationFlags
+        nullptr,                 // lpEnvironment      — inherit parent env
+        nullptr,                 // lpCurrentDirectory — inherit CWD
+        &si, &pi
+    );
+
+    if (!launched) return -1;
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exit_code = 1;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return static_cast<int>(exit_code);
+}
+#endif
+
 /* ── project root ─────────────────────────────────────────────────────── */
 
 static fs::path locate_root(const fs::path& start) {
@@ -535,21 +581,36 @@ static bool create_virtual_environment(const fs::path& root) {
         return false;
     }
 
-    /* Quote the venv destination so spaces in the project root are safe. */
-    const fs::path   venv_dir    = root / "oxsium";
-    const std::string venv_quoted = quote(venv_dir);
+    const fs::path venv_dir = root / "oxsium";
 
     info("Creating virtual environment " + ansi::CYAN() + "oxsium" + ansi::RST() + " ...");
-    bullet(ansi::DIM() + interp + " -m venv " + venv_quoted + ansi::RST());
 
-    /* system() already goes through the Windows shell; avoid adding an
-       extra cmd /c layer because it can break quoted executable paths.   */
-    const std::string cmd = interp + " -m venv " + venv_quoted;
-    const int rc = run(cmd);
+    int rc;
+#ifdef _WIN32
+    /* Use CreateProcess directly — bypasses cmd.exe so a python.exe path
+       that contains spaces (e.g. C:\Program Files\Python312\python.exe)
+       is passed as the application name, not as a shell token.  The venv
+       destination is passed as a plain (unquoted) argument; CreateProcess
+       does not go through cmd.exe tokenisation, so no extra quoting is
+       needed and the "filename/directory syntax is incorrect" error never
+       occurs.                                                             */
+    if (interp_path != fs::path("python") && interp_path != fs::path("py -3")) {
+        bullet(ansi::DIM() + interp_path.string() + " -m venv " + venv_dir.string() + ansi::RST());
+        rc = run_direct(interp_path, "-m venv "" + venv_dir.string() + """);
+    } else {
+        /* Fallback: interpreter is just "python" or "py -3" — use system() */
+        const std::string cmd = interp + " -m venv "" + venv_dir.string() + """;
+        bullet(ansi::DIM() + cmd + ansi::RST());
+        rc = run(cmd);
+    }
+#else
+    const std::string cmd = interp + " -m venv "" + venv_dir.string() + """;
+    bullet(ansi::DIM() + cmd + ansi::RST());
+    rc = run(cmd);
+#endif
+
     if (rc != 0) {
         err("Failed to create virtual environment.");
-        bullet("Command was: " + cmd);
-        /* ── NEW: detailed diagnostic ── */
         diagnose_venv_failure(interp_path, venv_dir, rc);
         return false;
     }
