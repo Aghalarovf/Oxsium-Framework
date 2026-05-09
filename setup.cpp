@@ -360,18 +360,41 @@ static bool create_virtual_environment(const fs::path& root) {
         bullet(ansi::PATH_CLR() + (root / "oxsium").string() + ansi::RST());
         return true;
     }
-    std::string interp = python_command(root);
-    if (interp.empty()) {
-        err("No Python interpreter found — cannot create virtual environment.");
+
+    /* Resolve interpreter: prefer explicit full path so a freshly-installed
+       Python (not yet in the current process PATH cache) is found reliably. */
+    fs::path interp_path = find_python_exe();
+    std::string interp;
+    if (!interp_path.empty()
+        && interp_path != fs::path("python")
+        && interp_path != fs::path("py -3")) {
+        interp = quote(interp_path);        // full path, always works
+    } else if (py_launcher_exists()) {
+        interp = "py -3";
+    } else if (python_exists()) {
+        interp = "python";
+    } else {
+        err("No Python interpreter found \u2014 cannot create virtual environment.");
         return false;
     }
+
+    /* Quote the venv destination so spaces in the project root are safe. */
+    const fs::path   venv_dir    = root / "oxsium";
+    const std::string venv_quoted = quote(venv_dir);
+
     info("Creating virtual environment " + ansi::CYAN() + "oxsium" + ansi::RST() + " ...");
-    if (run(interp + " -m venv " + quote(root / "oxsium")) != 0) {
+    bullet(ansi::DIM() + interp + " -m venv " + venv_quoted + ansi::RST());
+
+    /* cmd /c ensures the freshly-updated PATH from the Python installer
+       is visible even inside the current console session.                */
+    const std::string cmd = "cmd /c " + interp + " -m venv " + venv_quoted;
+    if (run(cmd) != 0) {
         err("Failed to create virtual environment.");
+        bullet("Command was: " + cmd);
         return false;
     }
     ok("Virtual environment created.");
-    bullet(ansi::PATH_CLR() + (root / "oxsium").string() + ansi::RST());
+    bullet(ansi::PATH_CLR() + venv_dir.string() + ansi::RST());
     return true;
 }
 
