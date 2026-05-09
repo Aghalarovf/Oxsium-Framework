@@ -194,8 +194,8 @@ static bool install_via_winget() {
 
     info("Installing Python 3.12 via " + ansi::CYAN() + "winget" + ansi::RST() + " ...");
     std::cout << "\n";
-    int rc = run("winget install -e --id Python.Python.3.12 "
-                 "--accept-package-agreements --accept-source-agreements");
+        // Use cmd.exe to invoke winget to avoid PowerShell parsing edge-cases
+        int rc = run("cmd /c \"winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements\"");
     std::cout << "\n";
     if (rc != 0) {
         warn("winget install failed (exit code " + std::to_string(rc) + "). Trying fallback ...");
