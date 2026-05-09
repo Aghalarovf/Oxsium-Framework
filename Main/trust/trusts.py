@@ -260,7 +260,7 @@ def get_domain_trusts(ip, domain, username, password, config):
 
         # ── domain_trusts.json-a yaz ─────────────────────────────────────────
         output_path = os.path.join(
-            getattr(config, "OUTPUT_DIR", "."), "domain_trusts.json"
+            str(config.DOMAIN_OBJECT_DIR), "domain_trusts.json"
         )
         try:
             with open(output_path, "w", encoding="utf-8") as f:

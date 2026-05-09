@@ -439,7 +439,7 @@ def get_domain_ous(ip, domain, username, password, config):
 
         # ── domain_ous.json-a yaz ────────────────────────────────────────────
         output_path = os.path.join(
-            getattr(config, "OUTPUT_DIR", "."), "domain_ous.json"
+            str(config.DOMAIN_OBJECT_DIR), "domain_ous.json"
         )
         try:
             with open(output_path, "w", encoding="utf-8") as f:

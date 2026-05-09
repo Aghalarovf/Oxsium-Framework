@@ -295,7 +295,7 @@ def get_domain_groups(ip, domain, username, password, config):
 
         # ── domain_groups.json-a yaz ─────────────────────────────────────────
         output_path = os.path.join(
-            getattr(config, "OUTPUT_DIR", "."), "domain_groups.json"
+            str(config.DOMAIN_OBJECT_DIR), "domain_groups.json"
         )
         try:
             with open(output_path, "w", encoding="utf-8") as f:
