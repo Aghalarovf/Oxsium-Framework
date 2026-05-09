@@ -222,7 +222,7 @@ static bool install_via_powershell() {
        2. Run it silently                                           */
     const std::string ps_script =
         "$url  = 'https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe';"
-        "$dest = \"$env:TEMP\\python-3.12-installer.exe\";"
+        "$dest = \"$env:TEMP\\\\python-3.12-installer.exe\";"
         "Write-Host '  Downloading ...';"
         "Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing;"
         "Write-Host '  Running installer (silent) ...';"
@@ -465,13 +465,16 @@ static bool create_launchers(const fs::path& root) {
    Entry point
    ══════════════════════════════════════════════════════════════════════════ */
 
-int main(int argc, char* argv[]) {
+int main() {
     ansi::init();
     print_banner();
 
-    const fs::path exe_path = (argc > 0)
-        ? fs::absolute(argv[0])
-        : fs::current_path() / "setup.exe";
+    /* Use current_path() as the reliable root — argv[0] can be a bare name
+       like "setup.exe" with no directory component when launched from the
+       same folder, which makes fs::absolute resolve relative to CWD anyway;
+       using current_path() directly avoids the ambiguity and any 8.3 short-
+       path issue on older Windows builds. */
+    const fs::path exe_path = fs::current_path() / "setup.exe";
 
     const fs::path root = locate_root(exe_path.parent_path());
     std::cout << ansi::DIM() << "  Project root : "
