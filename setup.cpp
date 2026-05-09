@@ -601,15 +601,15 @@ static bool create_virtual_environment(const fs::path& root) {
        occurs.                                                             */
     if (interp_path != fs::path("python") && interp_path != fs::path("py -3")) {
         bullet(ansi::DIM() + interp_path.string() + " -m venv " + venv_dir.string() + ansi::RST());
-        rc = run_direct(interp_path, "-m venv "" + venv_dir.string() + """);
+        rc = run_direct(interp_path, "-m venv \"" + venv_dir.string() + "\"");
     } else {
         /* Fallback: interpreter is just "python" or "py -3" — use system() */
-        const std::string cmd = interp + " -m venv "" + venv_dir.string() + """;
+        const std::string cmd = interp + " -m venv \"" + venv_dir.string() + "\"";
         bullet(ansi::DIM() + cmd + ansi::RST());
         rc = run(cmd);
     }
 #else
-    const std::string cmd = interp + " -m venv "" + venv_dir.string() + """;
+    const std::string cmd = interp + " -m venv \"" + venv_dir.string() + "\"";
     bullet(ansi::DIM() + cmd + ansi::RST());
     rc = run(cmd);
 #endif
