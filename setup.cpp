@@ -27,6 +27,10 @@ static bool enabled = true;
 
 static void init() {
 #ifdef _WIN32
+    /* Switch console to UTF-8 so box-drawing chars render correctly */
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+
     HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD  mode = 0;
     if (GetConsoleMode(h, &mode)) {
@@ -76,15 +80,15 @@ static void info(const std::string& msg) {
     std::cout << "  " << ansi::INFO_TAG() << "[INFO]" << ansi::RST() << "  " << msg << "\n";
 }
 static void bullet(const std::string& msg) {
-    std::cout << "         " << ansi::DIM() << "»" << ansi::RST() << "  " << msg << "\n";
+    std::cout << "         " << ansi::DIM() << ">>" << ansi::RST() << "  " << msg << "\n";
 }
 
 static void step_header(int n, const std::string& title) {
     std::cout << "\n"
               << ansi::HDR()
-              << "  ┌─ Step " << n << " ─────────────────────────────────────────┐\n"
-              << "  │  " << ansi::WHITE() << title << ansi::HDR() << "\n"
-              << "  └────────────────────────────────────────────────┘"
+              << "  +-- Step " << n << " ------------------------------------------+\n"
+              << "  |  " << ansi::WHITE() << title << ansi::HDR() << "\n"
+              << "  +--------------------------------------------------+"
               << ansi::RST() << "\n\n";
 }
 
@@ -92,10 +96,10 @@ static void print_banner() {
     std::cout
         << "\n"
         << ansi::HDR()
-        << "  ╔══════════════════════════════════════════════════╗\n"
-        << "  ║       " << ansi::WHITE() << "Oxsium Framework  —  Setup Installer"
-        << ansi::HDR()  << "       ║\n"
-        << "  ╚══════════════════════════════════════════════════╝"
+        << "  +==================================================+\n"
+        << "  |       " << ansi::WHITE() << "Oxsium Framework  -  Setup Installer"
+        << ansi::HDR()  << "       |\n"
+        << "  +==================================================+"
         << ansi::RST()  << "\n\n";
 }
 
@@ -103,17 +107,17 @@ static void print_success(const fs::path& root) {
     std::cout
         << "\n"
         << ansi::OK_TAG()
-        << "  ╔══════════════════════════════════════════════════╗\n"
-        << "  ║       " << ansi::WHITE() << "Installation completed successfully!"
-        << ansi::OK_TAG() << "       ║\n"
-        << "  ╚══════════════════════════════════════════════════╝"
+        << "  +==================================================+\n"
+        << "  |       " << ansi::WHITE() << "Installation completed successfully! "
+        << ansi::OK_TAG() << "       |\n"
+        << "  +==================================================+"
         << ansi::RST() << "\n\n";
 
-    std::cout << ansi::BOLD() << "  Quick start commands:" << ansi::RST() << "\n\n";
+    std::cout << ansi::BOLD() << "  Quick-start commands:" << ansi::RST() << "\n\n";
     std::cout << "    " << ansi::CYAN()   << "python setup_connect.py"
-              << ansi::RST() << ansi::DIM() << "   →  start the connection layer\n" << ansi::RST();
+              << ansi::RST() << ansi::DIM() << "   =>  start the connection layer\n" << ansi::RST();
     std::cout << "    " << ansi::CYAN()   << "python setup_decision.py"
-              << ansi::RST() << ansi::DIM() << "  →  start the Flask decision server\n" << ansi::RST();
+              << ansi::RST() << ansi::DIM() << "  =>  start the Flask decision server\n" << ansi::RST();
     std::cout << "\n"
               << ansi::DIM() << "  Virtual env : "
               << ansi::PATH_CLR() << (root / "oxsium").string()
@@ -182,6 +186,100 @@ static fs::path find_python_exe() {
 
 /* ── Python installer ─────────────────────────────────────────────────── */
 
+/*
+ * Method 1 — winget (Windows 10 1709+ / Windows 11)
+ */
+static bool install_via_winget() {
+    if (!command_ok("winget --version")) return false;
+
+    info("Installing Python 3.12 via " + ansi::CYAN() + "winget" + ansi::RST() + " ...");
+    std::cout << "\n";
+    int rc = run("winget install -e --id Python.Python.3.12 "
+                 "--accept-package-agreements --accept-source-agreements");
+    std::cout << "\n";
+    if (rc != 0) {
+        warn("winget install failed (exit code " + std::to_string(rc) + "). Trying fallback ...");
+        return false;
+    }
+    ok("Python 3.12 installed via winget.");
+    return true;
+}
+
+/*
+ * Method 2 — PowerShell Invoke-WebRequest
+ *   Downloads the official python.org installer to %TEMP% and runs it silently.
+ *   /quiet         — completely silent
+ *   PrependPath=1  — adds python.exe to PATH automatically
+ *   InstallAllUsers=0 — per-user install (no admin needed)
+ */
+static bool install_via_powershell() {
+    if (!command_ok("powershell -Command \"exit 0\"")) return false;
+
+    info("Downloading Python 3.12 installer via " + ansi::CYAN() + "PowerShell" + ansi::RST() + " ...");
+
+    /* Build the PowerShell one-liner:
+       1. Download installer to %TEMP%\python-3.12-installer.exe
+       2. Run it silently                                           */
+    const std::string ps_script =
+        "$url  = 'https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe';"
+        "$dest = \"$env:TEMP\\python-3.12-installer.exe\";"
+        "Write-Host '  Downloading ...';"
+        "Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing;"
+        "Write-Host '  Running installer (silent) ...';"
+        "Start-Process -FilePath $dest "
+        "  -ArgumentList '/quiet','InstallAllUsers=0','PrependPath=1','Include_test=0' "
+        "  -Wait -NoNewWindow;"
+        "Remove-Item $dest -Force";
+
+    std::string cmd = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"" + ps_script + "\"";
+    std::cout << "\n";
+    int rc = run(cmd);
+    std::cout << "\n";
+    if (rc != 0) {
+        warn("PowerShell download failed (exit code " + std::to_string(rc) + "). Trying fallback ...");
+        return false;
+    }
+    ok("Python 3.12 installed via PowerShell.");
+    return true;
+}
+
+/*
+ * Method 3 — curl (ships with Windows 10 1803+)
+ *   curl downloads the installer; then we run it silently with cmd /c start /wait
+ */
+static bool install_via_curl() {
+    if (!command_ok("curl --version")) return false;
+
+    info("Downloading Python 3.12 installer via " + ansi::CYAN() + "curl" + ansi::RST() + " ...");
+
+    /* %TEMP% expands correctly inside cmd /c */
+    const std::string download_cmd =
+        "curl -L --progress-bar "
+        "-o \"%TEMP%\\python-3.12-installer.exe\" "
+        "https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe";
+
+    std::cout << "\n";
+    if (run(download_cmd) != 0) {
+        std::cout << "\n";
+        warn("curl download failed. Trying fallback ...");
+        return false;
+    }
+
+    info("Running installer silently ...");
+    std::cout << "\n";
+    int rc = run("cmd /c start /wait \"\" "
+                 "\"%TEMP%\\python-3.12-installer.exe\" "
+                 "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0");
+    run("del /f /q \"%TEMP%\\python-3.12-installer.exe\" >nul 2>&1");
+    std::cout << "\n";
+    if (rc != 0) {
+        warn("curl installer failed (exit code " + std::to_string(rc) + ").");
+        return false;
+    }
+    ok("Python 3.12 installed via curl.");
+    return true;
+}
+
 static bool install_python() {
     warn("Python was not found on this system.");
     std::cout << "\n  " << ansi::BOLD()
@@ -203,24 +301,17 @@ static bool install_python() {
         return false;
     }
 
-    if (!command_ok("winget --version")) {
-        err("winget not found — cannot install automatically.");
-        bullet("Download manually: " + ansi::CYAN() + "https://www.python.org/downloads/" + ansi::RST());
-        return false;
-    }
+    /* Try each method in order — stop at the first success */
+    if (install_via_winget())     return true;
+    if (install_via_powershell()) return true;
+    if (install_via_curl())       return true;
 
-    info("Downloading and installing Python 3.12 via winget ...");
+    /* All methods failed */
+    err("All automatic installation methods failed.");
+    bullet("Please install manually: " + ansi::CYAN() + "https://www.python.org/downloads/" + ansi::RST());
+    bullet("Then re-run setup.exe.");
     std::cout << "\n";
-    int rc = run("winget install -e --id Python.Python.3.12 "
-                 "--accept-package-agreements --accept-source-agreements");
-    if (rc != 0) {
-        std::cout << "\n";
-        err("winget installation failed (exit code " + std::to_string(rc) + ").");
-        return false;
-    }
-    std::cout << "\n";
-    ok("Python 3.12 installed successfully.");
-    return true;
+    return false;
 }
 
 static bool ensure_python() {
@@ -364,9 +455,9 @@ static bool create_launchers(const fs::path& root) {
         return false;
     }
     ok("setup_connect.py  created");
-    bullet(ansi::DIM() + "→  Main/connect/connection.py" + ansi::RST());
+    bullet(ansi::DIM() + "=>  Main/connect/connection.py" + ansi::RST());
     ok("setup_decision.py created");
-    bullet(ansi::DIM() + "→  Main/Decision Engine/Helpers/root_principal.py  (Flask server)" + ansi::RST());
+    bullet(ansi::DIM() + "=>  Main/Decision Engine/Helpers/root_principal.py  (Flask server)" + ansi::RST());
     return true;
 }
 
