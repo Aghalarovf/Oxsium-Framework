@@ -627,13 +627,35 @@ static bool install_requirements(const fs::path& root) {
         err("requirements.txt not found: " + req.string());
         return false;
     }
-    std::string interp = quote(venv_python(root));
-    if (!fs::exists(venv_python(root))) interp = python_command(root);
-    if (interp.empty()) return false;
+
+    /* Resolve the Python interpreter to a concrete fs::path so we can
+       use run_direct() and bypass cmd.exe entirely.  This avoids the
+       "'C:\Program' is not recognized" error that occurs when python.exe
+       lives under C:\Program Files\ and system() passes the quoted path
+       through cmd.exe tokenisation.                                       */
+    fs::path interp_path = venv_python(root);
+    if (!fs::exists(interp_path)) {
+        interp_path = find_python_exe();
+        if (interp_path.empty() || interp_path == fs::path("python")
+                                || interp_path == fs::path("py -3")) {
+            err("No usable Python interpreter found for pip.");
+            return false;
+        }
+    }
+
+#ifdef _WIN32
+    auto pip_run = [&](const std::string& args) -> int {
+        return run_direct(interp_path, args);
+    };
+#else
+    auto pip_run = [&](const std::string& args) -> int {
+        return run("\"" + interp_path.string() + "\" " + args);
+    };
+#endif
 
     info("Upgrading pip, setuptools and wheel ...");
     std::cout << "\n";
-    if (run(interp + " -m pip install --upgrade pip setuptools wheel") != 0) {
+    if (pip_run("-m pip install --upgrade pip setuptools wheel") != 0) {
         std::cout << "\n";
         err("Failed to upgrade pip.");
         return false;
@@ -641,7 +663,7 @@ static bool install_requirements(const fs::path& root) {
     std::cout << "\n";
     info("Installing packages from requirements.txt ...");
     std::cout << "\n";
-    if (run(interp + " -m pip install -r " + quote(req)) != 0) {
+    if (pip_run("-m pip install -r \"" + req.string() + "\"") != 0) {
         std::cout << "\n";
         err("Failed to install requirements.");
         return false;
