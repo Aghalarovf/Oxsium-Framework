@@ -195,7 +195,9 @@ static bool install_via_winget() {
     info("Installing Python 3.12 via " + ansi::CYAN() + "winget" + ansi::RST() + " ...");
     std::cout << "\n";
     int rc = run("winget install -e --id Python.Python.3.12 "
-                 "--accept-package-agreements --accept-source-agreements");
+                 "--accept-package-agreements --accept-source-agreements "
+                 "--override \"/quiet InstallAllUsers=1 PrependPath=1 "
+                 "Include_pip=1 Include_lib=1 Include_test=0\"");
     std::cout << "\n";
     if (rc != 0) {
         warn("winget install failed (exit code " + std::to_string(rc) + "). Trying fallback ...");
@@ -209,8 +211,11 @@ static bool install_via_winget() {
  * Method 2 — PowerShell Invoke-WebRequest
  *   Downloads the official python.org installer to %TEMP% and runs it silently.
  *   /quiet         — completely silent
+ *   InstallAllUsers=1  — system-wide install (ensures full stdlib + ensurepip)
  *   PrependPath=1  — adds python.exe to PATH automatically
- *   InstallAllUsers=0 — per-user install (no admin needed)
+ *   Include_pip=1  — force-include pip (prevents ensurepip missing error)
+ *   Include_lib=1  — include standard library (required for venv)
+ *   Include_test=0 — skip test suite to save space
  */
 static bool install_via_powershell() {
     if (!command_ok("powershell -Command \"exit 0\"")) return false;
@@ -227,7 +232,8 @@ static bool install_via_powershell() {
         "Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing;"
         "Write-Host '  Running installer (silent) ...';"
         "Start-Process -FilePath $dest "
-        "  -ArgumentList '/quiet','InstallAllUsers=0','PrependPath=1','Include_test=0' "
+        "  -ArgumentList '/quiet','InstallAllUsers=1','PrependPath=1',"
+        "    'Include_pip=1','Include_lib=1','Include_test=0' "
         "  -Wait -NoNewWindow;"
         "Remove-Item $dest -Force";
 
@@ -269,7 +275,7 @@ static bool install_via_curl() {
     std::cout << "\n";
     int rc = run("cmd /c start /wait \"\" "
                  "\"%TEMP%\\python-3.12-installer.exe\" "
-                 "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0");
+                 "/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1 Include_lib=1 Include_test=0");
     run("del /f /q \"%TEMP%\\python-3.12-installer.exe\" >nul 2>&1");
     std::cout << "\n";
     if (rc != 0) {
