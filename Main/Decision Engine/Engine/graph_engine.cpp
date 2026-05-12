@@ -185,6 +185,7 @@ struct AceStep {
     std::string              target_type;
     std::string              principal_sid;
     std::string              principal_name;
+    std::string              principal_type;
     std::string              object_acetype;
     std::string              ace_qualifier;
     std::vector<std::string> rights;
@@ -443,6 +444,216 @@ static std::vector<AceRecord> mergeAceRecords(std::vector<AceRecord> in) {
     return out;
 }
 
+static std::string trimTrailingDollar(std::string value) {
+    while (!value.empty() && value.back() == '$')
+        value.pop_back();
+    return value;
+}
+
+struct RbcdComputer {
+    std::string              sid;
+    std::string              name;
+    std::string              dn;
+    std::vector<std::string> principals;
+};
+
+struct PrivGroup {
+    std::string sid;
+    std::string name;
+    std::string dn;
+    long        primaryToken = -1;
+};
+
+static std::vector<PrivGroup> extractPrivilegedGroups(const JsonArr& groupsArr) {
+    std::vector<PrivGroup> out;
+    for (const JsonVal& entry : groupsArr) {
+        if (!entry.isObj()) continue;
+        const JsonVal* isPriv = entry.find("is_privileged");
+        if (!isPriv || !isPriv->isBool() || !isPriv->b) continue;
+
+        PrivGroup g;
+        g.sid = getStr(entry, "sid");
+        g.name = getStr(entry, "group_name");
+        if (g.name.empty()) g.name = getStr(entry, "name");
+        g.dn  = getStr(entry, "dn");
+
+        const JsonVal* token = entry.find("primary_group_token");
+        if (token && token->isNum()) g.primaryToken = static_cast<long>(token->n);
+
+        if (g.sid.empty() || g.primaryToken < 0) continue;
+        out.push_back(std::move(g));
+    }
+    return out;
+}
+
+static std::vector<RbcdComputer> extractRbcdComputers(const JsonArr& computersArr) {
+    std::vector<RbcdComputer> out;
+
+    for (const JsonVal& entry : computersArr) {
+        if (!entry.isObj()) continue;
+
+        const JsonVal* rbcdEnabled = entry.find("rbcd_enabled");
+        if (!rbcdEnabled || !rbcdEnabled->isBool() || !rbcdEnabled->b)
+            continue;
+
+        RbcdComputer computer;
+        computer.sid = getStr(entry, "sid");
+        computer.name = trimTrailingDollar(getStr(entry, "computer_name"));
+        if (computer.name.empty())
+            computer.name = trimTrailingDollar(getStr(entry, "name"));
+        if (computer.name.empty())
+            computer.name = trimTrailingDollar(getStr(entry, "dns_name"));
+        computer.dn  = getStr(entry, "dn");
+
+        const JsonVal* principals = entry.find("rbcd_principals");
+        if (principals && principals->isArr()) {
+            for (const JsonVal& p : principals->arr) {
+                if (p.isStr() && !p.str().empty())
+                    computer.principals.push_back(p.str());
+            }
+        }
+
+        if (computer.sid.empty() || computer.principals.empty())
+            continue;
+
+        out.push_back(std::move(computer));
+    }
+
+    return out;
+}
+
+static void collectNodeIndexFromStep(
+        const AceStep& step,
+        std::map<std::string, std::pair<std::string, std::string>>& index)
+{
+    if (!step.target_sid.empty() && !index.count(step.target_sid))
+        index[step.target_sid] = {step.target_name, step.target_type};
+    for (const AceStep& child : step.next_step)
+        collectNodeIndexFromStep(child, index);
+}
+
+static void collectNodeIndexFromRecord(
+        const AceRecord& record,
+        std::map<std::string, std::pair<std::string, std::string>>& index)
+{
+    if (!record.target_sid.empty() && !index.count(record.target_sid))
+        index[record.target_sid] = {record.target_name, record.target_type};
+    for (const AceStep& step : record.next_step)
+        collectNodeIndexFromStep(step, index);
+}
+
+static size_t attachRbcdEdgesToSteps(
+        std::vector<AceStep>& stepList,
+        const std::map<std::string, std::vector<RbcdComputer>>& rbcdByPrincipal,
+        const std::map<std::string, std::pair<std::string, std::string>>& nodeIndex,
+        const JsonArr& usersArr,
+        const SidLookup& userLut,
+        const JsonArr& computersArr,
+        const SidLookup& computerLut,
+        const JsonArr& groupsArr,
+        const SidLookup& groupLut,
+        size_t& attachedCount)
+{
+    size_t localCount = 0;
+
+    for (AceStep& step : stepList) {
+        auto principalIt = rbcdByPrincipal.find(step.target_sid);
+        if (principalIt != rbcdByPrincipal.end()) {
+            for (const RbcdComputer& computer : principalIt->second) {
+                AceStep rbcdStep;
+                rbcdStep.target_name    = computer.name.empty() ? computer.sid : computer.name;
+                rbcdStep.target_sid     = computer.sid;
+                rbcdStep.target_dn      = computer.dn;
+                rbcdStep.target_type    = "Computer";
+                rbcdStep.principal_sid  = step.target_sid;
+                rbcdStep.principal_type = step.target_type.empty() ? "User" : step.target_type;
+                if (auto infoIt = nodeIndex.find(step.target_sid); infoIt != nodeIndex.end() && !infoIt->second.first.empty())
+                    rbcdStep.principal_name = infoIt->second.first;
+                else
+                    rbcdStep.principal_name = step.target_name.empty() ? step.target_sid : step.target_name;
+                rbcdStep.object_acetype = "rbcd";
+                rbcdStep.ace_qualifier  = "Allow";
+                rbcdStep.rights         = {"RBCD"};
+                rbcdStep.rights_display = "RBCD";
+                rbcdStep.edge_rights    = {"RBCD"};
+                rbcdStep.source_file    = "rbcd";
+                rbcdStep.target_attributes = lookupAttrs(computer.sid, "Computer",
+                                                         usersArr, userLut,
+                                                         computersArr, computerLut,
+                                                         groupsArr, groupLut);
+
+                step.next_step.push_back(std::move(rbcdStep));
+                ++localCount;
+                ++attachedCount;
+            }
+        }
+
+        localCount += attachRbcdEdgesToSteps(step.next_step, rbcdByPrincipal, nodeIndex,
+                                             usersArr, userLut,
+                                             computersArr, computerLut,
+                                             groupsArr, groupLut,
+                                             attachedCount);
+    }
+
+    return localCount;
+}
+
+static size_t attachRbcdEdgesToRecords(
+        std::vector<AceRecord>& records,
+        const std::map<std::string, std::vector<RbcdComputer>>& rbcdByPrincipal,
+        const std::map<std::string, std::pair<std::string, std::string>>& nodeIndex,
+        const JsonArr& usersArr,
+        const SidLookup& userLut,
+        const JsonArr& computersArr,
+        const SidLookup& computerLut,
+        const JsonArr& groupsArr,
+        const SidLookup& groupLut,
+        size_t& attachedCount)
+{
+    size_t localCount = 0;
+
+    for (AceRecord& record : records) {
+        auto principalIt = rbcdByPrincipal.find(record.target_sid);
+        if (principalIt != rbcdByPrincipal.end()) {
+            for (const RbcdComputer& computer : principalIt->second) {
+                AceStep rbcdStep;
+                rbcdStep.target_name    = computer.name.empty() ? computer.sid : computer.name;
+                rbcdStep.target_sid     = computer.sid;
+                rbcdStep.target_dn      = computer.dn;
+                rbcdStep.target_type    = "Computer";
+                rbcdStep.principal_sid  = record.target_sid;
+                rbcdStep.principal_type = record.target_type.empty() ? "User" : record.target_type;
+                if (auto infoIt = nodeIndex.find(record.target_sid); infoIt != nodeIndex.end() && !infoIt->second.first.empty())
+                    rbcdStep.principal_name = infoIt->second.first;
+                else
+                    rbcdStep.principal_name = record.target_name.empty() ? record.target_sid : record.target_name;
+                rbcdStep.object_acetype = "rbcd";
+                rbcdStep.ace_qualifier  = "Allow";
+                rbcdStep.rights         = {"RBCD"};
+                rbcdStep.rights_display = "RBCD";
+                rbcdStep.edge_rights    = {"RBCD"};
+                rbcdStep.source_file    = "rbcd";
+                rbcdStep.target_attributes = lookupAttrs(computer.sid, "Computer",
+                                                         usersArr, userLut,
+                                                         computersArr, computerLut,
+                                                         groupsArr, groupLut);
+
+                record.next_step.push_back(std::move(rbcdStep));
+                ++localCount;
+                ++attachedCount;
+            }
+        }
+
+        localCount += attachRbcdEdgesToSteps(record.next_step, rbcdByPrincipal, nodeIndex,
+                                             usersArr, userLut,
+                                             computersArr, computerLut,
+                                             groupsArr, groupLut,
+                                             attachedCount);
+    }
+
+    return localCount;
+}
+
 static bool valueMatches(const JsonVal& val, const std::string& expectedStr) {
     if (expectedStr == "true" || expectedStr == "True" || expectedStr == "TRUE") {
         return val.isBool() && val.b;
@@ -671,6 +882,11 @@ static void writePrincipalAttributes(
                 const std::string& ind)
 {
         if (attrs.empty()) return;
+        /*
+         * Backwards-compatible writer for principal_attributes. Note: after
+         * merging principal attributes into target attributes this will rarely
+         * be invoked. Kept for compatibility but not used in merged output.
+         */
         f << ind << "\"principal_attributes\" : {\n";
         for (size_t i = 0; i < attrs.size(); ++i) {
                 f << ind << "  \"" << jsonEsc(attrs[i].first) << "\" : "
@@ -681,6 +897,24 @@ static void writePrincipalAttributes(
         f << ind << "},\n";
 }
 
+/* Merge two attribute vectors: values from `primary` take precedence; any
+ * keys present in `secondary` but missing from `primary` are appended.
+ */
+static std::vector<std::pair<std::string, JsonVal>>
+mergeAttributes(const std::vector<std::pair<std::string, JsonVal>>& primary,
+                const std::vector<std::pair<std::string, JsonVal>>& secondary)
+{
+    std::vector<std::pair<std::string, JsonVal>> out = primary;
+    for (const auto& p : secondary) {
+        bool found = false;
+        for (const auto& q : primary) {
+            if (q.first == p.first) { found = true; break; }
+        }
+        if (!found) out.push_back(p);
+    }
+    return out;
+}
+
 static void writeStep(std::ofstream& f, const AceStep& s, const std::string& ind) {
     f << ind << "{\n";
     f << ind << "  \"target_name\"    : \"" << jsonEsc(s.target_name)    << "\",\n";
@@ -689,6 +923,8 @@ static void writeStep(std::ofstream& f, const AceStep& s, const std::string& ind
     f << ind << "  \"target_type\"    : \"" << jsonEsc(s.target_type)    << "\",\n";
     f << ind << "  \"principal_sid\"  : \"" << jsonEsc(s.principal_sid)  << "\",\n";
     f << ind << "  \"principal_name\" : \"" << jsonEsc(s.principal_name) << "\",\n";
+    if (!s.principal_type.empty())
+        f << ind << "  \"principal_type\" : \"" << jsonEsc(s.principal_type) << "\",\n";
     f << ind << "  \"object_acetype\" : \"" << jsonEsc(s.object_acetype) << "\",\n";
     f << ind << "  \"ace_qualifier\"  : \"" << jsonEsc(s.ace_qualifier)  << "\",\n";
     f << ind << "  \"rights\"         : "   << strArrToJson(s.rights)    << ",\n";
@@ -1148,8 +1384,11 @@ static void writeRecord(
     f << "      \"rights\"         : "   << strArrToJson(r.rights)      << ",\n";
     f << "      \"rights_display\" : \"" << jsonEsc(r.rights_display) << "\",\n";
     f << "      \"edge_rights\"    : "   << strArrToJson(r.edge_rights) << ",\n";
-    writeTargetAttributes(f, r.target_attributes, "      ");
-    writePrincipalAttributes(f, r.principal_attributes, "      ");
+    /* Merge principal attributes into target attributes so consumer code
+     * only needs to examine `target_attributes`.
+     */
+    const auto mergedAttrs = mergeAttributes(r.target_attributes, r.principal_attributes);
+    writeTargetAttributes(f, mergedAttrs, "      ");
     if (!r.special_edge.empty())
         f << "      \"special_edge\"   : \"" << jsonEsc(r.special_edge) << "\",\n";
     f << "      \"next_step\"      : [\n";
@@ -1209,6 +1448,18 @@ static void writeGraphObjects(
     f.flush();
     if (!f) throw std::runtime_error("Write error on file: " + outPath);
 }
+
+/* Forward declaration for member-of helper (implementation located below) */
+static size_t attachMemberOfEdges(
+    const std::map<long, PrivGroup>& privByToken,
+    const std::map<std::string, std::pair<std::string, std::string>>& nodeIndex,
+    const JsonArr& usersArr,
+    const SidLookup& userLut,
+    const JsonArr& computersArr,
+    const SidLookup& computerLut,
+    const JsonArr& groupsArr,
+    const SidLookup& groupLut,
+    std::vector<AceRecord>& outGroupRecords);
 
 
 int main(int argc, char* argv[]) {
@@ -1539,6 +1790,93 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    /* ══ Process --rbcd flag ══ */
+    
+    size_t rbcdEdgesAttached = 0;
+    size_t rbcdRelationships = 0;
+    if (flagRbcd) {
+        std::cout << "\n[*] Processing --rbcd attack vectors...\n";
+        auto rbcdComputers = extractRbcdComputers(computersArr);
+        std::cout << "    Found " << rbcdComputers.size() << " rbcd-enabled computer(s)\n";
+
+        std::map<std::string, std::vector<RbcdComputer>> rbcdByPrincipal;
+        for (const RbcdComputer& computer : rbcdComputers) {
+            for (const std::string& principalSid : computer.principals)
+                rbcdByPrincipal[principalSid].push_back(computer);
+        }
+
+        std::map<std::string, std::pair<std::string, std::string>> nodeIndex;
+        for (const AceRecord& rec : all)
+            collectNodeIndexFromRecord(rec, nodeIndex);
+        for (const AceRecord& rec : kerberoastingRecords)
+            collectNodeIndexFromRecord(rec, nodeIndex);
+        for (const AceRecord& rec : asrepRecords)
+            collectNodeIndexFromRecord(rec, nodeIndex);
+        for (const AceRecord& rec : pwdNotRequiredRecords)
+            collectNodeIndexFromRecord(rec, nodeIndex);
+
+        rbcdRelationships += attachRbcdEdgesToRecords(
+            all, rbcdByPrincipal, nodeIndex,
+            usersArr, userLut, computersArr, computerLut, groupsArr, groupLut,
+            rbcdEdgesAttached);
+        rbcdRelationships += attachRbcdEdgesToRecords(
+            kerberoastingRecords, rbcdByPrincipal, nodeIndex,
+            usersArr, userLut, computersArr, computerLut, groupsArr, groupLut,
+            rbcdEdgesAttached);
+        rbcdRelationships += attachRbcdEdgesToRecords(
+            asrepRecords, rbcdByPrincipal, nodeIndex,
+            usersArr, userLut, computersArr, computerLut, groupsArr, groupLut,
+            rbcdEdgesAttached);
+        rbcdRelationships += attachRbcdEdgesToRecords(
+            pwdNotRequiredRecords, rbcdByPrincipal, nodeIndex,
+            usersArr, userLut, computersArr, computerLut, groupsArr, groupLut,
+            rbcdEdgesAttached);
+
+        std::cout << "    RBCD edges attached: " << rbcdEdgesAttached << "\n";
+    }
+
+    /* ══ Process --member-of flag ══ */
+    size_t memberOfEdgesAttached = 0;
+    if (flagMemberOf) {
+        std::cout << "\n[*] Processing --member-of relationships...\n";
+        auto privGroups = extractPrivilegedGroups(groupsArr);
+        std::cout << "    Found " << privGroups.size() << " privileged group(s)\n";
+
+        if (!privGroups.empty()) {
+            std::map<long, PrivGroup> privByToken;
+            for (const PrivGroup& g : privGroups)
+                privByToken[g.primaryToken] = g;
+
+            std::map<std::string, std::pair<std::string, std::string>> nodeIndex;
+            for (const AceRecord& rec : all)
+                collectNodeIndexFromRecord(rec, nodeIndex);
+            for (const AceRecord& rec : kerberoastingRecords)
+                collectNodeIndexFromRecord(rec, nodeIndex);
+            for (const AceRecord& rec : asrepRecords)
+                collectNodeIndexFromRecord(rec, nodeIndex);
+            for (const AceRecord& rec : pwdNotRequiredRecords)
+                collectNodeIndexFromRecord(rec, nodeIndex);
+
+            std::vector<AceRecord> memberOfRecords;
+            memberOfEdgesAttached = attachMemberOfEdges(
+                privByToken, nodeIndex,
+                usersArr, userLut,
+                computersArr, computerLut,
+                groupsArr, groupLut,
+                memberOfRecords);
+
+            /* Append generated group records to attack-vector list so they are
+             * included in the final output alongside other special records. */
+            if (!memberOfRecords.empty()) {
+                std::cout << "    MemberOf group records created: " << memberOfRecords.size() << "\n";
+                /* append */
+                kerberoastingRecords.insert(kerberoastingRecords.end(), memberOfRecords.begin(), memberOfRecords.end());
+            }
+        }
+
+        std::cout << "    MemberOf edges attached: " << memberOfEdgesAttached << "\n";
+    }
+
     /* Write Output */
     std::cout << "\n[*] Writing " << all.size() << " L1 record(s) + "
               << totalSteps << " recursive edge(s)";
@@ -1548,6 +1886,10 @@ int main(int argc, char* argv[]) {
         std::cout << " + " << asrepRecords.size() << " AS-REP record(s)";
     if (!pwdNotRequiredRecords.empty())
         std::cout << " + " << pwdNotRequiredRecords.size() << " pwd-not-required record(s)";
+    if (rbcdEdgesAttached > 0)
+        std::cout << " + " << rbcdEdgesAttached << " rbcd edge(s)";
+    if (memberOfEdgesAttached > 0)
+        std::cout << " + " << memberOfEdgesAttached << " memberof edge(s)";
     std::cout << " to " << outFile << "...\n";
     try {
         writeGraphObjects(outFile, sid, name, all, kerberoastingRecords, asrepRecords, pwdNotRequiredRecords);
@@ -1572,7 +1914,125 @@ int main(int argc, char* argv[]) {
         std::cout << "  AS-REP records          : " << asrepRecords.size() << "\n";
     if (flagPwdNotRequired)
         std::cout << "  Pwd-not-required records: " << pwdNotRequiredRecords.size() << "\n";
+    if (flagRbcd)
+        std::cout << "  RBCD edges              : " << rbcdEdgesAttached << "\n";
+    if (flagMemberOf)
+        std::cout << "  MemberOf edges          : " << memberOfEdgesAttached << "\n";
     std::cout << "----------------------------------------------\n";
 
     return 0;
 }
+
+static bool getIntAttr(const std::vector<std::pair<std::string, JsonVal>>& attrs,
+                       const std::string& key,
+                       long& out)
+{
+    for (const auto& p : attrs) {
+        if (p.first == key) {
+            if (p.second.isNum()) { out = static_cast<long>(p.second.n); return true; }
+            if (p.second.isStr()) {
+                try { out = std::stol(p.second.s); return true; } catch (...) { return false; }
+            }
+            return false;
+        }
+    }
+    return false;
+}
+
+static size_t attachMemberOfEdges(
+        const std::map<long, PrivGroup>& privByToken,
+        const std::map<std::string, std::pair<std::string, std::string>>& nodeIndex,
+        const JsonArr& usersArr,
+        const SidLookup& userLut,
+        const JsonArr& computersArr,
+        const SidLookup& computerLut,
+        const JsonArr& groupsArr,
+        const SidLookup& groupLut,
+        std::vector<AceRecord>& outGroupRecords)
+{
+    size_t attached = 0;
+
+    /* Map token -> index within outGroupRecords */
+    std::map<long, size_t> tokenIdx;
+
+    for (const auto& nodePair : nodeIndex) {
+        const std::string nodeSid  = nodePair.first;
+        const std::string nodeName = nodePair.second.first;
+        const std::string nodeType = nodePair.second.second;
+
+        /* Enrich attributes for this node */
+        auto attrs = lookupAttrs(nodeSid, nodeType,
+                                 usersArr, userLut,
+                                 computersArr, computerLut,
+                                 groupsArr, groupLut);
+
+        long primaryGroupId = -1;
+        if (!getIntAttr(attrs, "primary_group_id", primaryGroupId))
+            continue;
+
+        auto it = privByToken.find(primaryGroupId);
+        if (it == privByToken.end()) continue;
+
+        const PrivGroup& pg = it->second;
+
+        size_t recIndex;
+        if (tokenIdx.count(pg.primaryToken)) {
+            recIndex = tokenIdx[pg.primaryToken];
+        } else {
+            AceRecord gr;
+            gr.target_name    = pg.name.empty() ? pg.sid : pg.name;
+            gr.target_sid     = pg.sid;
+            gr.target_dn      = pg.dn;
+            gr.target_type    = "Group";
+            gr.principal_sid  = pg.sid;
+            gr.principal_name = pg.name.empty() ? pg.sid : pg.name;
+            gr.object_acetype = "";
+            gr.ace_qualifier  = "Allow";
+            gr.rights         = {"MemberOf"};
+            gr.rights_display = "MemberOf";
+            gr.edge_rights    = {"MemberOf"};
+            gr.source_file    = "memberof";
+            /* enrich group attributes */
+            gr.target_attributes = lookupAttrs(pg.sid, "Group",
+                                               usersArr, userLut,
+                                               computersArr, computerLut,
+                                               groupsArr, groupLut);
+
+            outGroupRecords.push_back(std::move(gr));
+            recIndex = outGroupRecords.size() - 1;
+            tokenIdx[pg.primaryToken] = recIndex;
+        }
+
+        /* Create a step from group -> node */
+        AceStep ms;
+        ms.target_name    = nodeName.empty() ? nodeSid : nodeName;
+        ms.target_sid     = nodeSid;
+        ms.target_type    = nodeType;
+        ms.principal_sid  = pg.sid;
+        ms.principal_name = pg.name.empty() ? pg.sid : pg.name;
+        ms.object_acetype = "";
+        ms.ace_qualifier  = "Allow";
+        ms.rights         = {"MemberOf"};
+        ms.rights_display = "MemberOf";
+        ms.edge_rights    = {"MemberOf"};
+        ms.source_file    = "memberof";
+        ms.target_attributes = attrs; /* include node attributes on the edge */
+
+        outGroupRecords[recIndex].next_step.push_back(std::move(ms));
+        ++attached;
+    }
+
+    return attached;
+}
+
+/* Forward declaration for member-of helper (implementation located below) */
+static size_t attachMemberOfEdges(
+    const std::map<long, PrivGroup>& privByToken,
+    const std::map<std::string, std::pair<std::string, std::string>>& nodeIndex,
+    const JsonArr& usersArr,
+    const SidLookup& userLut,
+    const JsonArr& computersArr,
+    const SidLookup& computerLut,
+    const JsonArr& groupsArr,
+    const SidLookup& groupLut,
+    std::vector<AceRecord>& outGroupRecords);

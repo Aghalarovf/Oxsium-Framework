@@ -192,7 +192,8 @@ function hasAttrTrue(attrs, key) {
 }
 
 function getCombinedNodeAttributes(d) {
-    return [d?.target_attributes, d?.principal_attributes].filter(Boolean);
+    // principal_attributes are now merged into target_attributes by the engine.
+    return [d?.target_attributes].filter(Boolean);
 }
 
 function shouldHighlightAsAdmin(d) {
@@ -227,16 +228,15 @@ function getNodeHighlightColor(d) {
         if (d.type === 'user' && hasAttrTrue(attrs, 'potential_admin')) isPotential = true;
     }
 
-    // If disabled=true exists in target_attributes or principal_attributes,
-    // force gray regardless of node type.
+    // Prefer muted admin/potential highlight when node is both disabled and admin/potential.
+    if (isDisabled && isAdmin) return NODE_RULES.adminMuted;
+    if (isDisabled && isPotential) return NODE_RULES.potentialAdminMuted;
+
+    // If disabled=true exists in target_attributes, force gray.
     if (isDisabled) return NODE_RULES.disabledColor;
 
-    if (isAdmin) {
-        return getAdminNodeColor();
-    }
-    if (isPotential) {
-        return getPotentialAdminNodeColor();
-    }
+    if (isAdmin) return getAdminNodeColor();
+    if (isPotential) return getPotentialAdminNodeColor();
     return null;
 }
 
@@ -349,7 +349,7 @@ NODE_RULES.dc = {
 
 function shouldHighlightAsDomainController(d) {
     if (!d) return false;
-    const attrs = d.target_attributes || d.principal_attributes || {};
+    const attrs = d.target_attributes || {};
     try {
         if (typeof attrs === 'object' && !Array.isArray(attrs)) return Boolean(attrs.is_domain_controller === true || attrs.is_domain_controller);
         if (Array.isArray(attrs)) {

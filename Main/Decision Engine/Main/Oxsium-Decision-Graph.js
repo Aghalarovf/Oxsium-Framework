@@ -86,10 +86,19 @@ function prepareLayeredNodePositions(nodes, width, height) {
         return sid.toLowerCase() === rootId;
     });
 
+    // Collect unique child node ids for root (angle distribution should be per-node)
+    const rootChildIds = [];
+    const rootChildSet = new Set();
+    for (const l of rootLinks) {
+        const tid = typeof l.target === 'object' ? String(l.target.id) : String(l.target);
+        const key = String(tid).toLowerCase();
+        if (!rootChildSet.has(key)) { rootChildSet.add(key); rootChildIds.push(key); }
+    }
+
     // Hər bir birbaşa uşağın branch oxunu müəyyənləşdir
-    // Root-dan çıxan hər edge üçün bərabər bucaq bölgüsü
+    // Root-dan çıxan hər node üçün bərabər bucaq bölgüsü (node-based, not edge-based)
     const STEP = 190;  // branch boyunca ardıcıl node-lar arasındakı məsafə (px)
-    const branchCount = rootLinks.length;
+    const branchCount = rootChildIds.length;
     const branchStep  = branchCount > 0 ? (2 * Math.PI) / branchCount : 0;
 
     // Hər node-un hansı branch-a aid olduğunu müəyyən etmək üçün
@@ -129,10 +138,8 @@ function prepareLayeredNodePositions(nodes, width, height) {
     // (başlanğıc açı: -90° yəni yuxarı) — istifadəçi öz zövqünə uyğun dəyişə bilər
     const startAngle = -Math.PI / 2;
 
-    rootLinks.forEach((link, i) => {
-        const tid = typeof link.target === 'object'
-            ? String(link.target.id).toLowerCase()
-            : String(link.target).toLowerCase();
+    // Iterate unique child ids in preserved order
+    rootChildIds.forEach((tid, i) => {
         const angle = startAngle + i * branchStep;
         const factor = Math.max(getSpacingScale(rootId), getSpacingScale(tid));
         nodeBranch.set(tid, { angle, depth: 1, parent: rootId, segmentLength: STEP * factor });
@@ -147,28 +154,36 @@ function prepareLayeredNodePositions(nodes, width, height) {
         const childLinks = getOutgoingLinks(currentId);
         if (!childLinks.length) continue;
 
-        // Yalnız hələ yerləşdirilməmiş child-ları götür (index gap bug-unu aradan qaldırır)
-        const newChildren = childLinks.filter(link => {
-            const tid = typeof link.target === 'object'
-                ? String(link.target.id).toLowerCase()
-                : String(link.target).toLowerCase();
-            return !nodeBranch.has(tid) && tid !== rootId;
-        });
-        if (!newChildren.length) continue;
+        // Collect unique child node ids (node-based expansion)
+        const uniqueChildren = [];
+        const uSet = new Set();
+        for (const link of childLinks) {
+            const tid = typeof link.target === 'object' ? String(link.target.id).toLowerCase() : String(link.target).toLowerCase();
+            if (tid === rootId) continue;
+            if (!nodeBranch.has(tid) && !uSet.has(tid)) { uSet.add(tid); uniqueChildren.push(tid); }
+        }
+        if (!uniqueChildren.length) continue;
 
-        // Ümumi edge sayı = gələn edge + yalnız yerləşdirilən child sayı
-        // Məsələn: 2 edge → 180°, 3 edge → 120°, N edge → 360°/N
-        const inCount    = getIncomingLinks(currentId).length;
-        const totalEdges = Math.max(inCount + newChildren.length, 2);
-        const angleStep  = (2 * Math.PI) / totalEdges;
+        // Calculate angular slots based on unique node counts: incoming unique nodes + outgoing unique children
+        const incomingNodes = (function() {
+            const inc = new Set();
+            for (const l of GRAPH_DATA.links) {
+                const tid = typeof l.target === 'object' ? String(l.target.id).toLowerCase() : String(l.target).toLowerCase();
+                if (tid === currentId) {
+                    const sid = typeof l.source === 'object' ? String(l.source.id).toLowerCase() : String(l.source).toLowerCase();
+                    inc.add(sid);
+                }
+            }
+            return inc.size;
+        })();
 
-        // Slot 0 həmişə parent-ə ayrılır; child-lar slot 1-dən başlayır
+        const totalNodes = Math.max(incomingNodes + uniqueChildren.length, 2);
+        const angleStep  = (2 * Math.PI) / totalNodes;
+
+        // Slot 0 reserved for parent; children start from slot 1
         const backAngle = currentInfo.angle + Math.PI;
 
-        newChildren.forEach((link, slotIndex) => {
-            const tid = typeof link.target === 'object'
-                ? String(link.target.id).toLowerCase()
-                : String(link.target).toLowerCase();
+        uniqueChildren.forEach((tid, slotIndex) => {
             const factor = Math.max(getSpacingScale(currentId), getSpacingScale(tid));
             const childAngle = backAngle + (slotIndex + 1) * angleStep;
 
@@ -280,7 +295,8 @@ function buildGraph() {
     const linkGroup = zoomGroup.append('g').attr('class', 'links');
     const link = linkGroup.selectAll('g').data(GRAPH_DATA.links).enter().append('g');
 
-    linkHitLine = link.append('line')
+    // Use path elements so we can render curved arcs for parallel links
+    linkHitLine = link.append('path')
         .attr('class', 'link-hit-line')
         .attr('stroke', 'transparent')
         .attr('stroke-width', d => Math.max(getEdgeWidth(d) + 12, 18))
@@ -288,11 +304,12 @@ function buildGraph() {
         .attr('opacity', 1)
         .attr('pointer-events', 'stroke');
 
-    linkLine = link.append('line')
+    linkLine = link.append('path')
         .attr('class', 'link-line')
         .attr('stroke',       d => getEdgeStroke(d))
         .attr('stroke-width', d => getEdgeWidth(d))
         .attr('opacity',      EDGE_RULES.opacity.default)
+        .attr('fill', 'none')
         .attr('marker-end',   d => getEdgeMarker(d));
 
     linkLabel = link.append('text')
@@ -504,21 +521,78 @@ function buildGraph() {
             n.vy = 0;
         });
 
-        linkLine
-            .attr('x1', d => getTrimmedLinkPoints(d).x1)
-            .attr('y1', d => getTrimmedLinkPoints(d).y1)
-            .attr('x2', d => getTrimmedLinkPoints(d).x2)
-            .attr('y2', d => getTrimmedLinkPoints(d).y2);
+        // Update path d attribute; use quadratic curve for parallel links
+        linkLine.attr('d', d => {
+            const p = getTrimmedLinkPoints(d);
+            const sx = p.x1, sy = p.y1, tx = p.x2, ty = p.y2;
+            if (!d.parallelTotal || d.parallelTotal <= 1) {
+                return `M ${sx} ${sy} L ${tx} ${ty}`;
+            }
+            const dx = tx - sx, dy = ty - sy;
+            const nx = -dy, ny = dx; // perpendicular
+            const nlen = Math.hypot(nx, ny) || 1;
+            const ux = nx / nlen, uy = ny / nlen;
+            const gap = Math.max(24, getEdgeWidth(d) * 10);
+            // center offset so arcs are symmetrically placed
+            const midIndex = (d.parallelTotal - 1) / 2;
+            const offset = (d.parallelIndex - midIndex) * gap;
+            const cx = (sx + tx) / 2 + ux * offset;
+            const cy = (sy + ty) / 2 + uy * offset;
+            return `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`;
+        });
 
-        linkHitLine
-            .attr('x1', d => getTrimmedLinkPoints(d).x1)
-            .attr('y1', d => getTrimmedLinkPoints(d).y1)
-            .attr('x2', d => getTrimmedLinkPoints(d).x2)
-            .attr('y2', d => getTrimmedLinkPoints(d).y2);
+        linkHitLine.attr('d', d => {
+            const p = getTrimmedLinkPoints(d);
+            const sx = p.x1, sy = p.y1, tx = p.x2, ty = p.y2;
+            if (!d.parallelTotal || d.parallelTotal <= 1) return `M ${sx} ${sy} L ${tx} ${ty}`;
+            const dx = tx - sx, dy = ty - sy;
+            const nx = -dy, ny = dx;
+            const nlen = Math.hypot(nx, ny) || 1;
+            const ux = nx / nlen, uy = ny / nlen;
+            const gap = Math.max(24, getEdgeWidth(d) * 10);
+            const midIndex = (d.parallelTotal - 1) / 2;
+            const offset = (d.parallelIndex - midIndex) * gap;
+            const cx = (sx + tx) / 2 + ux * offset;
+            const cy = (sy + ty) / 2 + uy * offset;
+            return `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`;
+        });
 
+        // Position label at curve midpoint (t=0.5) for quadratic curve
         linkLabel
-            .attr('x', d => (getTrimmedLinkPoints(d).x1 + getTrimmedLinkPoints(d).x2) / 2)
-            .attr('y', d => (getTrimmedLinkPoints(d).y1 + getTrimmedLinkPoints(d).y2) / 2);
+            .attr('x', d => {
+                const p = getTrimmedLinkPoints(d);
+                const sx = p.x1, sy = p.y1, tx = p.x2, ty = p.y2;
+                if (!d.parallelTotal || d.parallelTotal <= 1) return (sx + tx) / 2;
+                const dx = tx - sx, dy = ty - sy;
+                const nx = -dy, ny = dx;
+                const nlen = Math.hypot(nx, ny) || 1;
+                const ux = nx / nlen, uy = ny / nlen;
+                const gap = Math.max(24, getEdgeWidth(d) * 10);
+                const midIndex = (d.parallelTotal - 1) / 2;
+                const offset = (d.parallelIndex - midIndex) * gap;
+                const cx = (sx + tx) / 2 + ux * offset;
+                // quadratic midpoint at t=0.5
+                const mx = 0.25 * sx + 0.5 * cx + 0.25 * tx;
+                return mx;
+            })
+            .attr('y', d => {
+                const p = getTrimmedLinkPoints(d);
+                const sx = p.x1, sy = p.y1, tx = p.x2, ty = p.y2;
+                if (!d.parallelTotal || d.parallelTotal <= 1) return (sy + ty) / 2;
+                const dx = tx - sx, dy = ty - sy;
+                const nx = -dy, ny = dx;
+                const nlen = Math.hypot(nx, ny) || 1;
+                const ux = nx / nlen, uy = ny / nlen;
+                const gap = Math.max(24, getEdgeWidth(d) * 10);
+                const midIndex = (d.parallelTotal - 1) / 2;
+                const offset = (d.parallelIndex - midIndex) * gap;
+                const cx = (sx + tx) / 2 + ux * offset;
+                const my = 0.25 * sy + 0.5 * cx * 0 + 0.5 * cx * 0 + 0.25 * ty; // keep fallback
+                // compute quadratic midpoint y properly
+                const my2 = 0.25 * sy + 0.5 * cx * 0 + 0.25 * ty; // simplified; use cy below
+                const myFinal = 0.25 * sy + 0.5 * ((sy + ty) / 2 + uy * offset) + 0.25 * ty;
+                return myFinal;
+            });
 
         node.attr('transform', d => `translate(${d.x},${d.y})`);
     });
@@ -937,19 +1011,28 @@ function buildGraphDataFromEngine(engineData, selected) {
         const edgeRights = Array.isArray(record?.edge_rights)
             ? record.edge_rights.filter(Boolean)
             : (Array.isArray(record?.rights) ? record.rights.filter(Boolean) : []);
-        const key = `${String(sourceId).toLowerCase()}->${String(targetId).toLowerCase()}::${edgeLabel(record)}`;
-        if (seenLinks.has(key)) return;
-        seenLinks.add(key);
-        const crit = typeof getEdgeCategory === 'function'
-            ? getEdgeCategory({ crit: false, edge_rights: edgeRights }) === 'critical'
-            : false;
-        links.push({
-            source: sourceId,
-            target: targetId,
-            rel: edgeLabel(record),
-            crit,
-            edge_rights: edgeRights
-        });
+
+        // If multiple rights, create one link per right so each is rendered separately
+        const rightsToUse = edgeRights.length ? edgeRights : (edgeLabel(record) ? [edgeLabel(record)] : ['ACE']);
+
+        for (const r of rightsToUse) {
+            const key = `${String(sourceId).toLowerCase()}->${String(targetId).toLowerCase()}::${String(r).toLowerCase()}`;
+            if (seenLinks.has(key)) continue;
+            seenLinks.add(key);
+            const crit = typeof getEdgeCategory === 'function'
+                ? getEdgeCategory({ crit: false, edge_rights: [r] }) === 'critical'
+                : false;
+            links.push({
+                source: sourceId,
+                target: targetId,
+                rel: r,
+                crit,
+                edge_rights: [r],
+                // parallel properties will be assigned after all links are collected
+                parallelIndex: 0,
+                parallelTotal: 1
+            });
+        }
     }
 
     function walkRecord(record, parentNode, depth) {
@@ -969,9 +1052,27 @@ function buildGraphDataFromEngine(engineData, selected) {
                 principalRec.target_type || 'user',
                 Math.max(0, depth - 1)
             );
-            // Attach principal_attributes from record (if present)
+            // Merge principal_attributes into node.target_attributes (if present)
             if (record.principal_attributes) {
-                principalNode.principal_attributes = record.principal_attributes;
+                try {
+                    // If node has no target_attributes, copy principal attrs directly
+                    if (!principalNode.target_attributes) {
+                        principalNode.target_attributes = record.principal_attributes;
+                    } else if (typeof principalNode.target_attributes === 'object' && !Array.isArray(principalNode.target_attributes)) {
+                        // Merge keys from principal_attributes into target_attributes without overwriting
+                        const src = record.principal_attributes;
+                        if (src && typeof src === 'object' && !Array.isArray(src)) {
+                            for (const k of Object.keys(src)) {
+                                if (!(k in principalNode.target_attributes)) {
+                                    principalNode.target_attributes[k] = src[k];
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // No-op on merge errors
+                    console.warn('Failed to merge principal_attributes:', e && e.message);
+                }
             }
         }
 
@@ -982,6 +1083,29 @@ function buildGraphDataFromEngine(engineData, selected) {
             record.target_type || 'object',
             depth
         );
+
+        // If record carries principal_attributes (old engine output), merge
+        // them into the target node's target_attributes so highlighting
+        // logic (which looks at target_attributes) works without rebuilding
+        // the C++ engine.
+        if (record.principal_attributes) {
+            try {
+                if (!targetNode.target_attributes) {
+                    targetNode.target_attributes = record.principal_attributes;
+                } else if (typeof targetNode.target_attributes === 'object' && !Array.isArray(targetNode.target_attributes)) {
+                    const src = record.principal_attributes;
+                    if (src && typeof src === 'object' && !Array.isArray(src)) {
+                        for (const k of Object.keys(src)) {
+                            if (!(k in targetNode.target_attributes)) {
+                                targetNode.target_attributes[k] = src[k];
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to merge record.principal_attributes into target node:', e && e.message);
+            }
+        }
 
         addEdge(parentNode.id, targetNode.id, record);
 
@@ -994,6 +1118,24 @@ function buildGraphDataFromEngine(engineData, selected) {
     const graphObjects = Array.isArray(engineData?.graph_objects) ? engineData.graph_objects : [];
     for (const record of graphObjects) {
         walkRecord(record, rootNode, 1);
+    }
+
+    // Compute parallel link counts for same source->target so we can render arcs
+    const buckets = new Map(); // key: source::target -> [indexes]
+    links.forEach((l, idx) => {
+        const s = String(l.source).toLowerCase();
+        const t = String(l.target).toLowerCase();
+        const k = `${s}::${t}`;
+        if (!buckets.has(k)) buckets.set(k, []);
+        buckets.get(k).push(idx);
+    });
+    for (const [k, idxs] of buckets.entries()) {
+        const total = idxs.length;
+        for (let i = 0; i < idxs.length; ++i) {
+            const li = links[idxs[i]];
+            li.parallelTotal = total;
+            li.parallelIndex = i; // 0..total-1
+        }
     }
 
     return { nodes, links };

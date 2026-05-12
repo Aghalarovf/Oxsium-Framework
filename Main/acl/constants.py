@@ -60,7 +60,7 @@ OBJECT_TYPE_RIGHTS: dict[str, str] = {
     "4c164200-20c0-11d0-a768-00aa006e0529": "Write-Account-Restrictions",
     "bf967a7f-0de6-11d0-a285-00aa003049e2": "Public-Information",
 
-    "5b47d60f-6090-40b2-9f37-2a4de88f3063": "Write-msDS-KeyCredentialLink",
+    "5b47d60f-6051-40fb-99e0-ed3a78604e5d": "Write-msDS-KeyCredentialLink",
     "3f78c3e5-f79a-46bd-a0b8-9d18116ddc79": "Write-msDS-AllowedToActOnBehalfOfOtherIdentity",
     "800d94d7-b7a1-42a1-b14d-7cae1423d07f": "Write-msDS-AllowedToDelegateTo",
     "f30e3bbe-9ff0-11d1-b603-0000f80367c1": "Write-gPLink",
