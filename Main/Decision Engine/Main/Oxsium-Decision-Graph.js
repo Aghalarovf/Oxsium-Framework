@@ -4,7 +4,7 @@ const svgEl  = d3.select(canvas).append('svg')
 
 const defs = svgEl.append('defs');
 
-['critical', 'high', 'normal'].forEach(type => {
+['blue', 'critical', 'high', 'normal'].forEach(type => {
     const color = EDGE_RULES.colors[type]?.arrowFill || (EDGE_RULES.colors.normal && EDGE_RULES.colors.normal.arrowFill) || '#334155';
     const ar    = EDGE_RULES.arrow;
     defs.append('marker')
@@ -19,6 +19,9 @@ const defs = svgEl.append('defs');
         .attr('d', ar.path)
         .attr('fill', color);
 });
+
+// inject DC animation styles from node rules (if available)
+try { if (typeof injectDcAnimationStyles === 'function') injectDcAnimationStyles(); } catch (e) {}
 
 const glowFilter = defs.append('filter').attr('id', 'glow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
 glowFilter.append('feGaussianBlur').attr('stdDeviation', '5').attr('result', 'coloredBlur');
@@ -48,7 +51,19 @@ const zoom = d3.zoom()
 
 svgEl.call(zoom);
 
-let linkLine, linkLabel, node, simulation;
+svgEl.on('click.clear-focus', evt => {
+    if (evt.target !== svgEl.node()) return;
+    window.clearPathFocus?.();
+    resetHighlight();
+});
+
+canvas.addEventListener('click', evt => {
+    if (evt.target !== canvas) return;
+    window.clearPathFocus?.();
+    resetHighlight();
+});
+
+let linkLine, linkHitLine, linkLabel, node, simulation;
 
 function prepareLayeredNodePositions(nodes, width, height) {
     const cx = width / 2;
@@ -73,6 +88,7 @@ function prepareLayeredNodePositions(nodes, width, height) {
 
     // Hər bir birbaşa uşağın branch oxunu müəyyənləşdir
     // Root-dan çıxan hər edge üçün bərabər bucaq bölgüsü
+    const STEP = 190;  // branch boyunca ardıcıl node-lar arasındakı məsafə (px)
     const branchCount = rootLinks.length;
     const branchStep  = branchCount > 0 ? (2 * Math.PI) / branchCount : 0;
 
@@ -80,6 +96,34 @@ function prepareLayeredNodePositions(nodes, width, height) {
     // BFS ilə root-dan ağacı gəzirik
     const nodeBranch = new Map();   // nodeId → { angle, depth }
     const nodeById   = new Map(nodes.map(n => [String(n.id).toLowerCase(), n]));
+
+    const getEdgeDegree = (id) => {
+        const node = nodeById.get(String(id || '').toLowerCase());
+        return Number(node?.edgeDegree || node?.degree || 0);
+    };
+
+    const getSpacingScale = (id) => {
+        const degree = getEdgeDegree(id);
+        if (degree >= 20) return 3;
+        if (degree >= 15) return 2;
+        if (degree >= 10) return 1.5;
+        return 1;
+    };
+
+    const getOutgoingLinks = (sourceId) => GRAPH_DATA.links.filter(l => {
+        const sid = typeof l.source === 'object'
+            ? String(l.source.id).toLowerCase()
+            : String(l.source).toLowerCase();
+        return sid === sourceId;
+    });
+
+    // Bir node-a gələn bütün edge-ləri qaytarır (istiqamətdən asılı olmayaraq)
+    const getIncomingLinks = (targetId) => GRAPH_DATA.links.filter(l => {
+        const tid = typeof l.target === 'object'
+            ? String(l.target.id).toLowerCase()
+            : String(l.target).toLowerCase();
+        return tid === targetId;
+    });
 
     // Branch açıları: üstdən başlayaraq saat istiqamətinə
     // (başlanğıc açı: -90° yəni yuxarı) — istifadəçi öz zövqünə uyğun dəyişə bilər
@@ -90,45 +134,81 @@ function prepareLayeredNodePositions(nodes, width, height) {
             ? String(link.target.id).toLowerCase()
             : String(link.target).toLowerCase();
         const angle = startAngle + i * branchStep;
-        nodeBranch.set(tid, { angle, depth: 1 });
+        const factor = Math.max(getSpacingScale(rootId), getSpacingScale(tid));
+        nodeBranch.set(tid, { angle, depth: 1, parent: rootId, segmentLength: STEP * factor });
     });
 
-    // BFS: qalan bütün node-ları öz branch oxuna yerləşdir
+    // Hər node öz child-larını da eyni qayda ilə fan-out etsin
     const queue = [...nodeBranch.keys()];
     while (queue.length > 0) {
         const currentId = queue.shift();
         const currentInfo = nodeBranch.get(currentId);
 
-        const childLinks = GRAPH_DATA.links.filter(l => {
-            const sid = typeof l.source === 'object'
-                ? String(l.source.id).toLowerCase()
-                : String(l.source).toLowerCase();
-            return sid === currentId;
-        });
+        const childLinks = getOutgoingLinks(currentId);
+        if (!childLinks.length) continue;
 
-        childLinks.forEach(link => {
+        // Yalnız hələ yerləşdirilməmiş child-ları götür (index gap bug-unu aradan qaldırır)
+        const newChildren = childLinks.filter(link => {
             const tid = typeof link.target === 'object'
                 ? String(link.target.id).toLowerCase()
                 : String(link.target).toLowerCase();
-            if (!nodeBranch.has(tid) && tid !== rootId) {
-                nodeBranch.set(tid, { angle: currentInfo.angle, depth: currentInfo.depth + 1 });
-                queue.push(tid);
-            }
+            return !nodeBranch.has(tid) && tid !== rootId;
+        });
+        if (!newChildren.length) continue;
+
+        // Ümumi edge sayı = gələn edge + yalnız yerləşdirilən child sayı
+        // Məsələn: 2 edge → 180°, 3 edge → 120°, N edge → 360°/N
+        const inCount    = getIncomingLinks(currentId).length;
+        const totalEdges = Math.max(inCount + newChildren.length, 2);
+        const angleStep  = (2 * Math.PI) / totalEdges;
+
+        // Slot 0 həmişə parent-ə ayrılır; child-lar slot 1-dən başlayır
+        const backAngle = currentInfo.angle + Math.PI;
+
+        newChildren.forEach((link, slotIndex) => {
+            const tid = typeof link.target === 'object'
+                ? String(link.target.id).toLowerCase()
+                : String(link.target).toLowerCase();
+            const factor = Math.max(getSpacingScale(currentId), getSpacingScale(tid));
+            const childAngle = backAngle + (slotIndex + 1) * angleStep;
+
+            nodeBranch.set(tid, {
+                angle: childAngle,
+                depth: currentInfo.depth + 1,
+                parent: currentId,
+                segmentLength: STEP * factor
+            });
+            queue.push(tid);
         });
     }
 
-    // Hər node-u öz branch oxu üzərindəki mövqeyə yerləşdir
-    const STEP = 190;  // branch boyunca ardıcıl node-lar arasındakı məsafə (px)
+    // Hər node-u öz PARENT-indən nisbi olaraq yerləşdir.
+    // Əvvəlki üsul (mərkəzdən dist * cos/sin) yanlış idi: child açısı
+    // dəyişdikdə node mərkəzdən uzaqlaşırdı, parent-dən deyil.
+    // İndi: position(node) = position(parent) + segmentLength * [cos(angle), sin(angle)]
+    const absPos = new Map();
+    absPos.set(rootId, { x: cx, y: cy });
 
-    nodeBranch.forEach((info, nid) => {
+    // Depth-ə görə sırala ki, parent həmişə child-dan əvvəl yerləşdirilsin
+    const sortedIds = [...nodeBranch.keys()].sort(
+        (a, b) => nodeBranch.get(a).depth - nodeBranch.get(b).depth
+    );
+
+    for (const nid of sortedIds) {
+        const info      = nodeBranch.get(nid);
+        const parentPos = absPos.get(info.parent);
+        if (!parentPos) continue;
+
+        const seg = info.segmentLength || STEP;
+        const x   = parentPos.x + seg * Math.cos(info.angle);
+        const y   = parentPos.y + seg * Math.sin(info.angle);
+        absPos.set(nid, { x, y });
+
         const n = nodeById.get(nid);
-        if (!n) return;
-        const dist = info.depth * STEP;
-        n.x = cx + dist * Math.cos(info.angle);
-        n.y = cy + dist * Math.sin(info.angle);
-    });
+        if (n) { n.x = x; n.y = y; }
+    }
 
-    // Branch-a düşməyən node-ları (varsa) mərkəz ətrafında yerləşdir
+        // Branch-a düşməyən node-ları (varsa) mərkəz ətrafında yerləşdir
     nodes.forEach(n => {
         if (n.root) return;
         const nid = String(n.id).toLowerCase();
@@ -149,6 +229,18 @@ function getTrimmedLinkPoints(link) {
     const dx = tx - sx;
     const dy = ty - sy;
     const distance = Math.hypot(dx, dy) || 1;
+
+    if (distance === 1 && sx === tx && sy === ty) {
+        const nodePadding = Math.max(getNodeEdgePadding(source, false), getNodeEdgePadding(target, true), 18);
+        const stubLength = nodePadding + 28;
+        return {
+            x1: sx - stubLength,
+            y1: sy,
+            x2: sx + stubLength,
+            y2: sy
+        };
+    }
+
     const sourcePadding = getNodeEdgePadding(source, false);
     const targetPadding = getNodeEdgePadding(target, true);
     const sourceRatio = sourcePadding / distance;
@@ -188,6 +280,14 @@ function buildGraph() {
     const linkGroup = zoomGroup.append('g').attr('class', 'links');
     const link = linkGroup.selectAll('g').data(GRAPH_DATA.links).enter().append('g');
 
+    linkHitLine = link.append('line')
+        .attr('class', 'link-hit-line')
+        .attr('stroke', 'transparent')
+        .attr('stroke-width', d => Math.max(getEdgeWidth(d) + 12, 18))
+        .attr('stroke-linecap', 'round')
+        .attr('opacity', 1)
+        .attr('pointer-events', 'stroke');
+
     linkLine = link.append('line')
         .attr('class', 'link-line')
         .attr('stroke',       d => getEdgeStroke(d))
@@ -206,20 +306,41 @@ function buildGraph() {
         .attr('text-anchor','middle')
         .text(d => formatEdgeLabel(d.rel));
 
-    linkLine
-        .on('mouseover.label', function(evt, d) {
-            const idx = linkLine.nodes().indexOf(this);
-            d3.select(linkLabel.nodes()[idx]).attr('opacity', 1);
-        })
-        .on('mouseout.label', function(evt, d) {
-            const idx = linkLine.nodes().indexOf(this);
-            d3.select(linkLabel.nodes()[idx]).attr('opacity', 0);
-        });
+    const baseLinkLabelSize = Number.parseFloat(EDGE_RULES.label.fontSize) || 9;
+
+    const showLinkLabel = function() {
+        const idx = linkHitLine.nodes().indexOf(this);
+        const label = d3.select(linkLabel.nodes()[idx]);
+        label
+            .classed('is-visible', true)
+            .attr('opacity', 1)
+            .attr('font-size', baseLinkLabelSize + 6)
+            .attr('font-weight', 900)
+            .classed('is-hovered', true);
+    };
+
+    const hideLinkLabel = function() {
+        const idx = linkHitLine.nodes().indexOf(this);
+        const label = d3.select(linkLabel.nodes()[idx]);
+        label
+            .classed('is-visible', false)
+            .attr('opacity', 0)
+            .attr('font-size', EDGE_RULES.label.fontSize)
+            .attr('font-weight', EDGE_RULES.label.fontWeight)
+            .classed('is-hovered', false);
+    };
+
+    linkHitLine
+        .on('mouseover.label', showLinkLabel)
+        .on('mousemove.label', showLinkLabel)
+        .on('mouseout.label', hideLinkLabel)
+        .on('click', clickEdge);
 
     // ── Nodes ──────────────────────────────────────────────
     const nodeGroup = zoomGroup.append('g').attr('class', 'nodes');
     node = nodeGroup.selectAll('g').data(GRAPH_DATA.nodes).enter().append('g')
         .attr('class', 'node-group')
+        .classed('is-domain-controller', d => (typeof shouldHighlightAsDomainController === 'function' && shouldHighlightAsDomainController(d)) )
         .attr('transform', d => `translate(${d.x},${d.y})`)
         .call(d3.drag()
             .on('start', dragStart)
@@ -228,6 +349,7 @@ function buildGraph() {
 
     node.append('circle')
         .attr('r', d => getNodeOuterRadius(d))
+        .attr('class', 'node-outer-ring')
         .attr('fill', 'none')
         .attr('stroke', d => getNodeOuterStyle(d).stroke)
         .attr('stroke-width', d => getNodeOuterStyle(d).strokeWidth)
@@ -257,24 +379,60 @@ function buildGraph() {
         .on('mouseout',  hideTooltip)
         .on('click', clickNode);
 
-    const NODE_ICONS = {
-        user:      '\u{1F464}',  // 👤
-        computer:  '\u{1F4BB}',  // 💻
-        group:     '\u{1F465}',  // 👥
-        domain:    '\u{1F310}',  // 🌐
-        ou:        '\u{1F4C1}',  // 📁
-        gpo:       '\u2699\uFE0F', // ⚙️
-        container: '\u{1F4E6}',  // 📦
-        object:    '\u2699\uFE0F'  // ⚙️
+    // Map node types to icon image files located in assets/Icons
+    const NODE_ICON_FILES = {
+        user:      'user.png',
+        computer:  'computer.png',
+        group:     'group.png',
+        domain:    'ou.png',    // fallback to folder-style icon
+        ou:        'ou.png',
+        gpo:       'gpo.png',
+        container: 'ou.png',
+        object:    'acl.png'
     };
 
-    node.append('text')
-        .attr('class', 'node-icon')
-        .attr('dy', '0.38em')
-        .attr('text-anchor', 'middle')
-        .attr('font-size', d => getNodeIconFontSize(d))
+    function getNodeIconSize(d) {
+        // return numeric px size
+        const v = getNodeIconFontSize(d) || '16px';
+        return parseInt(String(v).replace('px', ''));
+    }
+
+    function getNodeIconHref(d) {
+        // Build absolute URL for the icon relative to the current page so paths resolve
+        try {
+            const sel = window.SELECTED_PRINCIPAL;
+            let file;
+            if (sel && sel.label && String(sel.label).toLowerCase() === String(d.label || '').toLowerCase()) {
+                const kind = sel.kind || d.type;
+                file = NODE_ICON_FILES[kind] || NODE_ICON_FILES[d.type] || 'acl.png';
+            } else {
+                file = NODE_ICON_FILES[d.type] || NODE_ICON_FILES.object || 'acl.png';
+            }
+            // icons live under Main/assets/Icons — use URL() to resolve correctly from any page location
+            return new URL(`../../assets/Icons/${file}`, window.location.href).href;
+        } catch (e) {
+            return new URL('../../assets/favicon.png', window.location.href).href;
+        }
+    }
+
+    // Render image icons centered on node
+    node.append('image')
+        .attr('class', 'node-icon-img')
+        .attr('width', d => getNodeIconSize(d))
+        .attr('height', d => getNodeIconSize(d))
+        .attr('x', d => -getNodeIconSize(d) / 2)
+        .attr('y', d => -getNodeIconSize(d) / 2)
         .attr('pointer-events', 'none')
-        .text(d => NODE_ICONS[d.type] || NODE_ICONS.object);
+        .attr('preserveAspectRatio', 'xMidYMid meet')
+        .each(function(d) {
+            // set both href and xlink:href for broader compatibility
+            const href = getNodeIconHref(d);
+            d3.select(this).attr('href', href).attr('xlink:href', href);
+        })
+        .on('error', function(event, d) {
+            const fb = new URL('../../assets/favicon.png', window.location.href).href;
+            d3.select(this).attr('href', fb).attr('xlink:href', fb);
+        });
 
     const riskTxtCfg = NODE_RULES.label.riskText;
     node.filter(d => (d.risk || 0) > riskTxtCfg.showIfRiskAbove)
@@ -303,7 +461,7 @@ function buildGraph() {
         .attr('dy', d => getNodeTypeLabelDy(d))
         .attr('fill', d => getNodeTypeLabelColor(d))
         .attr('font-size', '9px')
-        .attr('font-weight', '400')
+        .attr('font-weight', '200')
         .attr('font-family', 'JetBrains Mono, monospace')
         .attr('text-anchor', 'middle')
         .attr('letter-spacing', '1.5px')
@@ -347,6 +505,12 @@ function buildGraph() {
         });
 
         linkLine
+            .attr('x1', d => getTrimmedLinkPoints(d).x1)
+            .attr('y1', d => getTrimmedLinkPoints(d).y1)
+            .attr('x2', d => getTrimmedLinkPoints(d).x2)
+            .attr('y2', d => getTrimmedLinkPoints(d).y2);
+
+        linkHitLine
             .attr('x1', d => getTrimmedLinkPoints(d).x1)
             .attr('y1', d => getTrimmedLinkPoints(d).y1)
             .attr('x2', d => getTrimmedLinkPoints(d).x2)
@@ -426,18 +590,171 @@ function hideTooltip() {
 }
 
 function clickNode(evt, d) {
-    const relatedPath = ATTACK_PATHS.find(p =>
-        p.hops.some(h => h.name && h.name.toLowerCase() === d.label.toLowerCase())
-    );
-    if (relatedPath) {
+    const relatedPath = findRelatedPathForNode(d);
+    if (relatedPath?.path) {
         const cards = document.querySelectorAll('.path-card');
         cards.forEach(c => {
-            if (c.dataset.id === relatedPath.id) {
-                selectPath(relatedPath, c);   // UI modulundan
+            if (c.dataset.id === relatedPath.path.id) {
+                selectPath(relatedPath.path, c);   // UI modulundan
                 c.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
         });
     }
+
+    window.updatePathDetailContext?.({
+        kind: 'node',
+        node: d,
+        path: relatedPath?.path || null,
+        edgeNames: relatedPath?.edgeNames || []
+    });
+
+    const pathChainEntries = buildRiskDistributionEntriesToNode(relatedPath?.path || null, relatedPath?.nodeIndex ?? -1);
+    const riskEntries = pathChainEntries.length > 0
+        ? pathChainEntries
+        : collectConnectedEdges(d);
+    window.updateRiskDistributionList?.(riskEntries, pathChainEntries.length > 0 ? 'Root to node chain' : 'Connected edges');
+    if (relatedPath?.path) {
+        window.setPathFocus?.(relatedPath.path.id);
+    }
+}
+
+function clickEdge(evt, d) {
+    const relatedPath = findRelatedPathForEdge(d);
+    if (relatedPath?.path) {
+        const cards = document.querySelectorAll('.path-card');
+        cards.forEach(c => {
+            if (c.dataset.id === relatedPath.path.id) {
+                selectPath(relatedPath.path, c);
+                c.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        });
+    }
+
+    window.updatePathDetailContext?.({
+        kind: 'edge',
+        edge: {
+            source: d.source?.label || d.source?.id || '',
+            target: d.target?.label || d.target?.id || '',
+            rel: d.rel || 'RELATION'
+        },
+        path: relatedPath?.path || null,
+        match: relatedPath?.match || null
+    });
+    evt?.stopPropagation?.();
+}
+
+function findRelatedPathForNode(nodeData) {
+    const label = String(nodeData?.label || '').toLowerCase();
+    if (!label) return null;
+
+    for (const path of ATTACK_PATHS) {
+        const hopIndex = path.hops.findIndex(h => h.name && h.name.toLowerCase() === label);
+        if (hopIndex === -1) continue;
+
+        const edgeNames = [];
+        const prevEdge = hopIndex > 0 ? path.hops[hopIndex - 1] : null;
+        const nextEdge = hopIndex + 1 < path.hops.length ? path.hops[hopIndex + 1] : null;
+
+        if (prevEdge?.edge) edgeNames.push(prevEdge.edge);
+        if (nextEdge?.edge && nextEdge.edge !== prevEdge?.edge) edgeNames.push(nextEdge.edge);
+
+        return {
+            path,
+            edgeNames,
+            nodeIndex: hopIndex
+        };
+    }
+
+    return null;
+}
+
+function buildRiskDistributionEntriesToNode(path, nodeIndex) {
+    if (!path || !Array.isArray(path.hops) || nodeIndex < 0) return [];
+
+    const entries = [];
+    let step = 1;
+
+    for (let i = 0; i < nodeIndex; i += 2) {
+        const sourceNode = path.hops[i];
+        const edgeHop = path.hops[i + 1];
+        const targetNode = path.hops[i + 2];
+        if (!sourceNode?.name || !edgeHop?.edge || !targetNode?.name) continue;
+
+        entries.push({
+            name: edgeHop.edge,
+            source: sourceNode.name,
+            target: targetNode.name,
+            meta: `${sourceNode.name} → ${targetNode.name}`,
+            step,
+            nodeName: targetNode.name
+        });
+        step++;
+
+        if (i + 2 >= nodeIndex) break;
+    }
+
+    return entries;
+}
+
+function collectConnectedEdges(nodeData) {
+    const nodeLabel = String(nodeData?.label || nodeData?.id || '').toLowerCase();
+    if (!nodeLabel || !Array.isArray(GRAPH_DATA?.links)) return [];
+
+    const edges = [];
+    const seen = new Set();
+
+    GRAPH_DATA.links.forEach(link => {
+        const sourceLabel = String(link.source?.label || link.source?.id || link.source || '').toLowerCase();
+        const targetLabel = String(link.target?.label || link.target?.id || link.target || '').toLowerCase();
+        const rel = String(link.rel || 'RELATION');
+
+        if (sourceLabel !== nodeLabel && targetLabel !== nodeLabel) return;
+
+        const key = `${sourceLabel}->${rel}->${targetLabel}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+
+        edges.push({
+            name: rel,
+            source: link.source?.label || link.source?.id || link.source || '',
+            target: link.target?.label || link.target?.id || link.target || '',
+            meta: `${link.source?.label || link.source?.id || link.source || 'Unknown'} → ${link.target?.label || link.target?.id || link.target || 'Unknown'}`
+        });
+    });
+
+    return edges;
+}
+
+function findRelatedPathForEdge(edgeData) {
+    const sourceLabel = String(edgeData?.source?.label || edgeData?.source?.id || '').toLowerCase();
+    const targetLabel = String(edgeData?.target?.label || edgeData?.target?.id || '').toLowerCase();
+    const rel = String(edgeData?.rel || '').toLowerCase();
+
+    if (!sourceLabel && !targetLabel) return null;
+
+    for (const path of ATTACK_PATHS) {
+        for (let i = 0; i < path.hops.length - 2; i++) {
+            const current = path.hops[i];
+            const edgeHop = path.hops[i + 1];
+            const next = path.hops[i + 2];
+            if (!current?.name || !next?.name || !edgeHop) continue;
+            const matchesSource = !sourceLabel || current.name.toLowerCase() === sourceLabel;
+            const matchesTarget = !targetLabel || next.name.toLowerCase() === targetLabel;
+            const matchesRel = !rel || String(edgeHop.edge || '').toLowerCase() === rel;
+            if (matchesSource && matchesTarget && matchesRel) {
+                return {
+                    path,
+                    match: {
+                        source: current.name,
+                        rel: edgeHop.edge || edgeData?.rel || 'RELATION',
+                        target: next.name
+                    }
+                };
+            }
+        }
+    }
+
+    return null;
 }
 
 function highlightPath(path) {
@@ -555,6 +872,23 @@ function edgeLabel(record) {
 }
 
 function buildGraphDataFromEngine(engineData, selected) {
+    // Extract target_attributes for the selected principal from graph_objects
+    let selectedAttributes = null;
+    if (engineData?.graph_objects && Array.isArray(engineData.graph_objects)) {
+        const matchingRecord = engineData.graph_objects.find(record => {
+            // Match by SID if available
+            if (selected?.sid && record?.target_sid === selected.sid) return true;
+            // Match by name
+            if (selected?.label && record?.target_name === selected.label) return true;
+            // Match by principal SID as fallback
+            if (selected?.sid && record?.principal_sid === selected.sid) return true;
+            return false;
+        });
+        if (matchingRecord?.target_attributes) {
+            selectedAttributes = matchingRecord.target_attributes;
+        }
+    }
+
     const rootNode = {
         id: selected.sid || selected.label,
         label: selected.label,
@@ -564,7 +898,7 @@ function buildGraphDataFromEngine(engineData, selected) {
         edges: 0,
         root: true,
         risk: 0,
-        target_attributes: selected.target_attributes ?? null
+        target_attributes: selectedAttributes ?? (selected.target_attributes ?? null)
     };
 
     const nodes = [rootNode];
@@ -589,6 +923,12 @@ function buildGraphDataFromEngine(engineData, selected) {
             };
             nodes.push(node);
             seenNodes.set(nodeKey, node);
+        } else {
+            // If node already exists but this record has target_attributes and the node doesn't, update it
+            const existingNode = seenNodes.get(nodeKey);
+            if (record?.target_attributes && !existingNode.target_attributes) {
+                existingNode.target_attributes = record.target_attributes;
+            }
         }
         return seenNodes.get(nodeKey);
     }
@@ -614,6 +954,26 @@ function buildGraphDataFromEngine(engineData, selected) {
 
     function walkRecord(record, parentNode, depth) {
         if (!record || typeof record !== 'object') return;
+
+        // Ensure principal node exists so we can attach principal_attributes
+        if (record.principal_sid) {
+            const principalRec = {
+                target_sid: record.principal_sid,
+                target_name: record.principal_name || record.principal_sid,
+                target_type: (record.principal_type || 'User')
+            };
+            const principalNode = ensureNode(
+                principalRec,
+                `node-${nodes.length}`,
+                principalRec.target_name,
+                principalRec.target_type || 'user',
+                Math.max(0, depth - 1)
+            );
+            // Attach principal_attributes from record (if present)
+            if (record.principal_attributes) {
+                principalNode.principal_attributes = record.principal_attributes;
+            }
+        }
 
         const targetNode = ensureNode(
             record,

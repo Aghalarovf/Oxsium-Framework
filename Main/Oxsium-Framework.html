@@ -72,67 +72,43 @@
       <div class="sidebar-section-title">Objects</div>
 
       <div class="nav-item" id="nav-users" onclick="switchTab('users')">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="5" r="3" stroke="currentColor" stroke-width="1.2"/>
-          <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.2"/>
-        </svg>
+        <img class="nav-icon" src="assets/Icons/user.png" alt="Users" onerror="this.onerror=null;this.src='assets/favicon.png'">
         Users
         <span class="nav-count" id="nav-users-count">—</span>
       </div>
 
       <div class="nav-item" id="nav-computers" onclick="switchTab('computers')">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
-          <rect x="2" y="4" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.2"/>
-          <path d="M5 4V3M11 4V3M4 8h2M8 8h4M4 11h4" stroke="currentColor" stroke-width="1.2"/>
-        </svg>
+        <img class="nav-icon" src="assets/Icons/computer.png" alt="Computers" onerror="this.onerror=null;this.src='assets/favicon.png'">
         Computers
         <span class="nav-count" id="nav-computers-count">—</span>
       </div>
 
       <div class="nav-item" id="nav-ous" onclick="switchTab('ous')">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
-          <path d="M8 2L2 5v6l6 3 6-3V5L8 2z" stroke="currentColor" stroke-width="1.2"/>
-          <path d="M8 2v9M2 5l6 3 6-3" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
-        </svg>
+        <img class="nav-icon" src="assets/Icons/ou.png" alt="OUs" onerror="this.onerror=null;this.src='assets/favicon.png'">
         OUs
         <span class="nav-count" id="nav-ous-count">—</span>
       </div>
 
       <div class="nav-item" id="nav-gpo" onclick="switchTab('gpo')">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
-          <rect x="2" y="2" width="12" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/>
-          <rect x="2" y="10" width="12" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/>
-          <path d="M8 6v4" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
-        </svg>
+        <img class="nav-icon" src="assets/Icons/gpo.png" alt="GPOs" onerror="this.onerror=null;this.src='assets/favicon.png'">
         GPOs
         <span class="nav-count" id="nav-gpo-count">—</span>
       </div>
 
       <div class="nav-item" id="nav-groups" onclick="switchTab('groups')">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="4" r="2" stroke="currentColor" stroke-width="1.2"/>
-          <circle cx="3" cy="12" r="1.5" stroke="currentColor" stroke-width="1.2"/>
-          <circle cx="13" cy="12" r="1.5" stroke="currentColor" stroke-width="1.2"/>
-          <path d="M8 6v2M6 8H3M10 8h3" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
-        </svg>
+        <img class="nav-icon" src="assets/Icons/group.png" alt="Groups" onerror="this.onerror=null;this.src='assets/favicon.png'">
         Groups
         <span class="nav-count" id="nav-groups-count">—</span>
       </div>
 
       <div class="nav-item" id="nav-trusts" onclick="switchTab('trusts')">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
-          <path d="M4 8h8M4 4l8 8M12 4L4 12" stroke="currentColor" stroke-width="1.2"/>
-          <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/>
-        </svg>
+        <img class="nav-icon" src="assets/Icons/trust.png" alt="Trusts" onerror="this.onerror=null;this.src='assets/favicon.png'">
         Trusts
         <span class="nav-count" id="nav-trusts-count">—</span>
       </div>
 
       <div class="nav-item" id="nav-acl" onclick="switchTab('acl')">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
-          <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
-          <path d="M5 6h6M5 8h6M5 10h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-        </svg>
+        <img class="nav-icon" src="assets/Icons/acl.png" alt="ACL" onerror="this.onerror=null;this.src='assets/favicon.png'">
         Access Control List
         <span class="nav-count" id="nav-acl-count">—</span>
       </div>
@@ -164,7 +140,7 @@
       <!-- MODE TOGGLE -->
       <div class="mode-toggle">
         <button class="mode-btn active" id="mode-remote" onclick="switchMode('remote')">
-          ⬡ Remote
+          <img src="assets/Icons/remote.png" alt="Remote" style="width:14px;height:14px;vertical-align:middle;margin-right:8px" onerror="this.onerror=null;this.src='assets/favicon.png'"> Remote
         </button>
         <span class="mode-btn-shell" title="Coming Soon ...">
           <button class="mode-btn disabled" id="mode-local" disabled aria-disabled="true" tabindex="-1">
@@ -264,17 +240,11 @@
         <!-- Actions -->
         <div class="action-row">
           <button class="btn-secondary" id="btn-connect-fast" onclick="handleConnectClick(event, 'fast')" type="button">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 1v6M5 4l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              <path d="M2 10c0 2.2 1.8 4 4 4h4c2.2 0 4-1.8 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
+            <img src="assets/Icons/fast_connect.png" alt="Fast" style="width:16px;height:16px;vertical-align:middle;margin-right:8px;filter:brightness(0) invert(1);" onerror="this.onerror=null;this.src='assets/favicon.png'">
             <span id="btn-connect-fast-text">FAST CONNECT</span>
           </button>
           <button class="btn-primary" id="btn-connect-deep" onclick="handleConnectClick(event, 'deep')" type="button">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 1v6M5 4l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              <path d="M2 10c0 2.2 1.8 4 4 4h4c2.2 0 4-1.8 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
+            <img src="assets/Icons/deep_connect.png" alt="Deep" style="width:16px;height:16px;vertical-align:middle;margin-right:8px" onerror="this.onerror=null;this.src='assets/favicon.png'">
             <span id="btn-connect-deep-text">DEEP CONNECT</span>
           </button>
           <button class="btn-danger" id="btn-disconnect" onclick="doDisconnect()" type="button" style="display: none;">
@@ -285,17 +255,11 @@
             <span id="btn-disconnect-text">DISCONNECT</span>
           </button>
           <button class="btn-secondary" onclick="clearForm()" type="button">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M2 7a5 5 0 1 1 5 5" stroke="currentColor" stroke-width="1.3"/>
-              <path d="M2 4v3h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-            </svg>
+            <img src="assets/Icons/reset.png" alt="Reset" style="width:14px;height:14px;vertical-align:middle;margin-right:8px" onerror="this.onerror=null;this.src='assets/favicon.png'">
             Reset
           </button>
           <button class="btn-secondary" onclick="testConn()" type="button">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M7 2a5 5 0 1 0 0 10A5 5 0 0 0 7 2z" stroke="currentColor" stroke-width="1.3"/>
-              <path d="M7 5v2.5l1.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-            </svg>
+            <img src="assets/Icons/test.png" alt="Test" style="width:14px;height:14px;vertical-align:middle;margin-right:8px" onerror="this.onerror=null;this.src='assets/favicon.png'">
             Test
           </button>
         </div>

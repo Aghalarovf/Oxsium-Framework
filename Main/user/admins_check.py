@@ -460,53 +460,6 @@ def _rule_04_dcsync_get_changes_all(ctx):
     except Exception:
         return False
 
-def _rule_5_krbtgt_generic_all(ctx: dict) -> bool:
-    _RIGHT_WRITE_PROPERTY = 0x00000020   # ADS_RIGHT_DS_WRITE_PROP
-
-    try:
-        aces       = _get_aces(ctx, "krbtgt_aces")
-        identities = _get_identities(ctx)
-
-        for ace in aces:
-            try:
-                sid = ace.get("sid") or ace.get("trustee_sid")
-                if sid not in identities:
-                    continue
-
-                ace_type = _safe_str(ace.get("ace_type") or ace.get("type") or "ALLOW").upper()
-                if "DENY" in ace_type:
-                    continue
-
-                mask = _safe_int(ace.get("mask") or ace.get("access_mask"))
-
-                # GenericAll  (0x000F01FF or 0x10000000 bit)
-                if (mask & _GENERIC_ALL_MASK) == _GENERIC_ALL_MASK:
-                    return True
-                if mask & 0x10000000:
-                    return True
-
-                # GenericWrite (0x0002019F)
-                if (mask & _RIGHT_GENERIC_WRITE) == _RIGHT_GENERIC_WRITE:
-                    return True
-
-                # WriteDACL   (0x00040000)
-                if mask & _RIGHT_WRITE_DACL:
-                    return True
-
-                # WriteOwner  (0x00080000)
-                if mask & _RIGHT_WRITE_OWNER:
-                    return True
-
-                # WriteProperty (ADS_RIGHT_DS_WRITE_PROP = 0x20)
-                if mask & _RIGHT_WRITE_PROPERTY:
-                    return True
-
-            except Exception:
-                continue
-
-        return False
-    except Exception:
-        return False
 
 def _rule_06_adminsdholder_generic_all(ctx):
     try:
@@ -757,7 +710,7 @@ _RULES = [
     (2,  "tier1", "Operator Groups (Account/Server/Backup/GPO/Print/Cryptographic/Hyper-V/Storage Replica Administrators)",        _rule_02_operator_groups),
     (3,  "tier1",    "GenericAll+WriteOwner @ Domain root",                                _rule_03_generic_all_domain_root),
     (4,  "tier1",    "DS-Replication-Get-Changes-All — DCSync",                            _rule_04_dcsync_get_changes_all),
-    (5,  "tier1",    "krbtgt Admin",                                                       _rule_5_krbtgt_generic_all),
+
     (6,  "tier1",    "AdminSDHolder — GA/WriteOwner/WriteDACL/GenericWrite/WriteProperty", _rule_06_adminsdholder_generic_all),
     (7,  "tier1",    "AllExtendedRights @ Domain — includes DCSync",                       _rule_07_all_extended_rights_domain),
     (8,  "absolute",    "Nested group -> Domain Admins (Rule 1 groups)",                      _rule_08_nested_to_domain_admins),

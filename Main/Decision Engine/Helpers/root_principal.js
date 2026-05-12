@@ -6,6 +6,8 @@
     const dropdown   = document.getElementById('root-principal-dropdown');
     const searchInput = document.getElementById('rp-search-input');
     const scrollArea = document.getElementById('rp-scroll-area');
+    const statusDot = document.querySelector('.status-dot');
+    const statusLabel = document.querySelector('.status-label');
 
     /* ── Runtime state ────────────────────────────────────── */
     let rpUsers     = [];   // [{ username, sid }]
@@ -18,14 +20,39 @@
     window.SELECTED_ROOT_PRINCIPAL_SID = '';
 
     const domainObjectBaseUrl = new URL('../../Domain%20Object/', window.location.href);
+    const defaultIconHref = new URL('../../assets/Icons/root_principal.png', window.location.href).href;
+    const fallbackHref = new URL('../../assets/favicon.png', window.location.href).href;
 
-    // Engine API port control (default 5100). Click "Engine Active" to change.
+    // Engine API port control (default 5100). Click the status label to change.
     window.ENGINE_API_HOST = window.ENGINE_API_HOST || '127.0.0.1';
     window.ENGINE_API_PORT = window.ENGINE_API_PORT || '5100';
 
+    function setEngineStatus(isActive) {
+        if (statusLabel) {
+            statusLabel.textContent = isActive ? 'Engine Active' : 'Engine Deactive';
+            statusLabel.classList.toggle('is-active', !!isActive);
+            statusLabel.classList.toggle('is-deactive', !isActive);
+        }
+        if (statusDot) {
+            statusDot.classList.toggle('is-active', !!isActive);
+            statusDot.classList.toggle('is-deactive', !isActive);
+        }
+    }
+
+    async function checkEngineHealth() {
+        try {
+            const url = `http://${window.ENGINE_API_HOST}:${window.ENGINE_API_PORT}/health`;
+            const response = await fetch(url, { cache: 'no-store' });
+            setEngineStatus(response.ok);
+            return response.ok;
+        } catch (err) {
+            setEngineStatus(false);
+            return false;
+        }
+    }
+
     // Attach a click handler to the topbar status label so user can set the engine port.
     try {
-        const statusLabel = document.querySelector('.status-label');
         if (statusLabel) {
             statusLabel.style.cursor = 'pointer';
             statusLabel.title = 'Click to set Engine API host:port';
@@ -47,6 +74,9 @@
     } catch (err) {
         console.warn('[RootPrincipal] status label attach failed:', err && err.message);
     }
+
+    setEngineStatus(false);
+    checkEngineHealth();
 
     /* ══════════════════════════════════════════════════════════
        1. DATA LOADING
@@ -153,7 +183,9 @@
      * @param {string} kind   - 'user' | 'computer'
      */
     function buildItem(label, sid, kind) {
-        const icon   = kind === 'user' ? '▸' : '▪';
+        const iconFile = kind === 'user' ? 'user.png' : 'computer.png';
+        const iconHref = new URL(`../../assets/Icons/${iconFile}`, window.location.href).href;
+        const icon = `<img class="rp-item-icon-img" src="${iconHref}" alt="${kind}" onerror="this.onerror=null;this.src='${fallbackHref}'" />`;
         const isSelected = window.SELECTED_PRINCIPAL
             && window.SELECTED_PRINCIPAL.label === label
             && window.SELECTED_PRINCIPAL.kind  === kind;
@@ -233,6 +265,33 @@
                 scrollArea.appendChild(buildItem(c.computer_name, c.sid, 'computer'))
             );
         }
+
+        // After rendering, ensure we update sticky group visibility according to scroll
+        // (hides the group label that would otherwise appear pinned at the bottom when scrolling)
+        requestAnimationFrame(() => updateGroupLabelVisibility());
+    }
+
+    /** Hide any group-label that is touching the bottom edge of the scroll area while scrolling */
+    function updateGroupLabelVisibility() {
+        if (!scrollArea) return;
+        const areaRect = scrollArea.getBoundingClientRect();
+        const labels = scrollArea.querySelectorAll('.rp-group-label');
+        labels.forEach(lbl => {
+            const lblRect = lbl.getBoundingClientRect();
+            // If the label's bottom is within 6px of the scroll area's bottom, consider it 'touching'
+            if (lblRect.bottom > areaRect.bottom - 6) {
+                lbl.classList.add('hidden-on-scroll');
+            } else {
+                lbl.classList.remove('hidden-on-scroll');
+            }
+        });
+    }
+
+    // Attach scroll handler to update visibility while user scrolls
+    if (scrollArea) {
+        scrollArea.addEventListener('scroll', () => {
+            updateGroupLabelVisibility();
+        }, { passive: true });
     }
 
     /* ══════════════════════════════════════════════════════════
@@ -246,8 +305,9 @@
         window.SELECTED_ROOT_PRINCIPAL_SID = sid || '';
 
         /* Update button label */
-        const icon = kind === 'computer' ? '💻' : '👤';
-        btn.innerHTML = `<span class="rp-icon">${icon}</span><span class="rp-selected-text" title="${escHtml(label)}">${escHtml(label)}</span>`;
+        const iconFile = kind === 'computer' ? 'computer.png' : 'user.png';
+        const iconHref = new URL(`../../assets/Icons/${iconFile}`, window.location.href).href;
+        btn.innerHTML = `<img class="rp-icon-img" src="${iconHref}" alt="${kind}" onerror="this.onerror=null;this.src='${fallbackHref}'" /><span class="topbar-btn-label rp-selected-text" title="${escHtml(label)}">${escHtml(label)}</span>`;
         btn.classList.add('active');
 
         /* Visually mark selected item */
@@ -300,8 +360,7 @@
         window.SELECTED_ROOT_PRINCIPAL_SID = '';
         btn.classList.remove('active');
         btn.classList.remove('open');
-        btn.classList.add('is-default');
-        btn.innerHTML = 'Root Principal';
+        setDefaultButtonState();
         closeDropdown();
 
         if (loaded) {
@@ -344,6 +403,15 @@
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
+    }
+
+    function setDefaultButtonState() {
+        btn.classList.add('is-default');
+        btn.innerHTML = `<img class="rp-icon-img" src="${defaultIconHref}" alt="Root Principal" onerror="this.onerror=null;this.src='${fallbackHref}'" /><span class="topbar-btn-label rp-selected-text">Root Principal</span>`;
+    }
+
+    if (!window.SELECTED_PRINCIPAL) {
+        setDefaultButtonState();
     }
 
     /* ── Expose public API ───────────────────────────────────── */

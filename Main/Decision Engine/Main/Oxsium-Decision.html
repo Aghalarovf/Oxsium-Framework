@@ -19,14 +19,15 @@
         <div class="topbar-left">
             <div class="status-cluster">
                 <div class="status-dot"></div>
-                <span class="status-label">Engine Active</span>
+                <span class="status-label">Engine Deactive</span>
             </div>
 
             <div class="topbar-sep"></div>
             <!-- Root Principal Section -->
             <div class="root-principal-section">
                 <button class="root-principal-btn" id="root-principal-trigger">
-                    Root Principal
+                    <img class="topbar-btn-icon" src="../../assets/Icons/root_principal.png" alt="Root Principal" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
+                    <span class="topbar-btn-label">Root Principal</span>
                 </button>
                 <div class="root-principal-dropdown" id="root-principal-dropdown">
                     <div class="rp-search">
@@ -41,7 +42,8 @@
             <!-- Filters Section -->
             <div class="filters-section">
                 <button class="root-principal-btn" id="filters-trigger">
-                    FILTERS
+                    <img class="topbar-btn-icon" src="../../assets/Icons/filter.png" alt="Filters" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
+                    <span class="topbar-btn-label">FILTERS</span>
                 </button>
                 <div class="root-principal-dropdown filters-dropdown" id="filters-dropdown">
                     <div class="filters-scroll-area" id="filters-scroll-area"></div>
@@ -50,7 +52,10 @@
 
             <!-- Export Button (to the right of Filters) -->
             <div class="export-section">
-                <button class="root-principal-btn" id="export-btn" title="Export">EXPORT</button>
+                <button class="root-principal-btn" id="export-btn" title="Export">
+                    <img class="topbar-btn-icon" src="../../assets/Icons/export.png" alt="Export" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
+                    <span class="topbar-btn-label">EXPORT</span>
+                </button>
             </div>
 
         </div>
@@ -58,13 +63,16 @@
         <!-- Right: action + logo -->
         <div class="topbar-right">
             <button class="reset-btn" id="reset-btn" aria-label="Reset" title="Reset">
-                ↺
+                <img src="../../assets/Icons/reset.png" alt="Reset" style="width:16px;height:16px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
             </button>
             <button class="notifications-btn" id="notifications-btn" aria-label="Notifications" title="Notifications">
-                🔔
+                <img src="../../assets/Icons/notification.png" alt="Notifications" style="width:16px;height:16px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
+            </button>
+            <button class="about-btn" id="about-btn" aria-label="About" title="About">
+                <img src="../../assets/Icons/about.png" alt="About" style="width:16px;height:16px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
             </button>
             <button class="settings-btn" id="settings-btn" aria-label="Settings" title="Settings">
-                ⚙
+                <img src="../../assets/Icons/settings.png" alt="Settings" style="width:16px;height:16px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
             </button>
             
 
@@ -75,7 +83,7 @@
 
             <div class="logo-block">
                 <div class="logo-icon-wrap">
-                    <img src="assets/favicon.png" alt="Oxsium" onerror="this.style.display='none';this.parentElement.innerHTML='<svg viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'#38bdf8\' stroke-width=\'1.5\' width=\'16\' height=\'16\'><path d=\'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5\'/></svg>'">
+                    <img src="../../assets/favicon.png" alt="Oxsium" onerror="this.style.display='none';this.parentElement.innerHTML='<svg viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'#38bdf8\' stroke-width=\'1.5\' width=\'16\' height=\'16\'><path d=\'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5\'/></svg>'">
                 </div>
                 <div class="logo-text-wrap">
                     <div class="logo-name">Oxsium</div>
@@ -113,13 +121,6 @@
 
         <div id="d3-canvas"></div>
 
-        <div class="graph-legend" id="graph-legend">
-            <div class="legend-item"><div class="legend-dot" style="background:#6366f1;box-shadow:0 0 5px #6366f1"></div>User Account</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#0ea5e9;box-shadow:0 0 5px #0ea5e9"></div>Group / OU</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#10b981;box-shadow:0 0 5px #10b981"></div>Computer</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;box-shadow:0 0 5px #f59e0b"></div>Domain</div>
-        </div>
-
         <div class="node-tooltip" id="node-tooltip">
             <div class="tooltip-type" id="tt-type">USER</div>
             <div class="tooltip-name" id="tt-name">—</div>
@@ -145,10 +146,18 @@
             </div>
             <input type="range" class="scale-slider" id="scale-slider" min="30" max="200" value="100" step="5">
             <div class="scale-btns">
-                <button class="scale-btn" id="zoom-in">+</button>
-                <button class="scale-btn" id="zoom-fit">⊡ Fit</button>
-                <button class="scale-btn" id="zoom-out">−</button>
-                <button class="scale-btn" id="zoom-reset">1:1</button>
+                <button class="scale-btn" id="zoom-in" title="Zoom In">
+                    <img src="../../assets/Icons/plus.png" alt="Zoom In" style="width:14px;height:14px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
+                </button>
+                <button class="scale-btn" id="zoom-fit" title="Fit">
+                    <img src="../../assets/Icons/fit.png" alt="Fit" style="width:14px;height:14px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
+                </button>
+                <button class="scale-btn" id="zoom-out" title="Zoom Out">
+                    <img src="../../assets/Icons/minus.png" alt="Zoom Out" style="width:14px;height:14px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
+                </button>
+                <button class="scale-btn" id="zoom-reset" title="1:1">
+                    <img src="../../assets/Icons/versus.png" alt="1:1" style="width:14px;height:14px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
+                </button>
             </div>
         </div>
     </main>
@@ -159,6 +168,16 @@
             <div class="right-title">Path Detail</div>
             <div class="path-detail-name" id="detail-name">Select a path</div>
             <div class="path-detail-sub" id="detail-sub">Click any path card to inspect</div>
+        </div>
+
+        <div class="detail-explain" id="detail-explain">
+            <div class="detail-explain-head">
+                <span class="detail-explain-label">Auto Explanation</span>
+                <span class="detail-explain-chip" id="detail-explain-chip">Path</span>
+            </div>
+            <div class="detail-explain-body" id="detail-explain-body">
+                Select a node or edge in the graph to see a detailed explanation here.
+            </div>
         </div>
 
         <!-- Score ring -->
@@ -197,9 +216,15 @@
 
         <!-- Sparkline -->
         <div class="sparkline-section">
-            <div class="spark-label">Risk Distribution</div>
+            <div class="sparkline-head">
+                <div class="spark-label">Risk Distribution</div>
+                <div class="risk-distribution-sub" id="risk-distribution-sub">Path edges</div>
+            </div>
             <div class="sparkline-wrap">
                 <svg id="sparkline-svg" viewBox="0 0 280 40" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="risk-distribution-list" id="risk-distribution-list">
+                <div class="risk-distribution-empty">Select a node to list connected edge names</div>
             </div>
         </div>
 

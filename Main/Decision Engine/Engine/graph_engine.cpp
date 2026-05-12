@@ -209,7 +209,10 @@ struct AceRecord {
     std::vector<std::string> edge_rights;
     std::vector<AceStep>     next_step;    /* Level-2 chain */
     std::string              source_file;
-    std::vector<std::pair<std::string, JsonVal>> target_attributes; /* enriched from domain JSON */
+    std::vector<std::pair<std::string, JsonVal>> target_attributes;    /* enriched from domain JSON — target node */
+    std::vector<std::pair<std::string, JsonVal>> principal_attributes; /* enriched from domain JSON — principal node (attack vectors) */
+    /* special_edge: populated only for attack-vector entry points (e.g. kerberoasting) */
+    std::string              special_edge;
 };
 
 static JsonVal loadAcls(const std::string& path) {
@@ -269,17 +272,18 @@ static const std::vector<std::string> USER_ATTRS = {
     "admin_rules", "dcsync", "asrep", "kerberoastable", "spn",
     "msds_supportedencryptiontypesname", "msds_supportedencryptiontypes",
     "primary_group_sid", "unconstrained_delegation",
+    "member_of", "domain_sid", "primary_group_id",
     "key_credential_link", "has_key_credential_link"
 };
 
 static const std::vector<std::string> COMPUTER_ATTRS = {
     "disabled", "unconstrained_delegation", "rbcd_enabled", "rbcd_principals",
-    "haslaps", "laps_attributes", "is_domain_controller", "domainsid"
+    "has_laps", "haslaps", "laps_attributes", "is_domain_controller", "domainsid"
 };
 
 static const std::vector<std::string> GROUP_ATTRS = {
-    "group_sid", "group_type", "is_nested", "domainsid",
-    "is_protected", "primary_group_token"
+    "group_sid", "group_type", "is_privileged", "is_nested",
+    "is_protected", "isaclprotected", "primary_group_token", "domainsid"
 };
 
 /* Lookup and extract attributes for a given SID + target_type */
@@ -450,84 +454,6 @@ static bool valueMatches(const JsonVal& val, const std::string& expectedStr) {
     }
 }
 
-static std::vector<AceRecord> extractHop1EntriesByAttribute(
-        const std::string&      usersFilePath,
-        const std::string&      dangerousFilePath,
-        const std::string&      extendedFilePath,
-        const std::string&      attrName,
-        const std::string&      attrValue)
-{
-    std::vector<AceRecord> records;
-    
-    std::cout << "[*] Loading users from: " << usersFilePath << "\n";
-    JsonVal usersRoot = loadAcls(usersFilePath);
-    if (!usersRoot.isObj()) {
-        std::cerr << "[WARN] Invalid users JSON\n";
-        return records;
-    }
-    
-    const JsonArr& usersArr = (usersRoot.find("users") && usersRoot.find("users")->isArr()) 
-                              ? usersRoot.find("users")->arr 
-                              : JsonArr();
-    
-    std::cout << "    Loaded " << usersArr.size() << " user(s)\n";
-    
-    JsonVal dangerousRoot = loadAcls(dangerousFilePath);
-    JsonVal extendedRoot  = loadAcls(extendedFilePath);
-    
-    std::cout << "[*] Filtering users where " << attrName << " = " << attrValue << "\n";
-    
-    size_t matchCount = 0;
-    for (const JsonVal& userEntry : usersArr) {
-        if (!userEntry.isObj()) continue;
-        
-        const JsonVal* attrVal = userEntry.find(attrName);
-        if (!attrVal) continue;
-        if (!valueMatches(*attrVal, attrValue)) continue;
-        
-        std::string username = getStr(userEntry, "username");
-        std::string sid      = getStr(userEntry, "sid");
-        std::string dn       = getStr(userEntry, "dn");
-        
-        if (username.empty() || sid.empty()) continue;
-        
-        matchCount++;
-        std::cout << "    [Match " << matchCount << "] " << username << " (" << sid << ")\n";
-        
-        AceRecord entryPoint;
-        entryPoint.target_name    = username;
-        entryPoint.target_sid     = sid;
-        entryPoint.target_dn      = dn;
-        entryPoint.target_type    = "user";
-        entryPoint.principal_sid  = sid;  
-        entryPoint.principal_name = username;
-        entryPoint.object_acetype = "vulnerable-entry-point";
-        entryPoint.ace_qualifier  = "Allow";
-        entryPoint.rights         = {attrName};  
-        entryPoint.rights_display = attrName;
-        entryPoint.edge_rights    = {attrName};
-        entryPoint.source_file    = "vulnerable entry point (" + attrName + "=" + attrValue + ")";
-        
-        auto dangerous = extractMatching(dangerousRoot, sid, username, "dangerous_ace");
-        auto extended  = extractMatching(extendedRoot,  sid, username, "extended_rights");
-        
-        dangerous.insert(dangerous.end(), extended.begin(), extended.end());
-        auto merged = mergeAceRecords(std::move(dangerous));
-        
-        if (merged.empty()) {
-            std::cout << "      -> No outgoing edges (pure entry point)\n";
-            records.push_back(entryPoint);
-        } else {
-            std::cout << "      -> " << merged.size() << " outgoing edge(s)\n";
-            records.insert(records.end(), merged.begin(), merged.end());
-        }
-    }
-    
-    std::cout << "    Total matching users: " << matchCount << "\n";
-    std::cout << "    Total entry point records created: " << records.size() << "\n";
-    
-    return records;
-}
 
 struct VulnerableUser {
     std::string sid;
@@ -739,6 +665,22 @@ static void writeTargetAttributes(
     f << ind << "},\n";
 }
 
+static void writePrincipalAttributes(
+                std::ofstream& f,
+                const std::vector<std::pair<std::string, JsonVal>>& attrs,
+                const std::string& ind)
+{
+        if (attrs.empty()) return;
+        f << ind << "\"principal_attributes\" : {\n";
+        for (size_t i = 0; i < attrs.size(); ++i) {
+                f << ind << "  \"" << jsonEsc(attrs[i].first) << "\" : "
+                    << jsonValToStr(attrs[i].second);
+                if (i + 1 < attrs.size()) f << ",";
+                f << "\n";
+        }
+        f << ind << "},\n";
+}
+
 static void writeStep(std::ofstream& f, const AceStep& s, const std::string& ind) {
     f << ind << "{\n";
     f << ind << "  \"target_name\"    : \"" << jsonEsc(s.target_name)    << "\",\n";
@@ -764,115 +706,502 @@ static void writeStep(std::ofstream& f, const AceStep& s, const std::string& ind
     f << ind << "}";
 }
 
+/* ══ Kerberoasting Attack Vector ══════════════════════════════════════════ */
+
+struct KerberoastUser {
+    std::string              sid;
+    std::string              name;
+    std::string              dn;
+    std::vector<std::string> spn;
+};
+
+static std::string spnListToJson(const std::vector<std::string>& spns) {
+    std::string r = "[";
+    for (size_t i = 0; i < spns.size(); ++i) {
+        if (i) r += ", ";
+        r += "\"" + jsonEsc(spns[i]) + "\"";
+    }
+    r += "]";
+    return r;
+}
+
+static std::vector<KerberoastUser> extractKerberoastableUsers(const JsonArr& usersArr) {
+    std::vector<KerberoastUser> out;
+    for (const JsonVal& entry : usersArr) {
+        if (!entry.isObj()) continue;
+        const JsonVal* kb = entry.find("kerberoastable");
+        if (!kb || !kb->isBool() || !kb->b) continue;
+
+        KerberoastUser ku;
+        ku.sid  = getStr(entry, "sid");
+        ku.name = getStr(entry, "username");
+        ku.dn   = getStr(entry, "dn");
+        if (ku.sid.empty() || ku.name.empty()) continue;
+
+        /* Collect SPN list — stored as JSON array in domain_users.json */
+        const JsonVal* spnVal = entry.find("spn");
+        if (spnVal && spnVal->isArr()) {
+            for (const JsonVal& s : spnVal->arr)
+                if (s.isStr()) ku.spn.push_back(s.str());
+        } else if (spnVal && spnVal->isStr() && !spnVal->str().empty()) {
+            ku.spn.push_back(spnVal->str());
+        }
+
+        out.push_back(std::move(ku));
+    }
+    return out;
+}
+
+static std::vector<AceRecord> processKerberoasting(
+        const std::vector<KerberoastUser>& kbUsers,
+        const JsonVal&                     dangerousRoot,
+        const JsonVal&                     extendedRoot,
+        const JsonArr&                     usersArr,
+        const SidLookup&                   userLut,
+        const JsonArr&                     computersArr,
+        const SidLookup&                   computerLut,
+        const JsonArr&                     groupsArr,
+        const SidLookup&                   groupLut,
+        ChainCache&                        cache,
+        int                                maxDepth)
+{
+    std::vector<AceRecord> results;
+
+    for (const KerberoastUser& ku : kbUsers) {
+        std::cout << "  [KERB] " << ku.name << " (" << ku.sid << ")\n";
+
+        /* Build special_edge label: "SPN: [spn1, spn2, ...]" */
+        std::string spnLabel = "SPN: " + spnListToJson(ku.spn);
+
+        /* Find all ACEs where this kerberoastable user is the principal */
+        auto dangerous = extractMatching(dangerousRoot, ku.sid, ku.name, "dangerous_ace");
+        auto extended  = extractMatching(extendedRoot,  ku.sid, ku.name, "extended_rights");
+        dangerous.insert(dangerous.end(), extended.begin(), extended.end());
+        auto merged = mergeAceRecords(std::move(dangerous));
+
+        if (merged.empty()) {
+            /* No outgoing ACEs — emit a pure entry-point node so the user
+               still appears in the graph as a kerberoastable account */
+            AceRecord ep;
+            ep.target_name    = ku.name;
+            ep.target_sid     = ku.sid;
+            ep.target_dn      = ku.dn;
+            ep.target_type    = "User";
+            ep.principal_sid  = ku.sid;
+            ep.principal_name = ku.name;
+            ep.object_acetype = "kerberoastable-entry-point";
+            ep.ace_qualifier  = "Allow";
+            ep.rights         = {"kerberoastable"};
+            ep.rights_display = "Kerberoastable";
+            ep.edge_rights    = {"kerberoastable"};
+            ep.source_file    = "kerberoasting (no outgoing edges)";
+            ep.special_edge   = spnLabel;
+            /* Enrich principal attributes (the kerberoastable user itself) */
+            ep.principal_attributes = lookupAttrs(ku.sid, "User",
+                                                  usersArr, userLut,
+                                                  computersArr, computerLut,
+                                                  groupsArr, groupLut);
+            results.push_back(std::move(ep));
+            std::cout << "    -> No outgoing ACEs (pure entry point)\n";
+            continue;
+        }
+
+        /* Attach special_edge and resolve chains for each outgoing record */
+        for (AceRecord& rec : merged) {
+            rec.special_edge  = spnLabel;
+            rec.source_file   = "kerberoasting -> " + rec.source_file;
+
+            if (rec.target_sid.empty()) continue;
+
+            auto cacheHit = cache.find(rec.target_sid);
+            if (cacheHit != cache.end()) {
+                rec.next_step = cacheHit->second;
+                std::cout << "    [cache hit] " << rec.target_name
+                          << " — " << countSteps(rec.next_step) << " edge(s)\n";
+                continue;
+            }
+
+            std::set<std::string> visited;
+            visited.insert(ku.sid);
+            visited.insert(rec.target_sid);
+
+            auto steps_d = extractSteps(dangerousRoot, rec.target_sid,
+                                        rec.target_name, "dangerous_ace");
+            auto steps_e = extractSteps(extendedRoot,  rec.target_sid,
+                                        rec.target_name, "extended_rights");
+            steps_d.insert(steps_d.end(), steps_e.begin(), steps_e.end());
+            rec.next_step = mergeAceSteps(std::move(steps_d));
+
+            for (AceStep& step : rec.next_step)
+                resolveChain(step, dangerousRoot, extendedRoot, visited, cache, 0, maxDepth);
+
+            cache[rec.target_sid] = rec.next_step;
+
+            size_t total = countSteps(rec.next_step);
+            if (total > 0)
+                std::cout << "    -> " << rec.target_name
+                          << " : " << total << " edge(s) in chain\n";
+        }
+
+        /* Enrich target attributes */
+        for (AceRecord& rec : merged) {
+            rec.target_attributes = lookupAttrs(rec.target_sid, rec.target_type,
+                                                usersArr, userLut,
+                                                computersArr, computerLut,
+                                                groupsArr, groupLut);
+            for (AceStep& s : rec.next_step)
+                enrichStepAttributes(s, usersArr, userLut, computersArr, computerLut, groupsArr, groupLut);
+        }
+
+        results.insert(results.end(), merged.begin(), merged.end());
+        std::cout << "    -> " << merged.size() << " record(s) added\n";
+    }
+
+    return results;
+}
+
+/* ══ AS-REP Roasting Attack Vector ════════════════════════════════════════ */
+
+struct AsrepUser {
+    std::string sid;
+    std::string name;
+    std::string dn;
+};
+
+static std::vector<AsrepUser> extractAsrepUsers(const JsonArr& usersArr) {
+    std::vector<AsrepUser> out;
+    for (const JsonVal& entry : usersArr) {
+        if (!entry.isObj()) continue;
+        const JsonVal* ar = entry.find("asrep");
+        if (!ar || !ar->isBool() || !ar->b) continue;
+
+        AsrepUser au;
+        au.sid  = getStr(entry, "sid");
+        au.name = getStr(entry, "username");
+        au.dn   = getStr(entry, "dn");
+        if (au.sid.empty() || au.name.empty()) continue;
+
+        out.push_back(std::move(au));
+    }
+    return out;
+}
+
+static std::vector<AceRecord> processAsrep(
+        const std::vector<AsrepUser>& arUsers,
+        const JsonVal&                dangerousRoot,
+        const JsonVal&                extendedRoot,
+        const JsonArr&                usersArr,
+        const SidLookup&              userLut,
+        const JsonArr&                computersArr,
+        const SidLookup&              computerLut,
+        const JsonArr&                groupsArr,
+        const SidLookup&              groupLut,
+        ChainCache&                   cache,
+        int                           maxDepth)
+{
+    std::vector<AceRecord> results;
+
+    for (const AsrepUser& au : arUsers) {
+        std::cout << "  [ASREP] " << au.name << " (" << au.sid << ")\n";
+
+        /* special_edge label — no SPN, use pre-auth attribute marker */
+        std::string asrepLabel = "pre_not_auth_required";
+
+        /* Find all outgoing ACEs where this AS-REP user is the principal */
+        auto dangerous = extractMatching(dangerousRoot, au.sid, au.name, "dangerous_ace");
+        auto extended  = extractMatching(extendedRoot,  au.sid, au.name, "extended_rights");
+        dangerous.insert(dangerous.end(), extended.begin(), extended.end());
+        auto merged = mergeAceRecords(std::move(dangerous));
+
+        if (merged.empty()) {
+            /* No outgoing ACEs — emit a pure entry-point node */
+            AceRecord ep;
+            ep.target_name    = au.name;
+            ep.target_sid     = au.sid;
+            ep.target_dn      = au.dn;
+            ep.target_type    = "User";
+            ep.principal_sid  = au.sid;
+            ep.principal_name = au.name;
+            ep.object_acetype = "asrep-entry-point";
+            ep.ace_qualifier  = "Allow";
+            ep.rights         = {"asreproastable"};
+            ep.rights_display = "AS-REP Roastable";
+            ep.edge_rights    = {"asreproastable"};
+            ep.source_file    = "asrep (no outgoing edges)";
+            ep.special_edge   = asrepLabel;
+            /* Enrich target attributes from domain_users */
+            ep.target_attributes = lookupAttrs(au.sid, "User",
+                                               usersArr, userLut,
+                                               computersArr, computerLut,
+                                               groupsArr, groupLut);
+            results.push_back(std::move(ep));
+            std::cout << "    -> No outgoing ACEs (pure entry point)\n";
+            continue;
+        }
+
+        /* Attach special_edge and resolve chains for each outgoing record */
+        for (AceRecord& rec : merged) {
+            rec.special_edge = asrepLabel;
+            rec.source_file  = "asrep -> " + rec.source_file;
+
+            if (rec.target_sid.empty()) continue;
+
+            auto cacheHit = cache.find(rec.target_sid);
+            if (cacheHit != cache.end()) {
+                rec.next_step = cacheHit->second;
+                std::cout << "    [cache hit] " << rec.target_name
+                          << " — " << countSteps(rec.next_step) << " edge(s)\n";
+                continue;
+            }
+
+            std::set<std::string> visited;
+            visited.insert(au.sid);
+            visited.insert(rec.target_sid);
+
+            auto steps_d = extractSteps(dangerousRoot, rec.target_sid,
+                                        rec.target_name, "dangerous_ace");
+            auto steps_e = extractSteps(extendedRoot,  rec.target_sid,
+                                        rec.target_name, "extended_rights");
+            steps_d.insert(steps_d.end(), steps_e.begin(), steps_e.end());
+            rec.next_step = mergeAceSteps(std::move(steps_d));
+
+            for (AceStep& step : rec.next_step)
+                resolveChain(step, dangerousRoot, extendedRoot, visited, cache, 0, maxDepth);
+
+            cache[rec.target_sid] = rec.next_step;
+
+            size_t total = countSteps(rec.next_step);
+            if (total > 0)
+                std::cout << "    -> " << rec.target_name
+                          << " : " << total << " edge(s) in chain\n";
+        }
+
+        /* Enrich target attributes */
+        for (AceRecord& rec : merged) {
+            rec.target_attributes = lookupAttrs(rec.target_sid, rec.target_type,
+                                                usersArr, userLut,
+                                                computersArr, computerLut,
+                                                groupsArr, groupLut);
+            for (AceStep& s : rec.next_step)
+                enrichStepAttributes(s, usersArr, userLut, computersArr, computerLut, groupsArr, groupLut);
+        }
+
+        results.insert(results.end(), merged.begin(), merged.end());
+        std::cout << "    -> " << merged.size() << " record(s) added\n";
+    }
+
+    return results;
+}
+
+/* ══ Password Not Required Attack Vector ══════════════════════════════════ */
+
+struct PwdNotRequiredUser {
+    std::string sid;
+    std::string name;
+    std::string dn;
+};
+
+static std::vector<PwdNotRequiredUser> extractPwdNotRequiredUsers(const JsonArr& usersArr) {
+    std::vector<PwdNotRequiredUser> out;
+    for (const JsonVal& entry : usersArr) {
+        if (!entry.isObj()) continue;
+
+        bool isPwdNotRequired = false;
+        const JsonVal* pnrUnderscore = entry.find("pwd_not_required");
+        if (pnrUnderscore && pnrUnderscore->isBool() && pnrUnderscore->b)
+            isPwdNotRequired = true;
+
+        const JsonVal* pnrHyphen = entry.find("pwd-not-required");
+        if (pnrHyphen && pnrHyphen->isBool() && pnrHyphen->b)
+            isPwdNotRequired = true;
+
+        if (!isPwdNotRequired) continue;
+
+        PwdNotRequiredUser pu;
+        pu.sid  = getStr(entry, "sid");
+        pu.name = getStr(entry, "username");
+        pu.dn   = getStr(entry, "dn");
+        if (pu.sid.empty() || pu.name.empty()) continue;
+
+        out.push_back(std::move(pu));
+    }
+    return out;
+}
+
+static std::vector<AceRecord> processPwdNotRequired(
+        const std::vector<PwdNotRequiredUser>& pnrUsers,
+        const JsonVal&                         dangerousRoot,
+        const JsonVal&                         extendedRoot,
+        const JsonArr&                         usersArr,
+        const SidLookup&                       userLut,
+        const JsonArr&                         computersArr,
+        const SidLookup&                       computerLut,
+        const JsonArr&                         groupsArr,
+        const SidLookup&                       groupLut,
+        ChainCache&                            cache,
+        int                                    maxDepth)
+{
+    std::vector<AceRecord> results;
+
+    for (const PwdNotRequiredUser& pu : pnrUsers) {
+        std::cout << "  [PWD-NOT-REQUIRED] " << pu.name << " (" << pu.sid << ")\n";
+
+        std::string pnrLabel = "PWD Not Required";
+
+        auto dangerous = extractMatching(dangerousRoot, pu.sid, pu.name, "dangerous_ace");
+        auto extended  = extractMatching(extendedRoot,  pu.sid, pu.name, "extended_rights");
+        dangerous.insert(dangerous.end(), extended.begin(), extended.end());
+        auto merged = mergeAceRecords(std::move(dangerous));
+
+        if (merged.empty()) {
+            AceRecord ep;
+            ep.target_name    = pu.name;
+            ep.target_sid     = pu.sid;
+            ep.target_dn      = pu.dn;
+            ep.target_type    = "User";
+            ep.principal_sid  = pu.sid;
+            ep.principal_name = pu.name;
+            ep.object_acetype = "pwd-not-required-entry-point";
+            ep.ace_qualifier  = "Allow";
+            ep.rights         = {"pwd_not_required"};
+            ep.rights_display = "PWD Not Required";
+            ep.edge_rights    = {"pwd_not_required"};
+            ep.source_file    = "pwd-not-required (no outgoing edges)";
+            ep.special_edge   = pnrLabel;
+            ep.target_attributes = lookupAttrs(pu.sid, "User",
+                                               usersArr, userLut,
+                                               computersArr, computerLut,
+                                               groupsArr, groupLut);
+            results.push_back(std::move(ep));
+            std::cout << "    -> No outgoing ACEs (pure entry point)\n";
+            continue;
+        }
+
+        for (AceRecord& rec : merged) {
+            rec.special_edge = pnrLabel;
+            rec.source_file  = "pwd-not-required -> " + rec.source_file;
+
+            if (rec.target_sid.empty()) continue;
+
+            auto cacheHit = cache.find(rec.target_sid);
+            if (cacheHit != cache.end()) {
+                rec.next_step = cacheHit->second;
+                std::cout << "    [cache hit] " << rec.target_name
+                          << " — " << countSteps(rec.next_step) << " edge(s)\n";
+                continue;
+            }
+
+            std::set<std::string> visited;
+            visited.insert(pu.sid);
+            visited.insert(rec.target_sid);
+
+            auto steps_d = extractSteps(dangerousRoot, rec.target_sid,
+                                        rec.target_name, "dangerous_ace");
+            auto steps_e = extractSteps(extendedRoot,  rec.target_sid,
+                                        rec.target_name, "extended_rights");
+            steps_d.insert(steps_d.end(), steps_e.begin(), steps_e.end());
+            rec.next_step = mergeAceSteps(std::move(steps_d));
+
+            for (AceStep& step : rec.next_step)
+                resolveChain(step, dangerousRoot, extendedRoot, visited, cache, 0, maxDepth);
+
+            cache[rec.target_sid] = rec.next_step;
+
+            size_t total = countSteps(rec.next_step);
+            if (total > 0)
+                std::cout << "    -> " << rec.target_name
+                          << " : " << total << " edge(s) in chain\n";
+        }
+
+        for (AceRecord& rec : merged) {
+            rec.target_attributes = lookupAttrs(rec.target_sid, rec.target_type,
+                                                usersArr, userLut,
+                                                computersArr, computerLut,
+                                                groupsArr, groupLut);
+            for (AceStep& s : rec.next_step)
+                enrichStepAttributes(s, usersArr, userLut, computersArr, computerLut, groupsArr, groupLut);
+        }
+
+        results.insert(results.end(), merged.begin(), merged.end());
+        std::cout << "    -> " << merged.size() << " record(s) added\n";
+    }
+
+    return results;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+static void writeRecord(
+        std::ofstream&       f,
+        const AceRecord&     r,
+        bool                 isLast)
+{
+    f << "    {\n";
+    f << "      \"target_name\"    : \"" << jsonEsc(r.target_name)    << "\",\n";
+    f << "      \"target_sid\"     : \"" << jsonEsc(r.target_sid)     << "\",\n";
+    f << "      \"target_dn\"      : \"" << jsonEsc(r.target_dn)      << "\",\n";
+    f << "      \"target_type\"    : \"" << jsonEsc(r.target_type)    << "\",\n";
+    f << "      \"principal_sid\"  : \"" << jsonEsc(r.principal_sid)  << "\",\n";
+    f << "      \"principal_name\" : \"" << jsonEsc(r.principal_name) << "\",\n";
+    f << "      \"object_acetype\" : \"" << jsonEsc(r.object_acetype) << "\",\n";
+    f << "      \"ace_qualifier\"  : \"" << jsonEsc(r.ace_qualifier)  << "\",\n";
+    f << "      \"rights\"         : "   << strArrToJson(r.rights)      << ",\n";
+    f << "      \"rights_display\" : \"" << jsonEsc(r.rights_display) << "\",\n";
+    f << "      \"edge_rights\"    : "   << strArrToJson(r.edge_rights) << ",\n";
+    writeTargetAttributes(f, r.target_attributes, "      ");
+    writePrincipalAttributes(f, r.principal_attributes, "      ");
+    if (!r.special_edge.empty())
+        f << "      \"special_edge\"   : \"" << jsonEsc(r.special_edge) << "\",\n";
+    f << "      \"next_step\"      : [\n";
+    for (size_t j = 0; j < r.next_step.size(); ++j) {
+        writeStep(f, r.next_step[j], "        ");
+        if (j + 1 < r.next_step.size()) f << ",";
+        f << "\n";
+    }
+    f << "      ],\n";
+    f << "      \"_source\"        : \"" << jsonEsc(r.source_file) << "\"\n";
+    f << "    }";
+    if (!isLast) f << ",";
+    f << "\n";
+}
+
 static void writeGraphObjects(
-        const std::string&                 outPath,
-        const std::string&                 sid,
-        const std::string&                 name,
-        const std::vector<AceRecord>&      records,
-        const std::vector<AceRecord>&      vulnerableRecords = {},
-        const std::vector<VulnerableUser>& vuUsers           = {})
+        const std::string&            outPath,
+        const std::string&            sid,
+        const std::string&            name,
+        const std::vector<AceRecord>& records,
+        const std::vector<AceRecord>& attackVectorRecords = {},
+    const std::vector<AceRecord>& asrepRecords = {},
+    const std::vector<AceRecord>& pwdNotRequiredRecords = {})
 {
     std::ofstream f(outPath, std::ios::out | std::ios::trunc);
     if (!f) throw std::runtime_error("Cannot write to file: " + outPath);
 
-    size_t totalRecords = records.size() + vulnerableRecords.size();
-
-    std::map<std::string, const VulnerableUser*> vuMap;
-    for (const VulnerableUser& vu : vuUsers)
-        if (!vu.sid.empty())
-            vuMap[vu.sid] = &vu;
+    size_t totalRecords = records.size() + attackVectorRecords.size() + asrepRecords.size() + pwdNotRequiredRecords.size();
 
     f << "{\n";
-    f << "  \"principal_sid\"  : \"" << jsonEsc(sid)   << "\",\n";
-    f << "  \"principal_name\" : \"" << jsonEsc(name)  << "\",\n";
-    f << "  \"total\"          : "   << totalRecords << ",\n";
-
-    /* ── Vulnerable users section ── */
-    f << "  \"vulnerable_users\" : [\n";
-    for (size_t i = 0; i < vuUsers.size(); ++i) {
-        const VulnerableUser& vu = vuUsers[i];
-        f << "    {\n";
-        f << "      \"name\"             : \"" << jsonEsc(vu.name) << "\",\n";
-        f << "      \"sid\"              : \"" << jsonEsc(vu.sid)  << "\",\n";
-        f << "      \"dn\"               : \"" << jsonEsc(vu.dn)   << "\",\n";
-        f << "      \"pwd_not_required\" : " << (vu.pwd_not_required ? "true" : "false") << ",\n";
-        f << "      \"asrep\"            : " << (vu.asrep            ? "true" : "false") << ",\n";
-        f << "      \"kerberoastable\"   : " << (vu.kerberoastable   ? "true" : "false") << "\n";
-        f << "    }";
-        if (i + 1 < vuUsers.size()) f << ",";
-        f << "\n";
-    }
-    f << "  ],\n";
+    f << "  \"principal_sid\"  : \"" << jsonEsc(sid)  << "\",\n";
+    f << "  \"principal_name\" : \"" << jsonEsc(name) << "\",\n";
+    f << "  \"total\"          : "    << totalRecords  << ",\n";
 
     f << "  \"graph_objects\"  : [\n";
 
     size_t idx = 0;
 
     for (size_t i = 0; i < records.size(); ++i, ++idx) {
-        const AceRecord& r = records[i];
-        f << "    {\n";
-        f << "      \"target_name\"    : \"" << jsonEsc(r.target_name)    << "\",\n";
-        f << "      \"target_sid\"     : \"" << jsonEsc(r.target_sid)     << "\",\n";
-        f << "      \"target_dn\"      : \"" << jsonEsc(r.target_dn)      << "\",\n";
-        f << "      \"target_type\"    : \"" << jsonEsc(r.target_type)    << "\",\n";
-        f << "      \"principal_sid\"  : \"" << jsonEsc(r.principal_sid)  << "\",\n";
-        f << "      \"principal_name\" : \"" << jsonEsc(r.principal_name) << "\",\n";
-        f << "      \"object_acetype\" : \"" << jsonEsc(r.object_acetype) << "\",\n";
-        f << "      \"ace_qualifier\"  : \"" << jsonEsc(r.ace_qualifier)  << "\",\n";
-        f << "      \"rights\"         : "   << strArrToJson(r.rights)     << ",\n";
-        f << "      \"rights_display\" : \"" << jsonEsc(r.rights_display) << "\",\n";
-        f << "      \"edge_rights\"    : "   << strArrToJson(r.edge_rights) << ",\n";
-        writeTargetAttributes(f, r.target_attributes, "      ");
-        f << "      \"next_step\"      : [\n";
-        for (size_t j = 0; j < r.next_step.size(); ++j) {
-            writeStep(f, r.next_step[j], "        ");
-            if (j + 1 < r.next_step.size()) f << ",";
-            f << "\n";
-        }
-        f << "      ],\n";
-        f << "      \"_source\"        : \"" << jsonEsc(r.source_file)    << "\"\n";
-        f << "    }";
-        if (idx + 1 < totalRecords) f << ",";
-        f << "\n";
+        writeRecord(f, records[i], (idx + 1 == totalRecords));
     }
 
-    for (size_t i = 0; i < vulnerableRecords.size(); ++i, ++idx) {
-        const AceRecord& r = vulnerableRecords[i];
-        f << "    {\n";
-        f << "      \"target_name\"    : \"" << jsonEsc(r.target_name)    << "\",\n";
-        f << "      \"target_sid\"     : \"" << jsonEsc(r.target_sid)     << "\",\n";
-        f << "      \"target_dn\"      : \"" << jsonEsc(r.target_dn)      << "\",\n";
-        f << "      \"target_type\"    : \"" << jsonEsc(r.target_type)    << "\",\n";
-        f << "      \"principal_sid\"  : \"" << jsonEsc(r.principal_sid)  << "\",\n";
-        f << "      \"principal_name\" : \"" << jsonEsc(r.principal_name) << "\",\n";
-        f << "      \"object_acetype\" : \"" << jsonEsc(r.object_acetype) << "\",\n";
-        f << "      \"ace_qualifier\"  : \"" << jsonEsc(r.ace_qualifier)  << "\",\n";
-        f << "      \"rights\"         : "   << strArrToJson(r.rights)     << ",\n";
-        f << "      \"rights_display\" : \"" << jsonEsc(r.rights_display) << "\",\n";
-        f << "      \"edge_rights\"    : "   << strArrToJson(r.edge_rights) << ",\n";
-        {
-            auto vuIt = vuMap.find(r.principal_sid);
-            if (vuIt != vuMap.end()) {
-                const VulnerableUser& vu = *vuIt->second;
-                f << "      \"entry_point_flags\" : {\n";
-                f << "        \"pwd_not_required\" : " << (vu.pwd_not_required ? "true" : "false") << ",\n";
-                f << "        \"asrep\"            : " << (vu.asrep            ? "true" : "false") << ",\n";
-                f << "        \"kerberoastable\"   : " << (vu.kerberoastable   ? "true" : "false") << "\n";
-                f << "      },\n";
-            }
-        }
-        writeTargetAttributes(f, r.target_attributes, "      ");
-        f << "      \"next_step\"      : [\n";
-        for (size_t j = 0; j < r.next_step.size(); ++j) {
-            writeStep(f, r.next_step[j], "        ");
-            if (j + 1 < r.next_step.size()) f << ",";
-            f << "\n";
-        }
-        f << "      ],\n";
-        f << "      \"_source\"        : \"" << jsonEsc(r.source_file) << " (vulnerable entry point)\"\n";
-        f << "    }";
-        if (idx + 1 < totalRecords) f << ",";
-        f << "\n";
+    for (size_t i = 0; i < attackVectorRecords.size(); ++i, ++idx) {
+        writeRecord(f, attackVectorRecords[i], (idx + 1 == totalRecords));
+    }
+
+    for (size_t i = 0; i < asrepRecords.size(); ++i, ++idx) {
+        writeRecord(f, asrepRecords[i], (idx + 1 == totalRecords));
+    }
+
+    for (size_t i = 0; i < pwdNotRequiredRecords.size(); ++i, ++idx) {
+        writeRecord(f, pwdNotRequiredRecords[i], (idx + 1 == totalRecords));
     }
 
     f << "  ]\n";
@@ -948,12 +1277,18 @@ int main(int argc, char* argv[]) {
     std::string outFile       = (engineDir   / "graph_objects.json").string();
     int         maxDepth      = 50;
     
-    struct Hop1Filter {
-        std::string file;
-        std::string attr;
-        std::string value;
-    };
-    std::vector<Hop1Filter> hop1Filters;
+    bool flagGpos              = false;
+    bool flagOus               = false;
+    bool flagTrusts            = false;
+    bool flagKerberoasting     = false;
+    bool flagAsrep             = false;
+    bool flagPwdNotRequired    = false;
+    bool flagEncryption        = false;
+    bool flagKeyCredentialLink = false;
+    bool flagManagedBy         = false;
+    bool flagRbcd              = false;
+    bool flagMemberOf          = false;
+    bool flagUnconstrained     = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -965,13 +1300,18 @@ int main(int argc, char* argv[]) {
         else if  (arg == "--computers"            && i + 1 < argc) computersFile = argv[++i];
         else if  (arg == "--groups"               && i + 1 < argc) groupsFile    = argv[++i];
         else if  (arg == "--out"                  && i + 1 < argc) outFile       = argv[++i];
-        else if  (arg == "--hop1-filter"          && i + 3 < argc) {
-            Hop1Filter f;
-            f.file  = argv[++i];
-            f.attr  = argv[++i];
-            f.value = argv[++i];
-            hop1Filters.push_back(f);
-        }
+        else if  (arg == "--gpos")                flagGpos              = true;
+        else if  (arg == "--ous")                 flagOus               = true;
+        else if  (arg == "--trusts")              flagTrusts            = true;
+        else if  (arg == "--kerberoasting")       flagKerberoasting     = true;
+        else if  (arg == "--asrep")               flagAsrep             = true;
+        else if  (arg == "--pwd-not-required")    flagPwdNotRequired    = true;
+        else if  (arg == "--encryption")          flagEncryption        = true;
+        else if  (arg == "--key-credential-link") flagKeyCredentialLink = true;
+        else if  (arg == "--managed-by")          flagManagedBy         = true;
+        else if  (arg == "--rbcd")                flagRbcd              = true;
+        else if  (arg == "--member-of")           flagMemberOf          = true;
+        else if  (arg == "--unconstrained")       flagUnconstrained     = true;
         else if  (arg == "--max-depth"            && i + 1 < argc) {
             try {
                 int v = std::stoi(argv[++i]);
@@ -1005,19 +1345,24 @@ int main(int argc, char* argv[]) {
             << "                       (default: " << groupsFile    << ")\n"
             << "  --out       <file>   Output destination file\n"
             << "                       (default: " << outFile << ")\n"
-            << "  --hop1-filter <file> <attr> <value>\n"
-            << "                       Add Hop-1 entry point filter\n"
-            << "                       Example: --hop1-filter domain_users.json kerberoastable true\n"
-            << "                       Can be used multiple times for multiple filters\n"
+            << "  --gpos               Enumerate Group Policy Objects\n"
+            << "  --ous                Enumerate Organizational Units\n"
+            << "  --trusts             Enumerate domain trusts\n"
+            << "  --kerberoasting      Find kerberoastable accounts\n"
+            << "  --asrep              Find AS-REP roastable accounts\n"
+            << "  --pwd-not-required   Find accounts with password not required\n"
+            << "  --encryption         Enumerate encryption settings\n"
+            << "  --key-credential-link Find accounts with key credential link\n"
+            << "  --managed-by         Enumerate managed-by relationships\n"
+            << "  --rbcd               Find Resource-Based Constrained Delegation targets\n"
+            << "  --member-of          Enumerate group memberships\n"
+            << "  --unconstrained      Find unconstrained delegation accounts\n"
             << "  --max-depth <int>    Maximum hop depth for next_step resolution\n"
             << "                       (default: 50, min: 1)\n\n"
             << "Examples:\n"
             << "  graph_engine -r S-1-5-21-767238238-2156610861-601915929-527 -n JohnDoe\n"
-            << "  graph_engine -r S-1-5-21-... -n JohnDoe --hop1-filter domain_users.json kerberoastable true\n"
-            << "  graph_engine -r S-1-5-21-... -n JohnDoe \\\n"
-            << "    --hop1-filter domain_users.json kerberoastable true \\\n"
-            << "    --hop1-filter domain_users.json asrep true \\\n"
-            << "    --hop1-filter domain_users.json pwd_not_required true\n";
+            << "  graph_engine -r S-1-5-21-... -n JohnDoe --kerberoasting\n"
+            << "  graph_engine -r S-1-5-21-... -n JohnDoe --asrep --pwd-not-required --unconstrained\n";
         return 1;
     }
 
@@ -1146,90 +1491,66 @@ int main(int argc, char* argv[]) {
         std::cout << "\n[!] No ACEs found for root SID — skipping L1 chain resolution.\n";
     }
 
-    /* ══ Process Hop-1 Entry Point Filters ══ */
-    std::cout << "\n[*] Processing Hop-1 entry point filters...\n";
-    std::vector<AceRecord> hop1Records;
-    
-    if (hop1Filters.empty()) {
-        std::cout << "    No --hop1-filter arguments provided.\n";
-    } else {
-        for (size_t fidx = 0; fidx < hop1Filters.size(); ++fidx) {
-            const auto& f = hop1Filters[fidx];
-            std::cout << "\n  [Filter " << (fidx + 1) << "] " << f.attr << " = " << f.value << "\n";
-            
-            auto filtered = extractHop1EntriesByAttribute(f.file, dangerousFile, extendedFile, f.attr, f.value);
-            std::cout << "    Extracted " << filtered.size() << " ACE record(s)\n";
-            
-            hop1Records.insert(hop1Records.end(), filtered.begin(), filtered.end());
+    /* ══ Process --kerberoasting flag ══ */
+    std::vector<AceRecord> kerberoastingRecords;
+    if (flagKerberoasting) {
+        std::cout << "\n[*] Processing --kerberoasting attack vectors...\n";
+        auto kbUsers = extractKerberoastableUsers(usersArr);
+        std::cout << "    Found " << kbUsers.size() << " kerberoastable user(s)\n";
+        if (!kbUsers.empty()) {
+            kerberoastingRecords = processKerberoasting(
+                kbUsers, dangerousRoot, extendedRoot,
+                usersArr, userLut, computersArr, computerLut, groupsArr, groupLut,
+                chainCache, maxDepth);
+            std::cout << "    Kerberoasting records resolved: "
+                      << kerberoastingRecords.size() << " record(s)\n";
         }
-        
-        if (!hop1Records.empty()) {
-            std::cout << "[*] Resolving chains for Hop-1 entry point records...\n";
+    }
 
-            size_t hop1Steps = 0;
-            ChainCache hop1Cache;
+    /* ══ Process --asrep flag ══ */
+    std::vector<AceRecord> asrepRecords;
+    if (flagAsrep) {
+        std::cout << "\n[*] Processing --asrep attack vectors...\n";
+        auto arUsers = extractAsrepUsers(usersArr);
+        std::cout << "    Found " << arUsers.size() << " AS-REP roastable user(s)\n";
+        if (!arUsers.empty()) {
+            asrepRecords = processAsrep(
+                arUsers, dangerousRoot, extendedRoot,
+                usersArr, userLut, computersArr, computerLut, groupsArr, groupLut,
+                chainCache, maxDepth);
+            std::cout << "    AS-REP records resolved: "
+                      << asrepRecords.size() << " record(s)\n";
+        }
+    }
 
-            for (AceRecord& rec : hop1Records) {
-                if (rec.target_sid.empty()) continue;
-
-                std::cout << "    [HOP1] " << rec.principal_name << " -> "
-                          << rec.target_name << " (" << rec.target_sid << ")\n";
-
-                auto cacheHit = hop1Cache.find(rec.target_sid);
-                if (cacheHit != hop1Cache.end()) {
-                    rec.next_step = cacheHit->second;
-                    std::cout << "      [cache hit] — " << countSteps(rec.next_step) << " edge(s)\n";
-                    hop1Steps += countSteps(rec.next_step);
-                    continue;
-                }
-
-                std::set<std::string> visited;
-                visited.insert(rec.principal_sid);
-                visited.insert(rec.target_sid);
-
-                auto steps_d = extractSteps(dangerousRoot, rec.target_sid,
-                                            rec.target_name, "dangerous_ace");
-                auto steps_e = extractSteps(extendedRoot,  rec.target_sid,
-                                            rec.target_name, "extended_rights");
-
-                steps_d.insert(steps_d.end(), steps_e.begin(), steps_e.end());
-                rec.next_step = mergeAceSteps(std::move(steps_d));
-
-                if (!rec.next_step.empty()) {
-                    std::cout << "      [depth 0] " << rec.next_step.size() << " edge(s) — expanding...\n";
-                }
-
-                for (AceStep& step : rec.next_step)
-                    resolveChain(step, dangerousRoot, extendedRoot, visited, hop1Cache);
-
-                hop1Cache[rec.target_sid] = rec.next_step;
-
-                size_t recTotal = countSteps(rec.next_step);
-                hop1Steps += recTotal;
-                if (recTotal > 0)
-                    std::cout << "      -> " << recTotal << " total edge(s)\n";
-            }
-
-            /* Enrich hop1 records with domain attributes */
-            for (AceRecord& rec : hop1Records) {
-                rec.target_attributes = lookupAttrs(rec.target_sid, rec.target_type,
-                                                   usersArr, userLut,
-                                                   computersArr, computerLut,
-                                                   groupsArr, groupLut);
-                for (AceStep& s : rec.next_step)
-                    enrichStepAttributes(s, usersArr, userLut, computersArr, computerLut, groupsArr, groupLut);
-            }
-
-            std::cout << "    Hop-1 chains resolved: " << hop1Steps << " total edge(s)\n";
+    /* ══ Process --pwd-not-required flag ══ */
+    std::vector<AceRecord> pwdNotRequiredRecords;
+    if (flagPwdNotRequired) {
+        std::cout << "\n[*] Processing --pwd-not-required attack vectors...\n";
+        auto pnrUsers = extractPwdNotRequiredUsers(usersArr);
+        std::cout << "    Found " << pnrUsers.size() << " pwd-not-required user(s)\n";
+        if (!pnrUsers.empty()) {
+            pwdNotRequiredRecords = processPwdNotRequired(
+                pnrUsers, dangerousRoot, extendedRoot,
+                usersArr, userLut, computersArr, computerLut, groupsArr, groupLut,
+                chainCache, maxDepth);
+            std::cout << "    Pwd-not-required records resolved: "
+                      << pwdNotRequiredRecords.size() << " record(s)\n";
         }
     }
 
     /* Write Output */
     std::cout << "\n[*] Writing " << all.size() << " L1 record(s) + "
-              << totalSteps << " recursive edge(s) + "
-              << hop1Records.size() << " Hop-1 entry point record(s) to " << outFile << "...\n";
+              << totalSteps << " recursive edge(s)";
+    if (!kerberoastingRecords.empty())
+        std::cout << " + " << kerberoastingRecords.size() << " kerberoasting record(s)";
+    if (!asrepRecords.empty())
+        std::cout << " + " << asrepRecords.size() << " AS-REP record(s)";
+    if (!pwdNotRequiredRecords.empty())
+        std::cout << " + " << pwdNotRequiredRecords.size() << " pwd-not-required record(s)";
+    std::cout << " to " << outFile << "...\n";
     try {
-        writeGraphObjects(outFile, sid, name, all, hop1Records);
+        writeGraphObjects(outFile, sid, name, all, kerberoastingRecords, asrepRecords, pwdNotRequiredRecords);
     } catch (const std::exception& e) {
         std::cerr << "[ERROR] " << e.what() << "\n";
         return 2;
@@ -1243,9 +1564,14 @@ int main(int argc, char* argv[]) {
     std::cout << "  L1 Edges (total)        : " << all.size()      << "\n";
     std::cout << "    dangerous_ace         : " << dangerous.size() << "\n";
     std::cout << "    extended_rights       : " << extended.size()  << "\n";
-    std::cout << "  Hop-1 Entry Points      : " << hop1Records.size() << "\n";
     std::cout << "  next_step edges (total) : " << totalSteps       << "\n";
     std::cout << "    (fully recursive — all depths)\n";
+    if (flagKerberoasting)
+        std::cout << "  Kerberoasting records   : " << kerberoastingRecords.size() << "\n";
+    if (flagAsrep)
+        std::cout << "  AS-REP records          : " << asrepRecords.size() << "\n";
+    if (flagPwdNotRequired)
+        std::cout << "  Pwd-not-required records: " << pwdNotRequiredRecords.size() << "\n";
     std::cout << "----------------------------------------------\n";
 
     return 0;

@@ -22,6 +22,12 @@ class EdgeWidth:
     dimmed:      float
 
 EDGE_COLORS: dict[str, EdgeColorScheme] = {
+    "blue": EdgeColorScheme(
+        stroke="rgba(56, 189, 248, 0.75)",
+        stroke_active="rgba(56, 189, 248, 1.0)",
+        arrow_fill="#38bdf8",
+        label_fill="#38bdf8"
+    ),
     "critical": EdgeColorScheme(
         stroke="rgba(239, 68, 68, 0.75)",
         stroke_active="rgba(239, 68, 68, 1.0)",
@@ -43,6 +49,7 @@ EDGE_COLORS: dict[str, EdgeColorScheme] = {
 }
 
 EDGE_WIDTHS: dict[str, float] = {
+    "blue":        1.0,
     "critical":    2.0,
     "high":        1.5,
     "normal":      1.0,
@@ -51,6 +58,7 @@ EDGE_WIDTHS: dict[str, float] = {
 }
 
 EDGE_FORCES: dict[str, EdgeForce] = {
+    "blue":     EdgeForce(distance=145, strength=0.40),
     "critical": EdgeForce(distance=90,  strength=0.85),
     "high":     EdgeForce(distance=110, strength=0.65),
     "normal":   EdgeForce(distance=145, strength=0.40),
@@ -89,6 +97,9 @@ def get_edge_category(edge_rights: list[str], crit_flag: bool = False) -> str:
     if crit_flag:
         return "critical"
     rights_set = set(edge_rights or [])
+    rights_lower = {str(r).lower() for r in rights_set}
+    if "kerberoastable" in rights_lower or "asreproastable" in rights_lower:
+        return "blue"
     if rights_set & CRITICAL_RIGHTS:
         return "critical"
     if rights_set & HIGH_RIGHTS:

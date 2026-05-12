@@ -1,6 +1,12 @@
 const EDGE_RULES = {
 
     colors: {
+        blue: {
+            stroke:       'rgba(56, 189, 248, 0.75)',
+            strokeActive: 'rgba(56, 189, 248, 1.0)',
+            arrowFill:    '#38bdf8',
+            labelFill:    '#38bdf8'
+        },
         critical: {
             stroke:       'rgba(239, 68, 68, 0.75)',   
             strokeActive: 'rgba(239, 68, 68, 1.0)',
@@ -28,6 +34,7 @@ const EDGE_RULES = {
     },
 
     width: {
+        blue:    3,
         critical: 3,     
         high:     3,
         special:  3,
@@ -65,6 +72,7 @@ const EDGE_RULES = {
     },
 
     force: {
+        blue:     { distance: 200, strength: 0.40 },
         critical: { distance: 200, strength: 0.85 },
         high:     { distance: 200, strength: 0.65 },
         special:  { distance: 200, strength: 0.55 },
@@ -116,6 +124,8 @@ const EDGE_RULES = {
 function getEdgeCategory(d) {
     if (d.crit) return 'critical';
     const rights = Array.isArray(d.edge_rights) ? d.edge_rights : [];
+    const rightsLower = rights.map(r => String(r).toLowerCase());
+    if (rightsLower.some(r => r === 'kerberoastable' || r === 'asreproastable')) return 'blue';
     if (rights.some(r => EDGE_RULES.criticalRights.includes(r))) return 'critical';
     if (rights.some(r => EDGE_RULES.highRights.includes(r)))    return 'high';
     if (rights.some(r => EDGE_RULES.specialRights.includes(r)))  return 'special';
@@ -140,7 +150,17 @@ function getEdgeLabelColor(d) {
 }
 
 function getEdgeForce(d) {
-    return EDGE_RULES.force[getEdgeCategory(d)];
+    const force = EDGE_RULES.force[getEdgeCategory(d)];
+    const sourceDegree = Number(d?.source?.edgeDegree || d?.source?.degree || 0);
+    const targetDegree = Number(d?.target?.edgeDegree || d?.target?.degree || 0);
+    const heavyNode = Math.max(sourceDegree, targetDegree) >= 10;
+
+    if (!heavyNode) return force;
+
+    return {
+        distance: force.distance * 2,
+        strength: force.strength
+    };
 }
 
 function formatEdgeLabel(rel) {

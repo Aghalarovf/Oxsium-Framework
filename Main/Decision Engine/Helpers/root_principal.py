@@ -132,11 +132,19 @@ def start_api_server(port=PORT, host="localhost", base_dir=None):
         if name:
             cmd += ["-n", name]
         
-        # Always add default Hop-1 filters for vulnerable users (with full paths)
-        domain_obj_path = actual_base / "Domain Object" / "domain_users.json"
-        cmd += ["--hop1-filter", str(domain_obj_path), "kerberoastable", "true"]
-        cmd += ["--hop1-filter", str(domain_obj_path), "asrep", "true"]
-        cmd += ["--hop1-filter", str(domain_obj_path), "pwd_not_required", "true"]
+        # Use the native graph_engine flags instead of the old hop1-filter shim.
+        cmd += ["--gpos"]
+        cmd += ["--ous"]
+        cmd += ["--trusts"]
+        cmd += ["--kerberoasting"]
+        cmd += ["--asrep"]
+        cmd += ["--pwd-not-required"]
+        cmd += ["--encryption"]
+        cmd += ["--key-credential-link"]
+        cmd += ["--managed-by"]
+        cmd += ["--rbcd"]
+        cmd += ["--member-of"]
+        cmd += ["--unconstrained"]
         
         cmd += ["--out", str(out_file)]
 

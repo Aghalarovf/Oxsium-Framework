@@ -49,6 +49,18 @@ function loadGraphData(graphData, attackPaths) {
     GRAPH_DATA   = graphData   || { nodes: [], links: [] };
     ATTACK_PATHS = attackPaths || [];
 
+    const nodeEdgeCounts = new Map();
+    (GRAPH_DATA.links || []).forEach(link => {
+        const sourceId = String(link.source?.id || link.source || '').toLowerCase();
+        const targetId = String(link.target?.id || link.target || '').toLowerCase();
+        if (sourceId) nodeEdgeCounts.set(sourceId, (nodeEdgeCounts.get(sourceId) || 0) + 1);
+        if (targetId) nodeEdgeCounts.set(targetId, (nodeEdgeCounts.get(targetId) || 0) + 1);
+    });
+    (GRAPH_DATA.nodes || []).forEach(node => {
+        const key = String(node.id || '').toLowerCase();
+        node.edgeDegree = nodeEdgeCounts.get(key) || 0;
+    });
+
     const maxHops = ATTACK_PATHS.reduce((m, p) =>
         Math.max(m, p.hops ? p.hops.filter(h => h.name).length - 1 : 0), 0);
 
@@ -112,12 +124,50 @@ function renderPathCards() {
         card.addEventListener('click', () => selectPath(path, card));
         list.appendChild(card);
     });
+
+    restorePathFocusIfNeeded();
 }
 
 // ══════════════════════════════════════════════════════════════
 //  Sağ panel — path seçimi və detallar
 // ══════════════════════════════════════════════════════════════
 let selectedPath = null;
+let currentPathFocusId = '';
+
+function setPathFocus(pathId) {
+    currentPathFocusId = pathId || '';
+    const cards = document.querySelectorAll('.path-card');
+    cards.forEach(card => {
+        const isMatch = card.dataset.id === pathId;
+        card.classList.toggle('dimmed', !!pathId && !isMatch);
+        card.classList.toggle('active', isMatch);
+        if (pathId && !isMatch) {
+            card.style.setProperty('opacity', '0.14', 'important');
+            card.style.setProperty('filter', 'grayscale(1) brightness(0.52) saturate(0)', 'important');
+            card.style.setProperty('background', 'rgba(0,0,0,0.16)', 'important');
+        } else {
+            card.style.removeProperty('opacity');
+            card.style.removeProperty('filter');
+            card.style.removeProperty('background');
+        }
+    });
+}
+
+function clearPathFocus() {
+    currentPathFocusId = '';
+    document.querySelectorAll('.path-card').forEach(card => {
+        card.classList.remove('dimmed');
+        card.style.removeProperty('opacity');
+        card.style.removeProperty('filter');
+        card.style.removeProperty('background');
+    });
+}
+
+function restorePathFocusIfNeeded() {
+    if (currentPathFocusId) {
+        setPathFocus(currentPathFocusId);
+    }
+}
 
 function selectPath(path, cardEl) {
     document.querySelectorAll('.path-card').forEach(c => c.classList.remove('active'));
@@ -125,8 +175,9 @@ function selectPath(path, cardEl) {
     selectedPath = path;
 
     // Başlıq
-    document.getElementById('detail-name').textContent = path.id;
-    document.getElementById('detail-sub').textContent  =
+                card.style.removeProperty('opacity');
+                card.style.removeProperty('filter');
+                card.style.removeProperty('background');
         `${path.from} → ${path.to} · ${path.hops.filter(h => h.name).length - 1} hops`;
 
     // Skor ringi
@@ -153,9 +204,12 @@ function selectPath(path, cardEl) {
     // Hop siyahısı və sparkline
     renderHopList(path);
     renderSparkline(path);
+    renderRiskDistributionList(buildRiskDistributionEntriesFromPath(path), 'Path edges');
+    renderPathExplanation({ kind: 'path', path });
 
     // Graph node-larını vurgula (D3 modulundan)
     highlightPath(path);
+    setPathFocus(path.id);
 }
 
 // ── Hop siyahısı ─────────────────────────────────────────────
@@ -191,11 +245,175 @@ function renderHopList(path) {
     });
 }
 
+function renderPathExplanation(context) {
+    const chip = document.getElementById('detail-explain-chip');
+    const body = document.getElementById('detail-explain-body');
+    if (!chip || !body) return;
+
+    const esc = (value) => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    const setBody = (parts) => {
+        body.innerHTML = parts.filter(Boolean).map(text => `<p>${text}</p>`).join('');
+    };
+
+    if (!context) {
+        chip.textContent = 'Path';
+        body.innerHTML = '<p class="detail-muted">Select a node or edge in the graph to see a detailed explanation here.</p>';
+        return;
+    }
+
+    if (context.kind === 'node') {
+        const node = context.node || {};
+        const path = context.path || null;
+        const edgeNames = Array.isArray(context.edgeNames) ? context.edgeNames.filter(Boolean) : [];
+        chip.textContent = 'Node';
+        document.getElementById('detail-name').textContent = node.label || 'Selected Node';
+        document.getElementById('detail-sub').textContent = `${String(node.type || 'object').toUpperCase()} · Depth ${node.depth != null ? node.depth : '—'} · ${node.edges != null ? node.edges : '—'} edges`;
+
+        const edgeLine = edgeNames.length
+            ? `Connected edge${edgeNames.length > 1 ? 's' : ''}: ${edgeNames.map(name => `<span class="detail-edge-tag">${esc(name)}</span>`).join(' ')}`
+            : 'No explicit edge name was matched for this node in the current path.';
+
+        const pathLine = path
+            ? `It is part of path <strong>${esc(path.id)}</strong> from <strong>${esc(path.from)}</strong> to <strong>${esc(path.to)}</strong>.`
+            : 'It is not currently attached to a selected path, but it remains the active focus node in the graph.';
+
+        setBody([
+            `The selected node is <strong>${esc(node.label || 'Unknown')}</strong> and it is classified as <strong>${esc(String(node.type || 'object').toUpperCase())}</strong>.`,
+            `It sits at depth <strong>${esc(node.depth != null ? node.depth : '—')}</strong> and currently shows <strong>${esc(node.edges != null ? node.edges : '—')}</strong> connected edges in the graph.`,
+            edgeLine,
+            pathLine,
+            'Use this view to follow how the node participates in the current attack chain and which neighboring relationships make it relevant.'
+        ]);
+        return;
+    }
+
+    if (context.kind === 'edge') {
+        const edge = context.edge || {};
+        const path = context.path || null;
+        const match = context.match || null;
+        chip.textContent = 'Edge';
+        document.getElementById('detail-name').textContent = `${edge.source || 'Unknown'} → ${edge.target || 'Unknown'}`;
+        document.getElementById('detail-sub').innerHTML = `${esc(edge.rel || 'RELATION')} · edge focus`;
+
+        const chainLine = match
+            ? `This edge is drawn because the selected route contains <strong>${esc(match.source || edge.source || 'Unknown')}</strong> → <span class="detail-edge-tag">${esc(match.rel || edge.rel || 'RELATION')}</span> → <strong>${esc(match.target || edge.target || 'Unknown')}</strong>.`
+            : `This edge is drawn to represent the direct relationship from <strong>${esc(edge.source || 'Unknown')}</strong> to <strong>${esc(edge.target || 'Unknown')}</strong>.`;
+
+        const reasonLine = match
+            ? `It appears in <strong>${esc(path?.id || 'the selected path')}</strong> because the path data records this step as a real transition between principals, not just a visual connector.`
+            : 'It remains visible as a direct graph relationship even when no exact path chain match is available.';
+
+        setBody([
+            `The selected edge connects <strong>${esc(edge.source || 'Unknown')}</strong> to <strong>${esc(edge.target || 'Unknown')}</strong> and carries the relation <span class="detail-edge-tag">${esc(edge.rel || 'RELATION')}</span>.`,
+            chainLine,
+            reasonLine,
+            'Use edge inspection to understand exactly which principal reaches which target and why that transition is part of the attack route.'
+        ]);
+        return;
+    }
+
+    if (context.kind === 'path') {
+        const path = context.path || {};
+        chip.textContent = 'Path';
+        document.getElementById('detail-name').textContent = path.id || 'Selected Path';
+        document.getElementById('detail-sub').textContent = `${path.from || '—'} → ${path.to || '—'} · ${path.hops ? path.hops.filter(h => h.name).length - 1 : '—'} hops`;
+        setBody([
+            `The selected route is <strong>${esc(path.id || 'Unknown')}</strong>.`,
+            `It starts at <strong>${esc(path.from || '—')}</strong> and ends at <strong>${esc(path.to || '—')}</strong>, with the full hop chain shown below.`,
+            'Click any node or edge in the graph to switch this panel into a more focused explanation view.'
+        ]);
+    }
+}
+
+window.updatePathDetailContext = renderPathExplanation;
+
+function buildRiskDistributionEntriesFromPath(path) {
+    if (!path || !Array.isArray(path.hops)) return [];
+    const entries = [];
+
+    for (let i = 0; i < path.hops.length; i++) {
+        const hop = path.hops[i];
+        if (!hop || !hop.edge) continue;
+        const prevNode = i > 0 ? path.hops[i - 1] : null;
+        const nextNode = i + 1 < path.hops.length ? path.hops[i + 1] : null;
+        entries.push({
+            name: hop.edge,
+            source: prevNode?.name || '',
+            target: nextNode?.name || '',
+            meta: prevNode?.name && nextNode?.name
+                ? `${prevNode.name} → ${nextNode.name}`
+                : 'Path edge'
+        });
+    }
+
+    return entries;
+}
+
+function normalizeRiskDistributionEntry(entry) {
+    if (typeof entry === 'string') {
+        return { name: entry, meta: '', step: null, nodeName: '' };
+    }
+    return {
+        name: entry?.name || entry?.rel || entry?.edge || 'Edge',
+        source: entry?.source || '',
+        target: entry?.target || '',
+        meta: entry?.meta || entry?.note || '',
+        step: entry?.step ?? null,
+        nodeName: entry?.nodeName || ''
+    };
+}
+
+function renderRiskDistributionList(entries, subtitle) {
+    const list = document.getElementById('risk-distribution-list');
+    const sub = document.getElementById('risk-distribution-sub');
+    if (!list) return;
+
+    if (sub && subtitle) {
+        sub.textContent = subtitle;
+    }
+
+    const items = Array.isArray(entries) ? entries.map(normalizeRiskDistributionEntry).filter(item => item.name) : [];
+
+    if (items.length === 0) {
+        list.innerHTML = '<div class="risk-distribution-empty">No edge names available for the current selection</div>';
+        return;
+    }
+
+    list.innerHTML = items.map(item => {
+        const chain = item.meta || (item.source || item.target ? `${item.source || 'Unknown'} → ${item.target || 'Unknown'}` : '');
+        const stepLabel = item.step != null ? `Step ${item.step}` : '';
+        const nodeLabel = item.nodeName ? `Target node: ${item.nodeName}` : '';
+        return `
+        <div class="risk-distribution-item">
+            <div class="risk-distribution-item-top">
+                <div class="risk-distribution-item-step">${escapeHtml(stepLabel)}</div>
+                <div class="risk-distribution-item-name">${escapeHtml(item.name)}</div>
+            </div>
+            <div class="risk-distribution-item-meta">${escapeHtml(chain)}</div>
+            ${nodeLabel ? `<div class="risk-distribution-item-node">${escapeHtml(nodeLabel)}</div>` : ''}
+        </div>`;
+    }).join('');
+}
+
+function escapeHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+window.updateRiskDistributionList = renderRiskDistributionList;
+
 // ── Sparkline (native SVG, D3 yox) ──────────────────────────
 function renderSparkline(path) {
     const svg = document.getElementById('sparkline-svg');
     svg.innerHTML = '';
-
     if (ATTACK_PATHS.length < 2) return;
 
     const scores = ATTACK_PATHS.map(p => p.score);
@@ -249,8 +467,10 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
 //  İlkin boş render
 //  Engine data göndərənə qədər sıfır göstər
 // ══════════════════════════════════════════════════════════════
-document.getElementById('node-count').textContent = '—';
-document.getElementById('path-count').textContent = '—';
+const _nodeCountEl = document.getElementById('node-count') || document.getElementById('stat-nodes');
+const _pathCountEl = document.getElementById('path-count') || document.getElementById('stat-hops');
+if (_nodeCountEl) _nodeCountEl.textContent = '—';
+if (_pathCountEl) _pathCountEl.textContent = '—';
 renderPathCards();   // "AWAITING ENGINE DATA" göstərir
 // buildGraph() — Graph modulu yüklənəndə özü çağırılır
 
@@ -262,6 +482,38 @@ window.onRootPrincipalSelected = (principal) => {
     sessionStorage.setItem('selectedRootPrincipal', principal.label || '');
     sessionStorage.setItem('selectedRootPrincipalType', principal.kind || '');
     sessionStorage.setItem('selectedRootPrincipalSID', principal.sid || '');
+};
+
+// Apply selected root principal to currently loaded GRAPH_DATA (if present)
+function applyRootPrincipalToGraph(principal) {
+    if (!principal || !GRAPH_DATA || !GRAPH_DATA.nodes) return;
+    const label = String(principal.label || '').toLowerCase();
+    const kind  = principal.kind || '';
+
+    // Clear existing root flags
+    GRAPH_DATA.nodes.forEach(n => { n.root = false; });
+
+    // Try to find matching node by label and/or type
+    let matched = GRAPH_DATA.nodes.find(n => String(n.label || '').toLowerCase() === label && (!kind || n.type === kind));
+    if (!matched) {
+        // Fallback: match by startsWith or includes
+        matched = GRAPH_DATA.nodes.find(n => String(n.label || '').toLowerCase().includes(label));
+    }
+
+    if (matched) {
+        matched.root = true;
+        // Rebuild graph to reflect root styling
+        try { buildGraph(); } catch (e) { console.warn('[Decision] rebuild failed:', e && e.message); }
+    } else {
+        console.info('[Decision] Selected root principal not found in current graph:', principal.label);
+    }
+}
+
+// If other modules call window.onRootPrincipalSelected, also apply to graph
+const _origOnRoot = window.onRootPrincipalSelected;
+window.onRootPrincipalSelected = (p) => {
+    try { if (typeof _origOnRoot === 'function') _origOnRoot(p); } catch (e) {}
+    try { applyRootPrincipalToGraph(p); } catch (e) {}
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -376,9 +628,10 @@ function initRootPrincipal() {
         item.dataset.name = name.toLowerCase();
         item.dataset.type = type;
 
-        const icon = type === 'computer' ? '💻' : '👤';
+        const file = type === 'computer' ? 'computer.png' : 'user.png';
+        const href = new URL(`../../assets/Icons/${file}`, window.location.href).href;
         item.innerHTML = `
-            <span class="rp-item-icon">${icon}</span>
+            <span class="rp-item-icon"><img src="${href}" alt="${type}" style="width:18px;height:18px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'"></span>
             <span class="rp-item-text">${name}</span>
         `;
 
@@ -394,8 +647,9 @@ function initRootPrincipal() {
         itemEl.classList.add('selected');
 
         const sid = window.RootPrincipal?.getSID?.(name) || '';
-        const icon = type === 'computer' ? '💻' : '👤';
-        btn.innerHTML = `<span class="rp-icon">${icon}</span><span>${name}</span>`;
+        const file = type === 'computer' ? 'computer.png' : 'user.png';
+        const href = new URL(`../../assets/Icons/${file}`, window.location.href).href;
+        btn.innerHTML = `<span class="rp-icon"><img src="${href}" alt="${type}" style="width:18px;height:18px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'"></span><span>${name}</span>`;
         btn.classList.add('active');
 
         sessionStorage.setItem('selectedRootPrincipal', name);
@@ -445,3 +699,6 @@ function initRootPrincipal() {
         if (e.key === 'Escape') dropdown.classList.remove('open');
     });
 }
+
+window.setPathFocus = setPathFocus;
+window.clearPathFocus = clearPathFocus;
