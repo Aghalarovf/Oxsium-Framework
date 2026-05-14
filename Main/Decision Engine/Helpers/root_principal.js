@@ -10,8 +10,8 @@
     const statusLabel = document.querySelector('.status-label');
 
     /* ── Runtime state ────────────────────────────────────── */
-    let rpUsers     = [];   // [{ username, sid }]
-    let rpComputers = [];   // [{ computer_name, sid }]
+    let rpUsers     = [];   // [{ username, sid, target_attributes }]
+    let rpComputers = [];   // [{ computer_name, sid, target_attributes }]
     let allItems    = [];   // merged flat list for filtering
     let loaded      = false;
 
@@ -110,7 +110,8 @@
         if (usersData && Array.isArray(usersData.users)) {
             rpUsers = usersData.users.map(u => ({
                 username: u.username || '(unnamed)',
-                sid:      u.sid      || ''
+                sid:      u.sid      || '',
+                target_attributes: u
             }));
         } else {
             rpUsers = [];
@@ -121,7 +122,8 @@
         if (computersData && Array.isArray(computersData.computers)) {
             rpComputers = computersData.computers.map(c => ({
                 computer_name: (c.computer_name || '(unnamed)').replace(/\$$/, ''), // strip trailing $
-                sid:           c.sid || ''
+                sid:           c.sid || '',
+                target_attributes: c
             }));
         } else {
             rpComputers = [];
@@ -133,12 +135,14 @@
             ...rpUsers.map(u => ({
                 label:  u.username,
                 sid:    u.sid,
-                kind:   'user'
+                kind:   'user',
+                target_attributes: u.target_attributes
             })),
             ...rpComputers.map(c => ({
                 label:  c.computer_name,
                 sid:    c.sid,
-                kind:   'computer'
+                kind:   'computer',
+                target_attributes: c.target_attributes
             }))
         ];
 
@@ -182,7 +186,10 @@
      * @param {string} sid    - stored in data-sid for future use
      * @param {string} kind   - 'user' | 'computer'
      */
-    function buildItem(label, sid, kind) {
+    function buildItem(item) {
+        const label = item.kind === 'computer' ? item.computer_name : item.username;
+        const sid = item.sid;
+        const kind = item.kind;
         const iconFile = kind === 'user' ? 'user.png' : 'computer.png';
         const iconHref = new URL(`../../assets/Icons/${iconFile}`, window.location.href).href;
         const icon = `<img class="rp-item-icon-img" src="${iconHref}" alt="${kind}" onerror="this.onerror=null;this.src='${fallbackHref}'" />`;
@@ -198,7 +205,7 @@
         el.innerHTML = `
             <span class="rp-item-icon">${icon}</span>
             <span class="rp-item-text" title="${escHtml(label)}">${escHtml(label)}</span>`;
-        el.addEventListener('click', () => onItemSelect(label, sid, kind));
+        el.addEventListener('click', () => onItemSelect(item));
         return el;
     }
 
@@ -250,7 +257,12 @@
             scrollArea.appendChild(hdr);
 
             filteredUsers.forEach(u =>
-                scrollArea.appendChild(buildItem(u.username, u.sid, 'user'))
+                scrollArea.appendChild(buildItem({
+                    username: u.username,
+                    sid: u.sid,
+                    kind: 'user',
+                    target_attributes: u.target_attributes
+                }))
             );
         }
 
@@ -262,7 +274,12 @@
             scrollArea.appendChild(hdr);
 
             filteredComps.forEach(c =>
-                scrollArea.appendChild(buildItem(c.computer_name, c.sid, 'computer'))
+                scrollArea.appendChild(buildItem({
+                    computer_name: c.computer_name,
+                    sid: c.sid,
+                    kind: 'computer',
+                    target_attributes: c.target_attributes
+                }))
             );
         }
 
@@ -299,9 +316,25 @@
     ══════════════════════════════════════════════════════════ */
 
     /** Called when a principal item is clicked. */
-    function onItemSelect(label, sid, kind) {
+    function isTruthyAttrValue(v) {
+        if (v === true) return true;
+        if (typeof v === 'string') return v.toLowerCase() === 'true';
+        if (typeof v === 'number') return Number(v) === 1;
+        return false;
+    }
+
+    function hasTruthyAttr(attrs, key) {
+        if (!attrs || typeof attrs !== 'object') return false;
+        return isTruthyAttrValue(attrs[key]);
+    }
+
+    function onItemSelect(item) {
+        const label = item.kind === 'computer' ? item.computer_name : item.username;
+        const sid = item.sid;
+        const kind = item.kind;
+        const targetAttributes = item.target_attributes || null;
         /* Persist globally — SID kept for future engine use */
-        window.SELECTED_PRINCIPAL = { label, sid, kind };
+        window.SELECTED_PRINCIPAL = { label, sid, kind, target_attributes: targetAttributes };
         window.SELECTED_ROOT_PRINCIPAL_SID = sid || '';
 
         /* Update button label */
@@ -322,12 +355,16 @@
         sessionStorage.setItem('selectedRootPrincipal', label);
         sessionStorage.setItem('selectedRootPrincipalType', kind);
         sessionStorage.setItem('selectedRootPrincipalSID', sid || '');
+        sessionStorage.setItem('selectedRootPrincipalAttrs', JSON.stringify(targetAttributes || {}));
 
         /* Notify Decision Engine if callback is present */
         if (typeof window.onRootPrincipalSelected === 'function') {
-            window.onRootPrincipalSelected({ label, sid, kind });
+            window.onRootPrincipalSelected({ label, sid, kind, target_attributes: targetAttributes });
         }
 
+        console.info(
+            `[RootPrincipal] attrs → is_admin=${hasTruthyAttr(targetAttributes, 'is_admin')} | potential_admin=${hasTruthyAttr(targetAttributes, 'potential_admin')}`
+        );
         console.info(`[RootPrincipal] Selected → ${kind.toUpperCase()} | ${label} | SID: ${sid || '(none)'}`);
     }
 
@@ -358,6 +395,7 @@
     function resetSelection() {
         window.SELECTED_PRINCIPAL = null;
         window.SELECTED_ROOT_PRINCIPAL_SID = '';
+        sessionStorage.removeItem('selectedRootPrincipalAttrs');
         btn.classList.remove('active');
         btn.classList.remove('open');
         setDefaultButtonState();

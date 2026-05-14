@@ -33,8 +33,10 @@ feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 const zoomGroup = svgEl.append('g').attr('class', 'zoom-root');
 
 let currentTransform = d3.zoomIdentity;
+let currentDomainName = ''; // Domain adını saxla
+
 const zoom = d3.zoom()
-    .scaleExtent([0.1, 5])
+    .scaleExtent([0.001, 5])
     .on('zoom', evt => {
         currentTransform = evt.transform;
         zoomGroup.attr('transform', evt.transform);
@@ -47,6 +49,49 @@ const zoom = d3.zoom()
         
         nodeLabels.transition().duration(300).attr('opacity', labelOpacity);
         nodeTypeLabels.transition().duration(300).attr('opacity', labelOpacity);
+        
+        // Scale-bağlı domain boundary vizualizasiyası
+        const boundaryGroup = zoomGroup.select('.domain-boundary-group');
+        if (boundaryGroup && !boundaryGroup.empty()) {
+            const scale = evt.transform.k;
+            // Scale < 20 (20%) olduqda görünür olur
+            // Scale 20% - 10% arasında: opacity artır (20%'de 0 → 10%'de 1)
+            // Scale ≤ 10% olduqda: opacity 1 (fulla görünən qalır)
+            const VISIBILITY_START = 0.2;  // 20%
+            const OPACITY_PEAK = 0.1;      // 10% (pik opacity noktası)
+            
+            let opacity = 0;
+            let visible = false;
+            
+            if (scale < VISIBILITY_START) {
+                visible = true;
+                if (scale > OPACITY_PEAK) {
+                    // 20% ile 10% arasında: opacity artır
+                    opacity = (VISIBILITY_START - scale) / (VISIBILITY_START - OPACITY_PEAK);
+                    opacity = Math.min(1, Math.max(0, opacity));
+                } else {
+                    // 10% və altında: tam opak (fulla görünən)
+                    opacity = 1;
+                }
+            }
+            
+            boundaryGroup.transition().duration(200)
+                .style('display', visible ? 'block' : 'none')
+                .attr('opacity', opacity);
+        }
+        
+        // 10%-də node'lar və link'ləri gizlə
+        const nodesGroup = zoomGroup.select('.nodes');
+        const linksGroup = zoomGroup.select('.links');
+        const currentScale = evt.transform.k;
+        const nodeOpacity = currentScale <= 0.1 ? 0 : 1;
+        
+        if (nodesGroup && !nodesGroup.empty()) {
+            nodesGroup.transition().duration(200).attr('opacity', nodeOpacity);
+        }
+        if (linksGroup && !linksGroup.empty()) {
+            linksGroup.transition().duration(200).attr('opacity', nodeOpacity);
+        }
     });
 
 svgEl.call(zoom);
@@ -54,16 +99,161 @@ svgEl.call(zoom);
 svgEl.on('click.clear-focus', evt => {
     if (evt.target !== svgEl.node()) return;
     window.clearPathFocus?.();
+    currentGraphFocus = {
+        active: false,
+        nodeNames: new Set(),
+        linkPairs: new Set()
+    };
     resetHighlight();
 });
 
 canvas.addEventListener('click', evt => {
     if (evt.target !== canvas) return;
     window.clearPathFocus?.();
+    currentGraphFocus = {
+        active: false,
+        nodeNames: new Set(),
+        linkPairs: new Set()
+    };
     resetHighlight();
 });
 
+// Domain boundary adını yeniləmə funksiyası
+window.updateDomainBoundaryName = function(domainName) {
+    currentDomainName = domainName || '';
+};
+
 let linkLine, linkHitLine, linkLabel, node, simulation;
+let currentGraphFocus = {
+    active: false,
+    nodeNames: new Set(),
+    linkPairs: new Set()
+};
+const GRAPH_FOCUS_FADE_MS = 260;
+
+function normalizeGraphName(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function makeLinkPairKey(sourceName, targetName) {
+    return `${normalizeGraphName(sourceName)}->${normalizeGraphName(targetName)}`;
+}
+
+function getNodeNameFromLinkEndpoint(endpoint) {
+    return normalizeGraphName(endpoint?.label || endpoint?.id || endpoint || '');
+}
+
+function buildGraphFocusFromNode(nodeData) {
+    const nodeNames = new Set();
+    const linkPairs = new Set();
+    const nodeById = new Map(GRAPH_DATA.nodes.map(n => [normalizeGraphName(n.id), n]));
+
+    let current = nodeData;
+    let safety = 0;
+    while (current && safety < 128) {
+        const currentName = normalizeGraphName(current.label || current.id);
+        if (currentName) nodeNames.add(currentName);
+
+        const parentId = normalizeGraphName(current._parentId);
+        if (!parentId) break;
+
+        const parentNode = nodeById.get(parentId);
+        const parentName = normalizeGraphName(parentNode?.label || parentNode?.id || current._parentLabel || '');
+        if (parentName) nodeNames.add(parentName);
+        if (parentName && currentName) {
+            linkPairs.add(makeLinkPairKey(parentName, currentName));
+        }
+
+        current = parentNode;
+        safety++;
+    }
+
+    return { nodeNames, linkPairs };
+}
+
+function buildGraphFocusFromPath(path, nodeIndex) {
+    const nodeNames = new Set();
+    const linkPairs = new Set();
+
+    const entries = buildRiskDistributionEntriesToNode(path, nodeIndex);
+    entries.forEach(entry => {
+        const sourceName = normalizeGraphName(entry.source);
+        const targetName = normalizeGraphName(entry.target);
+        if (sourceName) nodeNames.add(sourceName);
+        if (targetName) nodeNames.add(targetName);
+        if (sourceName && targetName) {
+            linkPairs.add(makeLinkPairKey(sourceName, targetName));
+        }
+    });
+
+    return { nodeNames, linkPairs };
+}
+
+function applyGraphFocus(path, nodeIndex) {
+    if (!node || !linkLine) return;
+
+    const focus = buildGraphFocusFromPath(path, nodeIndex);
+    const hasFocus = focus.nodeNames.size > 0;
+    currentGraphFocus = {
+        active: hasFocus,
+        nodeNames: focus.nodeNames,
+        linkPairs: focus.linkPairs
+    };
+
+    if (!hasFocus) {
+        resetHighlight();
+        return;
+    }
+
+    node
+        .transition()
+        .duration(GRAPH_FOCUS_FADE_MS)
+        .ease(d3.easeCubicOut)
+        .attr('opacity', d => focus.nodeNames.has(normalizeGraphName(d.label)) ? 1 : 0.14)
+        .style('filter', d => focus.nodeNames.has(normalizeGraphName(d.label))
+            ? 'none'
+            : 'grayscale(1) brightness(0.72) saturate(0.2)')
+        .select('circle.node-circle')
+        .attr('stroke-width', d => d.root
+            ? NODE_RULES.highlight.inactiveStrokeWidth
+            : (focus.nodeNames.has(normalizeGraphName(d.label))
+            ? NODE_RULES.highlight.activeStrokeWidth
+            : NODE_RULES.highlight.inactiveStrokeWidth));
+
+    linkLine
+        .transition()
+        .duration(GRAPH_FOCUS_FADE_MS)
+        .ease(d3.easeCubicOut)
+        .attr('opacity', d => {
+            const sourceName = getNodeNameFromLinkEndpoint(d.source);
+            const targetName = getNodeNameFromLinkEndpoint(d.target);
+            const pairKey = makeLinkPairKey(sourceName, targetName);
+            return focus.linkPairs.has(pairKey) ? 1 : 0.10;
+        })
+        .attr('stroke', d => {
+            const sourceName = getNodeNameFromLinkEndpoint(d.source);
+            const targetName = getNodeNameFromLinkEndpoint(d.target);
+            const pairKey = makeLinkPairKey(sourceName, targetName);
+            return focus.linkPairs.has(pairKey) ? getEdgeStroke(d) : 'rgba(148, 163, 184, 0.7)';
+        });
+
+    linkLabel
+        .transition()
+        .duration(GRAPH_FOCUS_FADE_MS)
+        .ease(d3.easeCubicOut)
+        .attr('opacity', d => {
+            const sourceName = getNodeNameFromLinkEndpoint(d.source);
+            const targetName = getNodeNameFromLinkEndpoint(d.target);
+            const pairKey = makeLinkPairKey(sourceName, targetName);
+            return focus.linkPairs.has(pairKey) ? 0.9 : 0.04;
+        })
+        .attr('fill', d => {
+            const sourceName = getNodeNameFromLinkEndpoint(d.source);
+            const targetName = getNodeNameFromLinkEndpoint(d.target);
+            const pairKey = makeLinkPairKey(sourceName, targetName);
+            return focus.linkPairs.has(pairKey) ? getEdgeLabelColor(d) : '#94a3b8';
+        });
+}
 
 function prepareLayeredNodePositions(nodes, width, height) {
     const cx = width / 2;
@@ -204,6 +394,12 @@ function prepareLayeredNodePositions(nodes, width, height) {
     const absPos = new Map();
     absPos.set(rootId, { x: cx, y: cy });
 
+    const rootRecord = nodeById.get(rootId);
+    if (rootRecord) {
+        rootRecord._parentId = '';
+        rootRecord._parentLabel = '';
+    }
+
     // Depth-ə görə sırala ki, parent həmişə child-dan əvvəl yerləşdirilsin
     const sortedIds = [...nodeBranch.keys()].sort(
         (a, b) => nodeBranch.get(a).depth - nodeBranch.get(b).depth
@@ -220,7 +416,12 @@ function prepareLayeredNodePositions(nodes, width, height) {
         absPos.set(nid, { x, y });
 
         const n = nodeById.get(nid);
-        if (n) { n.x = x; n.y = y; }
+        if (n) {
+            n.x = x;
+            n.y = y;
+            n._parentId = info.parent;
+            n._parentLabel = nodeById.get(info.parent)?.label || info.parent;
+        }
     }
 
         // Branch-a düşməyən node-ları (varsa) mərkəz ətrafında yerləşdir
@@ -230,6 +431,8 @@ function prepareLayeredNodePositions(nodes, width, height) {
         if (!nodeBranch.has(nid)) {
             n.x = cx + (Math.random() - 0.5) * 300;
             n.y = cy + (Math.random() - 0.5) * 300;
+            n._parentId = '';
+            n._parentLabel = '';
         }
     });
 }
@@ -289,7 +492,55 @@ function buildGraph() {
     const ch = canvas.clientHeight || 500;
     const cx = cw / 2;
     const cy = ch / 2;
+
+    // Node mövqelərini əvvəlcə hazırla (boundary radius hesablamaq üçün)
     prepareLayeredNodePositions(GRAPH_DATA.nodes, cw, ch);
+
+    // Ən uzaq node-a qədər olan maksimum məsafəni hesabla
+    let maxDistance = 200; // minimum radius
+    GRAPH_DATA.nodes.forEach(node => {
+        if (node.x != null && node.y != null && !isNaN(node.x) && !isNaN(node.y)) {
+            const dx = node.x - cx;
+            const dy = node.y - cy;
+            const distance = Math.hypot(dx, dy);
+            maxDistance = Math.max(maxDistance, distance);
+        }
+    });
+
+    // Padding əlavə et ki dairə node-ları tam əhatə etsin
+    const BOUNDARY_PADDING = 60; // ekstra boşluq
+    const BOUNDARY_RADIUS = maxDistance + BOUNDARY_PADDING;
+
+    // Domain boundary visualization group (nodes/links-dən arxada olsun)
+    const boundaryGroup = zoomGroup.append('g').attr('class', 'domain-boundary-group')
+        .style('display', 'none')
+        .attr('opacity', 0);
+    
+    // Transparent circle (domain sınırı)
+    boundaryGroup.append('circle')
+        .attr('class', 'domain-boundary-circle')
+        .attr('cx', cx)
+        .attr('cy', cy)
+        .attr('r', BOUNDARY_RADIUS)
+        .attr('fill', 'rgba(100, 150, 200, 0.05)')
+        .attr('stroke', 'rgba(100, 150, 200, 0.3)')
+        .attr('stroke-width', 2)
+        .attr('pointer-events', 'none');
+    
+    // Domain adı text (dairənin üst kenarında)
+    if (currentDomainName) {
+        boundaryGroup.append('text')
+            .attr('class', 'domain-boundary-label')
+            .attr('x', cx)
+            .attr('y', cy - BOUNDARY_RADIUS + 15)
+            .attr('text-anchor', 'middle')
+            .attr('fill', 'rgba(100, 150, 200, 0.8)')
+            .attr('font-size', '16px')
+            .attr('font-weight', 'bold')
+            .attr('font-family', 'JetBrains Mono, monospace')
+            .attr('pointer-events', 'none')
+            .text(currentDomainName);
+    }
 
     // ── Links ──────────────────────────────────────────────
     const linkGroup = zoomGroup.append('g').attr('class', 'links');
@@ -359,6 +610,7 @@ function buildGraph() {
         .attr('class', 'node-group')
         .classed('is-domain-controller', d => (typeof shouldHighlightAsDomainController === 'function' && shouldHighlightAsDomainController(d)) )
         .attr('transform', d => `translate(${d.x},${d.y})`)
+        .on('click', clickNode)
         .call(d3.drag()
             .on('start', dragStart)
             .on('drag',  dragging)
@@ -393,8 +645,7 @@ function buildGraph() {
         .attr('opacity',      d => NODE_RULES.offsets.nodeOpacity)
         .on('mouseover', showTooltip)
         .on('mousemove', moveTooltip)
-        .on('mouseout',  hideTooltip)
-        .on('click', clickNode);
+        .on('mouseout',  hideTooltip);
 
     // Map node types to icon image files located in assets/Icons
     const NODE_ICON_FILES = {
@@ -597,7 +848,8 @@ function buildGraph() {
         node.attr('transform', d => `translate(${d.x},${d.y})`);
     });
 
-    simulation.on('end', fitGraph);
+    // Avtomatik fit deaktiv - sadəcə fit düyməsi istifadə olunacaq
+    // simulation.on('end', fitGraph);
 }
 
 function fitGraph() {
@@ -635,8 +887,8 @@ function dragEnd(evt, d) {
     if (!evt.active) simulation.alphaTarget(0);
     d._bx = d.x;
     d._by = d.y;
-    d.fx = null;
-    d.fy = null;
+    d.fx = d.x;
+    d.fy = d.y;
 }
 
 const tooltip = document.getElementById('node-tooltip');
@@ -664,32 +916,75 @@ function hideTooltip() {
 }
 
 function clickNode(evt, d) {
-    const relatedPath = findRelatedPathForNode(d);
-    if (relatedPath?.path) {
-        const cards = document.querySelectorAll('.path-card');
-        cards.forEach(c => {
-            if (c.dataset.id === relatedPath.path.id) {
-                selectPath(relatedPath.path, c);   // UI modulundan
-                c.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
+    const relatedPaths = findRelatedPathsForNode(d);
+    window.selectPaths?.(relatedPaths.map(item => item.path));
+    applyGraphFocusToNode(d);
+}
+
+function applyGraphFocusToNode(nodeData) {
+    if (!node || !linkLine) return;
+
+    const focus = buildGraphFocusFromNode(nodeData);
+    const hasFocus = focus.nodeNames.size > 0;
+    currentGraphFocus = {
+        active: hasFocus,
+        nodeNames: focus.nodeNames,
+        linkPairs: focus.linkPairs
+    };
+
+    if (!hasFocus) {
+        resetHighlight();
+        return;
+    }
+
+    node
+        .transition()
+        .duration(GRAPH_FOCUS_FADE_MS)
+        .ease(d3.easeCubicOut)
+        .attr('opacity', d => focus.nodeNames.has(normalizeGraphName(d.label || d.id)) ? 1 : 0.14)
+        .style('filter', d => focus.nodeNames.has(normalizeGraphName(d.label || d.id))
+            ? 'none'
+            : 'grayscale(1) brightness(0.72) saturate(0.2)')
+        .select('circle.node-circle')
+        .attr('stroke-width', d => d.root
+            ? NODE_RULES.highlight.inactiveStrokeWidth
+            : (focus.nodeNames.has(normalizeGraphName(d.label || d.id))
+            ? NODE_RULES.highlight.activeStrokeWidth
+            : NODE_RULES.highlight.inactiveStrokeWidth));
+
+    linkLine
+        .transition()
+        .duration(GRAPH_FOCUS_FADE_MS)
+        .ease(d3.easeCubicOut)
+        .attr('opacity', d => {
+            const sourceName = getNodeNameFromLinkEndpoint(d.source);
+            const targetName = getNodeNameFromLinkEndpoint(d.target);
+            const pairKey = makeLinkPairKey(sourceName, targetName);
+            return focus.linkPairs.has(pairKey) ? 1 : 0.10;
+        })
+        .attr('stroke', d => {
+            const sourceName = getNodeNameFromLinkEndpoint(d.source);
+            const targetName = getNodeNameFromLinkEndpoint(d.target);
+            const pairKey = makeLinkPairKey(sourceName, targetName);
+            return focus.linkPairs.has(pairKey) ? getEdgeStroke(d) : 'rgba(148, 163, 184, 0.7)';
         });
-    }
 
-    window.updatePathDetailContext?.({
-        kind: 'node',
-        node: d,
-        path: relatedPath?.path || null,
-        edgeNames: relatedPath?.edgeNames || []
-    });
-
-    const pathChainEntries = buildRiskDistributionEntriesToNode(relatedPath?.path || null, relatedPath?.nodeIndex ?? -1);
-    const riskEntries = pathChainEntries.length > 0
-        ? pathChainEntries
-        : collectConnectedEdges(d);
-    window.updateRiskDistributionList?.(riskEntries, pathChainEntries.length > 0 ? 'Root to node chain' : 'Connected edges');
-    if (relatedPath?.path) {
-        window.setPathFocus?.(relatedPath.path.id);
-    }
+    linkLabel
+        .transition()
+        .duration(GRAPH_FOCUS_FADE_MS)
+        .ease(d3.easeCubicOut)
+        .attr('opacity', d => {
+            const sourceName = getNodeNameFromLinkEndpoint(d.source);
+            const targetName = getNodeNameFromLinkEndpoint(d.target);
+            const pairKey = makeLinkPairKey(sourceName, targetName);
+            return focus.linkPairs.has(pairKey) ? 0.9 : 0.04;
+        })
+        .attr('fill', d => {
+            const sourceName = getNodeNameFromLinkEndpoint(d.source);
+            const targetName = getNodeNameFromLinkEndpoint(d.target);
+            const pairKey = makeLinkPairKey(sourceName, targetName);
+            return focus.linkPairs.has(pairKey) ? getEdgeLabelColor(d) : '#94a3b8';
+        });
 }
 
 function clickEdge(evt, d) {
@@ -704,22 +999,14 @@ function clickEdge(evt, d) {
         });
     }
 
-    window.updatePathDetailContext?.({
-        kind: 'edge',
-        edge: {
-            source: d.source?.label || d.source?.id || '',
-            target: d.target?.label || d.target?.id || '',
-            rel: d.rel || 'RELATION'
-        },
-        path: relatedPath?.path || null,
-        match: relatedPath?.match || null
-    });
     evt?.stopPropagation?.();
 }
 
-function findRelatedPathForNode(nodeData) {
+function findRelatedPathsForNode(nodeData) {
     const label = String(nodeData?.label || '').toLowerCase();
-    if (!label) return null;
+    if (!label) return [];
+
+    const matches = [];
 
     for (const path of ATTACK_PATHS) {
         const hopIndex = path.hops.findIndex(h => h.name && h.name.toLowerCase() === label);
@@ -732,14 +1019,14 @@ function findRelatedPathForNode(nodeData) {
         if (prevEdge?.edge) edgeNames.push(prevEdge.edge);
         if (nextEdge?.edge && nextEdge.edge !== prevEdge?.edge) edgeNames.push(nextEdge.edge);
 
-        return {
+        matches.push({
             path,
             edgeNames,
             nodeIndex: hopIndex
-        };
+        });
     }
 
-    return null;
+    return matches;
 }
 
 function buildRiskDistributionEntriesToNode(path, nodeIndex) {
@@ -854,19 +1141,41 @@ function highlightPath(path) {
 
 function resetHighlight() {
     if (!node || !linkLine) return;
-    node.select('circle')
-        .attr('opacity', NODE_RULES.highlight.inactiveOpacity)
+    currentGraphFocus = {
+        active: false,
+        nodeNames: new Set(),
+        linkPairs: new Set()
+    };
+    node
+        .transition()
+        .duration(GRAPH_FOCUS_FADE_MS)
+        .ease(d3.easeCubicOut)
+        .attr('opacity', 1)
+        .style('filter', 'none')
+        .selectAll('circle')
+        .attr('opacity', 1);
+    node.select('.node-circle')
         .attr('stroke-width', NODE_RULES.highlight.inactiveStrokeWidth);
     linkLine
+        .transition()
+        .duration(GRAPH_FOCUS_FADE_MS)
+        .ease(d3.easeCubicOut)
         .attr('opacity', EDGE_RULES.opacity.default)
-        .attr('stroke-width', d => getEdgeWidth(d));
+        .attr('stroke-width', d => getEdgeWidth(d))
+        .attr('stroke', d => getEdgeStroke(d));
+    linkLabel
+        .transition()
+        .duration(GRAPH_FOCUS_FADE_MS)
+        .ease(d3.easeCubicOut)
+        .attr('opacity', 0)
+        .attr('fill', d => getEdgeLabelColor(d));
 }
 
 function updateScaleDisplay(pct) {
     const slider  = document.getElementById('scale-slider');
     const display = document.getElementById('scale-display');
-    slider.value  = Math.max(30, Math.min(300, pct));
-    display.textContent = pct + '%';
+    slider.value  = Math.max(0.1, Math.min(300, pct));
+    display.textContent = pct.toFixed(1) + '%';
 }
 
 document.getElementById('scale-slider').addEventListener('input', e => {
@@ -900,11 +1209,21 @@ function getSelectedRootPrincipal() {
     const storedName = sessionStorage.getItem('selectedRootPrincipal') || '';
     const storedType = sessionStorage.getItem('selectedRootPrincipalType') || '';
     const storedSid = sessionStorage.getItem('selectedRootPrincipalSID') || '';
+    const storedAttrsRaw = sessionStorage.getItem('selectedRootPrincipalAttrs') || '';
+    let storedAttrs = null;
+    if (storedAttrsRaw) {
+        try {
+            storedAttrs = JSON.parse(storedAttrsRaw);
+        } catch (err) {
+            storedAttrs = null;
+        }
+    }
 
     const selected = runtimeSelected || (storedName ? {
         label: storedName,
         kind: storedType,
-        sid: storedSid
+        sid: storedSid,
+        target_attributes: storedAttrs
     } : null);
 
     if (!selected || (!selected.label && !selected.sid)) return null;
@@ -963,6 +1282,8 @@ function buildGraphDataFromEngine(engineData, selected) {
         }
     }
 
+    const rootAttributes = selected?.target_attributes ?? selectedAttributes ?? null;
+
     const rootNode = {
         id: selected.sid || selected.label,
         label: selected.label,
@@ -972,7 +1293,7 @@ function buildGraphDataFromEngine(engineData, selected) {
         edges: 0,
         root: true,
         risk: 0,
-        target_attributes: selectedAttributes ?? (selected.target_attributes ?? null)
+        target_attributes: rootAttributes
     };
 
     const nodes = [rootNode];

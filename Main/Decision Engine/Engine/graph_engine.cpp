@@ -1282,7 +1282,7 @@ static std::vector<AceRecord> processPwdNotRequired(
     for (const PwdNotRequiredUser& pu : pnrUsers) {
         std::cout << "  [PWD-NOT-REQUIRED] " << pu.name << " (" << pu.sid << ")\n";
 
-        std::string pnrLabel = "PWD Not Required";
+        std::string pnrLabel = "PWD-Not-Required";
 
         auto dangerous = extractMatching(dangerousRoot, pu.sid, pu.name, "dangerous_ace");
         auto extended  = extractMatching(extendedRoot,  pu.sid, pu.name, "extended_rights");
@@ -1299,9 +1299,9 @@ static std::vector<AceRecord> processPwdNotRequired(
             ep.principal_name = pu.name;
             ep.object_acetype = "pwd-not-required-entry-point";
             ep.ace_qualifier  = "Allow";
-            ep.rights         = {"pwd_not_required"};
-            ep.rights_display = "PWD Not Required";
-            ep.edge_rights    = {"pwd_not_required"};
+            ep.rights         = {"PWD-Not-Required"};
+            ep.rights_display = "PWD-Not-Required";
+            ep.edge_rights    = {"PWD-Not-Required"};
             ep.source_file    = "pwd-not-required (no outgoing edges)";
             ep.special_edge   = pnrLabel;
             ep.target_attributes = lookupAttrs(pu.sid, "User",
@@ -1329,6 +1329,179 @@ static std::vector<AceRecord> processPwdNotRequired(
 
             std::set<std::string> visited;
             visited.insert(pu.sid);
+            visited.insert(rec.target_sid);
+
+            auto steps_d = extractSteps(dangerousRoot, rec.target_sid,
+                                        rec.target_name, "dangerous_ace");
+            auto steps_e = extractSteps(extendedRoot,  rec.target_sid,
+                                        rec.target_name, "extended_rights");
+            steps_d.insert(steps_d.end(), steps_e.begin(), steps_e.end());
+            rec.next_step = mergeAceSteps(std::move(steps_d));
+
+            for (AceStep& step : rec.next_step)
+                resolveChain(step, dangerousRoot, extendedRoot, visited, cache, 0, maxDepth);
+
+            cache[rec.target_sid] = rec.next_step;
+
+            size_t total = countSteps(rec.next_step);
+            if (total > 0)
+                std::cout << "    -> " << rec.target_name
+                          << " : " << total << " edge(s) in chain\n";
+        }
+
+        for (AceRecord& rec : merged) {
+            rec.target_attributes = lookupAttrs(rec.target_sid, rec.target_type,
+                                                usersArr, userLut,
+                                                computersArr, computerLut,
+                                                groupsArr, groupLut);
+            for (AceStep& s : rec.next_step)
+                enrichStepAttributes(s, usersArr, userLut, computersArr, computerLut, groupsArr, groupLut);
+        }
+
+        results.insert(results.end(), merged.begin(), merged.end());
+        std::cout << "    -> " << merged.size() << " record(s) added\n";
+    }
+
+    return results;
+}
+
+/* ══ Encryption Types Attack Vector ═══════════════════════════════════════ */
+
+struct EncryptionUser {
+    std::string sid;
+    std::string name;
+    std::string dn;
+    std::string strongest_algo;
+};
+
+static std::string strongestEncryptionAlgo(const JsonVal& encList) {
+    if (!encList.isArr() || encList.arr.empty()) return "";
+
+    std::string bestName;
+    double      bestRisk = -1.0;
+
+    for (const JsonVal& item : encList.arr) {
+        if (item.isObj()) {
+            std::string name = getStr(item, "name");
+            if (name.empty()) continue;
+
+            double risk = 0.0;
+            if (const JsonVal* riskVal = item.find("risk")) {
+                if (riskVal->isNum()) risk = riskVal->n;
+                else if (riskVal->isStr()) {
+                    try { risk = std::stod(riskVal->s); } catch (...) { risk = 0.0; }
+                }
+            }
+
+            if (bestName.empty() || risk > bestRisk) {
+                bestName = name;
+                bestRisk = risk;
+            }
+        } else if (item.isStr()) {
+            if (bestName.empty()) bestName = item.str();
+        }
+    }
+
+    return bestName;
+}
+
+static std::vector<EncryptionUser> extractEncryptionUsers(const JsonArr& usersArr) {
+    std::vector<EncryptionUser> out;
+
+    for (const JsonVal& entry : usersArr) {
+        if (!entry.isObj()) continue;
+
+        const JsonVal* encList = entry.find("msds_supportedencryptiontypes_name");
+        if (!encList || !encList->isArr() || encList->arr.empty()) {
+            encList = entry.find("msds_supportedencryptiontypesname");
+        }
+        if (!encList || !encList->isArr() || encList->arr.empty()) continue;
+
+        std::string strongest = strongestEncryptionAlgo(*encList);
+        if (strongest.empty()) continue;
+
+        EncryptionUser eu;
+        eu.sid = getStr(entry, "sid");
+        eu.name = getStr(entry, "username");
+        eu.dn = getStr(entry, "dn");
+        eu.strongest_algo = strongest;
+        if (eu.sid.empty() || eu.name.empty()) continue;
+
+        out.push_back(std::move(eu));
+    }
+
+    return out;
+}
+
+static std::vector<AceRecord> processEncryption(
+        const std::vector<EncryptionUser>& encUsers,
+        const JsonVal&                     dangerousRoot,
+        const JsonVal&                     extendedRoot,
+        const JsonArr&                     usersArr,
+        const SidLookup&                   userLut,
+        const JsonArr&                     computersArr,
+        const SidLookup&                   computerLut,
+        const JsonArr&                     groupsArr,
+        const SidLookup&                   groupLut,
+        ChainCache&                        cache,
+        int                                maxDepth)
+{
+    std::vector<AceRecord> results;
+
+    for (const EncryptionUser& eu : encUsers) {
+        std::cout << "  [ENC] " << eu.name << " (" << eu.sid << ")"
+                  << " -> " << eu.strongest_algo << "\n";
+
+        const std::string edgeLabel = eu.strongest_algo;
+
+        auto dangerous = extractMatching(dangerousRoot, eu.sid, eu.name, "dangerous_ace");
+        auto extended  = extractMatching(extendedRoot,  eu.sid, eu.name, "extended_rights");
+        dangerous.insert(dangerous.end(), extended.begin(), extended.end());
+        auto merged = mergeAceRecords(std::move(dangerous));
+
+        if (merged.empty()) {
+            AceRecord ep;
+            ep.target_name    = eu.name;
+            ep.target_sid     = eu.sid;
+            ep.target_dn      = eu.dn;
+            ep.target_type    = "User";
+            ep.principal_sid  = eu.sid;
+            ep.principal_name = eu.name;
+            ep.object_acetype = "encryption-entry-point";
+            ep.ace_qualifier  = "Allow";
+            ep.rights         = {edgeLabel};
+            ep.rights_display = edgeLabel;
+            ep.edge_rights    = {edgeLabel};
+            ep.source_file    = "encryption (no outgoing edges)";
+            ep.special_edge   = edgeLabel;
+            ep.target_attributes = lookupAttrs(eu.sid, "User",
+                                               usersArr, userLut,
+                                               computersArr, computerLut,
+                                               groupsArr, groupLut);
+            results.push_back(std::move(ep));
+            std::cout << "    -> No outgoing ACEs (pure entry point)\n";
+            continue;
+        }
+
+        for (AceRecord& rec : merged) {
+            rec.special_edge   = edgeLabel;
+            rec.rights         = {edgeLabel};
+            rec.rights_display = edgeLabel;
+            rec.edge_rights    = {edgeLabel};
+            rec.source_file    = "encryption -> " + rec.source_file;
+
+            if (rec.target_sid.empty()) continue;
+
+            auto cacheHit = cache.find(rec.target_sid);
+            if (cacheHit != cache.end()) {
+                rec.next_step = cacheHit->second;
+                std::cout << "    [cache hit] " << rec.target_name
+                          << " — " << countSteps(rec.next_step) << " edge(s)\n";
+                continue;
+            }
+
+            std::set<std::string> visited;
+            visited.insert(eu.sid);
             visited.insert(rec.target_sid);
 
             auto steps_d = extractSteps(dangerousRoot, rec.target_sid,
@@ -1410,13 +1583,18 @@ static void writeGraphObjects(
         const std::string&            name,
         const std::vector<AceRecord>& records,
         const std::vector<AceRecord>& attackVectorRecords = {},
-    const std::vector<AceRecord>& asrepRecords = {},
-    const std::vector<AceRecord>& pwdNotRequiredRecords = {})
+        const std::vector<AceRecord>& asrepRecords = {},
+        const std::vector<AceRecord>& pwdNotRequiredRecords = {},
+        const std::vector<AceRecord>& encryptionRecords = {})
 {
     std::ofstream f(outPath, std::ios::out | std::ios::trunc);
     if (!f) throw std::runtime_error("Cannot write to file: " + outPath);
 
-    size_t totalRecords = records.size() + attackVectorRecords.size() + asrepRecords.size() + pwdNotRequiredRecords.size();
+    size_t totalRecords = records.size()
+                      + attackVectorRecords.size()
+                      + asrepRecords.size()
+                      + pwdNotRequiredRecords.size()
+                      + encryptionRecords.size();
 
     f << "{\n";
     f << "  \"principal_sid\"  : \"" << jsonEsc(sid)  << "\",\n";
@@ -1441,6 +1619,10 @@ static void writeGraphObjects(
 
     for (size_t i = 0; i < pwdNotRequiredRecords.size(); ++i, ++idx) {
         writeRecord(f, pwdNotRequiredRecords[i], (idx + 1 == totalRecords));
+    }
+
+    for (size_t i = 0; i < encryptionRecords.size(); ++i, ++idx) {
+        writeRecord(f, encryptionRecords[i], (idx + 1 == totalRecords));
     }
 
     f << "  ]\n";
@@ -1536,11 +1718,8 @@ int main(int argc, char* argv[]) {
     bool flagPwdNotRequired    = false;
     bool flagEncryption        = false;
     bool flagKeyCredentialLink = false;
-    bool flagManagedBy         = false;
     bool flagRbcd              = false;
     bool flagMemberOf          = false;
-    bool flagUnconstrained     = false;
-
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if      ((arg == "-r" || arg == "--root") && i + 1 < argc) sid           = argv[++i];
@@ -1559,10 +1738,8 @@ int main(int argc, char* argv[]) {
         else if  (arg == "--pwd-not-required")    flagPwdNotRequired    = true;
         else if  (arg == "--encryption")          flagEncryption        = true;
         else if  (arg == "--key-credential-link") flagKeyCredentialLink = true;
-        else if  (arg == "--managed-by")          flagManagedBy         = true;
         else if  (arg == "--rbcd")                flagRbcd              = true;
         else if  (arg == "--member-of")           flagMemberOf          = true;
-        else if  (arg == "--unconstrained")       flagUnconstrained     = true;
         else if  (arg == "--max-depth"            && i + 1 < argc) {
             try {
                 int v = std::stoi(argv[++i]);
@@ -1604,16 +1781,14 @@ int main(int argc, char* argv[]) {
             << "  --pwd-not-required   Find accounts with password not required\n"
             << "  --encryption         Enumerate encryption settings\n"
             << "  --key-credential-link Find accounts with key credential link\n"
-            << "  --managed-by         Enumerate managed-by relationships\n"
             << "  --rbcd               Find Resource-Based Constrained Delegation targets\n"
             << "  --member-of          Enumerate group memberships\n"
-            << "  --unconstrained      Find unconstrained delegation accounts\n"
             << "  --max-depth <int>    Maximum hop depth for next_step resolution\n"
             << "                       (default: 50, min: 1)\n\n"
             << "Examples:\n"
             << "  graph_engine -r S-1-5-21-767238238-2156610861-601915929-527 -n JohnDoe\n"
             << "  graph_engine -r S-1-5-21-... -n JohnDoe --kerberoasting\n"
-            << "  graph_engine -r S-1-5-21-... -n JohnDoe --asrep --pwd-not-required --unconstrained\n";
+            << "  graph_engine -r S-1-5-21-... -n JohnDoe --asrep --pwd-not-required\n";
         return 1;
     }
 
@@ -1622,10 +1797,6 @@ int main(int argc, char* argv[]) {
     std::cout << "------------------------------------------------\n";
     std::cout << "  Root SID   : " << sid           << "\n";
     std::cout << "  Root Name  : " << name          << "\n";
-    std::cout << "  Dangerous  : " << dangerousFile  << "\n";
-    std::cout << "  Extended   : " << extendedFile   << "\n";
-    std::cout << "  Output     : " << outFile        << "\n";
-    std::cout << "  Max Depth  : " << maxDepth       << " hop(s)\n\n";
 
     /* Load ACE files once — reused for both Level-1 and Level-2 */
     std::cout << "[*] Loading ACE source files...\n";
@@ -1648,12 +1819,37 @@ int main(int argc, char* argv[]) {
     SidLookup computerLut = buildSidLookup(computersArr);
     SidLookup groupLut    = buildSidLookup(groupsArr);
 
+    const std::vector<std::pair<std::string, JsonVal>> rootUserAttrs =
+        lookupAttrs(sid, "User",
+                    usersArr, userLut,
+                    computersArr, computerLut,
+                    groupsArr, groupLut);
+
+    auto boolAttrText = [](const std::vector<std::pair<std::string, JsonVal>>& attrs,
+                           const std::string& key) -> std::string {
+        for (const auto& p : attrs) {
+            if (p.first != key) continue;
+            if (p.second.isBool()) return p.second.b ? "true" : "false";
+            if (p.second.isStr()) return p.second.s.empty() ? "false" : p.second.s;
+            if (p.second.isNum()) return p.second.n != 0.0 ? "true" : "false";
+            return "false";
+        }
+        return "n/a";
+    };
+
     std::cout << "    users     : " << usersArr.size()     << " object(s), "
               << userLut.size()     << " indexed\n";
     std::cout << "    computers : " << computersArr.size() << " object(s), "
               << computerLut.size() << " indexed\n";
     std::cout << "    groups    : " << groupsArr.size()    << " object(s), "
               << groupLut.size()    << " indexed\n";
+
+    std::cout << "  is_admin        : " << boolAttrText(rootUserAttrs, "is_admin") << "\n";
+    std::cout << "  potential_admin  : " << boolAttrText(rootUserAttrs, "potential_admin") << "\n";
+    std::cout << "  Dangerous  : " << dangerousFile  << "\n";
+    std::cout << "  Extended   : " << extendedFile   << "\n";
+    std::cout << "  Output     : " << outFile        << "\n";
+    std::cout << "  Max Depth  : " << maxDepth       << " hop(s)\n\n";
 
     /* Level-1: root principal -> direct targets */
     std::cout << "[*] Level-1 - scanning for principal_sid: " << sid << "\n";
@@ -1790,6 +1986,22 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    /* ══ Process --encryption flag ══ */
+    std::vector<AceRecord> encryptionRecords;
+    if (flagEncryption) {
+        std::cout << "\n[*] Processing --encryption attack vectors...\n";
+        auto encUsers = extractEncryptionUsers(usersArr);
+        std::cout << "    Found " << encUsers.size() << " encryption-configured user(s)\n";
+        if (!encUsers.empty()) {
+            encryptionRecords = processEncryption(
+                encUsers, dangerousRoot, extendedRoot,
+                usersArr, userLut, computersArr, computerLut, groupsArr, groupLut,
+                chainCache, maxDepth);
+            std::cout << "    Encryption records resolved: "
+                      << encryptionRecords.size() << " record(s)\n";
+        }
+    }
+
     /* ══ Process --rbcd flag ══ */
     
     size_t rbcdEdgesAttached = 0;
@@ -1814,6 +2026,8 @@ int main(int argc, char* argv[]) {
             collectNodeIndexFromRecord(rec, nodeIndex);
         for (const AceRecord& rec : pwdNotRequiredRecords)
             collectNodeIndexFromRecord(rec, nodeIndex);
+        for (const AceRecord& rec : encryptionRecords)
+            collectNodeIndexFromRecord(rec, nodeIndex);
 
         rbcdRelationships += attachRbcdEdgesToRecords(
             all, rbcdByPrincipal, nodeIndex,
@@ -1829,6 +2043,10 @@ int main(int argc, char* argv[]) {
             rbcdEdgesAttached);
         rbcdRelationships += attachRbcdEdgesToRecords(
             pwdNotRequiredRecords, rbcdByPrincipal, nodeIndex,
+            usersArr, userLut, computersArr, computerLut, groupsArr, groupLut,
+            rbcdEdgesAttached);
+        rbcdRelationships += attachRbcdEdgesToRecords(
+            encryptionRecords, rbcdByPrincipal, nodeIndex,
             usersArr, userLut, computersArr, computerLut, groupsArr, groupLut,
             rbcdEdgesAttached);
 
@@ -1855,6 +2073,8 @@ int main(int argc, char* argv[]) {
             for (const AceRecord& rec : asrepRecords)
                 collectNodeIndexFromRecord(rec, nodeIndex);
             for (const AceRecord& rec : pwdNotRequiredRecords)
+                collectNodeIndexFromRecord(rec, nodeIndex);
+            for (const AceRecord& rec : encryptionRecords)
                 collectNodeIndexFromRecord(rec, nodeIndex);
 
             std::vector<AceRecord> memberOfRecords;
@@ -1886,13 +2106,15 @@ int main(int argc, char* argv[]) {
         std::cout << " + " << asrepRecords.size() << " AS-REP record(s)";
     if (!pwdNotRequiredRecords.empty())
         std::cout << " + " << pwdNotRequiredRecords.size() << " pwd-not-required record(s)";
+    if (!encryptionRecords.empty())
+        std::cout << " + " << encryptionRecords.size() << " encryption record(s)";
     if (rbcdEdgesAttached > 0)
         std::cout << " + " << rbcdEdgesAttached << " rbcd edge(s)";
     if (memberOfEdgesAttached > 0)
         std::cout << " + " << memberOfEdgesAttached << " memberof edge(s)";
     std::cout << " to " << outFile << "...\n";
     try {
-        writeGraphObjects(outFile, sid, name, all, kerberoastingRecords, asrepRecords, pwdNotRequiredRecords);
+        writeGraphObjects(outFile, sid, name, all, kerberoastingRecords, asrepRecords, pwdNotRequiredRecords, encryptionRecords);
     } catch (const std::exception& e) {
         std::cerr << "[ERROR] " << e.what() << "\n";
         return 2;
@@ -1914,6 +2136,8 @@ int main(int argc, char* argv[]) {
         std::cout << "  AS-REP records          : " << asrepRecords.size() << "\n";
     if (flagPwdNotRequired)
         std::cout << "  Pwd-not-required records: " << pwdNotRequiredRecords.size() << "\n";
+    if (flagEncryption)
+        std::cout << "  Encryption records       : " << encryptionRecords.size() << "\n";
     if (flagRbcd)
         std::cout << "  RBCD edges              : " << rbcdEdgesAttached << "\n";
     if (flagMemberOf)
@@ -2003,7 +2227,6 @@ static size_t attachMemberOfEdges(
             tokenIdx[pg.primaryToken] = recIndex;
         }
 
-        /* Create a step from group -> node */
         AceStep ms;
         ms.target_name    = nodeName.empty() ? nodeSid : nodeName;
         ms.target_sid     = nodeSid;
@@ -2025,7 +2248,6 @@ static size_t attachMemberOfEdges(
     return attached;
 }
 
-/* Forward declaration for member-of helper (implementation located below) */
 static size_t attachMemberOfEdges(
     const std::map<long, PrivGroup>& privByToken,
     const std::map<std::string, std::pair<std::string, std::string>>& nodeIndex,

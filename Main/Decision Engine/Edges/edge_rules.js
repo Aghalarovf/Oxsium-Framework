@@ -121,6 +121,14 @@ const EDGE_RULES = {
     ]
 };
 
+// UI overrides for specific extended-rights / object-type right names
+// Ensure msDS-KeyCredentialLink is shown as "Shadow Credentials" in the graph
+const EDGE_LABEL_OVERRIDES = {
+    'write-msds-keycredentiallink': 'Shadow Credentials',
+    'msds-keycredentiallink': 'Shadow Credentials',
+    '5b47d60f-6051-40fb-99e0-ed3a78604e5d': 'Shadow Credentials'
+};
+
 function getEdgeCategory(d) {
     if (d.crit) return 'critical';
     const rights = Array.isArray(d.edge_rights) ? d.edge_rights : [];
@@ -166,5 +174,10 @@ function getEdgeForce(d) {
 function formatEdgeLabel(rel) {
     const max = EDGE_RULES.label.maxLength;
     if (!rel) return '';
+    const key = String(rel).trim().toLowerCase();
+    // Override key-credential related rights to a friendlier label
+    if (key.includes('keycredential') || EDGE_LABEL_OVERRIDES[key]) {
+        return EDGE_LABEL_OVERRIDES[key] || 'Shadow Credentials';
+    }
     return rel.length > max ? rel.slice(0, max - 1) + '…' : rel;
 }
