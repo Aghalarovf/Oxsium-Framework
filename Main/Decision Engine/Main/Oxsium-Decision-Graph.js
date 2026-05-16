@@ -916,9 +916,15 @@ function hideTooltip() {
 }
 
 function clickNode(evt, d) {
-    const relatedPaths = findRelatedPathsForNode(d);
-    window.selectPaths?.(relatedPaths.map(item => item.path));
+    // Graph focus (highlight chain in graph)
     applyGraphFocusToNode(d);
+
+    // Right panel: render node chain from root to clicked node
+    if (typeof window.renderNodeChainPanel === 'function') {
+        window.renderNodeChainPanel(d);
+    }
+
+    evt?.stopPropagation?.();
 }
 
 function applyGraphFocusToNode(nodeData) {
@@ -1003,7 +1009,7 @@ function clickEdge(evt, d) {
 }
 
 function findRelatedPathsForNode(nodeData) {
-    const label = String(nodeData?.label || '').toLowerCase();
+    const label = String(nodeData?.label || nodeData?.id || '').toLowerCase();
     if (!label) return [];
 
     const matches = [];

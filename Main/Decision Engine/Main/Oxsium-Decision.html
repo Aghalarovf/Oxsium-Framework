@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Oxsium Framework — Decision Engine</title>
+    <title>Decision Tree — Oxsium Framework</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="Oxsium-Decision.css">
@@ -164,79 +164,7 @@
 
     <!-- ══ RIGHT PANEL: Detail View ══ -->
     <aside class="panel-right">
-        <div class="right-header">
-            <div class="right-title">Path Detail</div>
-            <div class="path-detail-name" id="detail-name">Select a path</div>
-            <div class="path-detail-sub" id="detail-sub">Click any path card to inspect</div>
-        </div>
-
-        <div class="detail-explain" id="detail-explain">
-            <div class="detail-explain-head">
-                <span class="detail-explain-label">Auto Explanation</span>
-                <span class="detail-explain-chip" id="detail-explain-chip">Path</span>
-            </div>
-            <div class="detail-explain-body" id="detail-explain-body">
-                Select a node or edge in the graph to see a detailed explanation here.
-            </div>
-        </div>
-
-        <!-- Score ring -->
-        <div class="score-section" id="score-section">
-            <div class="score-ring-wrap">
-                <svg viewBox="0 0 60 60">
-                    <circle cx="30" cy="30" r="24" fill="none" stroke="#1a2840" stroke-width="5"/>
-                    <circle id="score-ring" cx="30" cy="30" r="24"
-                        fill="none" stroke="#ef4444" stroke-width="5"
-                        stroke-dasharray="0 150"
-                        stroke-linecap="round"
-                        transform="rotate(-90 30 30)"
-                        style="transition: stroke-dasharray 0.6s ease"/>
-                </svg>
-                <div class="score-ring-val" id="score-num">—</div>
-            </div>
-            <div class="score-meta">
-                <div class="score-meta-row">
-                    <span class="score-meta-key">Severity</span>
-                    <span class="score-meta-val red" id="meta-sev">—</span>
-                </div>
-                <div class="score-meta-row">
-                    <span class="score-meta-key">Hops</span>
-                    <span class="score-meta-val" id="meta-hops">—</span>
-                </div>
-                <div class="score-meta-row">
-                    <span class="score-meta-key">Start Node</span>
-                    <span class="score-meta-val" id="meta-start">—</span>
-                </div>
-                <div class="score-meta-row">
-                    <span class="score-meta-key">Target</span>
-                    <span class="score-meta-val orange" id="meta-target">—</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Sparkline -->
-        <div class="sparkline-section">
-            <div class="sparkline-head">
-                <div class="spark-label">Risk Distribution</div>
-                <div class="risk-distribution-sub" id="risk-distribution-sub">Path edges</div>
-            </div>
-            <div class="sparkline-wrap">
-                <svg id="sparkline-svg" viewBox="0 0 280 40" preserveAspectRatio="none"></svg>
-            </div>
-            <div class="risk-distribution-list" id="risk-distribution-list">
-                <div class="risk-distribution-empty">Select a node to list connected edge names</div>
-            </div>
-        </div>
-
-        <!-- Hop list -->
-        <div class="hops-section" id="hops-section">
-            <div class="section-sep">Hop Chain</div>
-            <div id="hop-list">
-                <div style="padding:24px 14px;text-align:center;font-size:9px;color:var(--text-dim);letter-spacing:1px;">
-                    NO PATH SELECTED
-                </div>
-            </div>
-        </div>
+        <!-- Empty - ready for new content -->
     </aside>
 
 </div>
@@ -289,6 +217,8 @@
 
 <script src="Oxsium-Decision.js"></script>
 <script src="Oxsium-Decision-Path.js"></script>
+<script src="../Helpers/graph_hint.js"></script>
+<script src="Oxsium-Decision-NodeChain.js"></script>
 <script src="../Nodes/node_rule.js"></script>
 <script src="../Edges/edge_rules.js"></script>
 <script src="Oxsium-Decision-Graph.js"></script>

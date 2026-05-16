@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Certificate Service — Oxsium Framework</title>
+  <link rel="stylesheet" href="Oxsium-Certificate.css">
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- TOP BAR -->
+  <header class="panel top-panel">
+    <div class="topbar-left-slim">
+      <div class="dot dot-green"></div>
+      <span class="engine-status">ENGINE ACTIVE</span>
+    </div>
+    <div class="certificate-brand ml-auto">
+      <div class="certificate-brand-divider"></div>
+      <div class="certificate-brand-icon">
+        <img src="../../assets/favicon.png" alt="Oxsium" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
+      </div>
+      <div class="certificate-brand-text">
+        <div class="certificate-brand-name">OXSIUM</div>
+        <div class="certificate-brand-sub">FRAMEWORK · v2.1</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- LEFT: REFERENCES -->
+  <aside class="panel left-panel" id="refPanel"></aside>
+
+  <!-- MAIN -->
+  <main class="main-panel">
+
+    <!-- CONNECTION MODULE -->
+    <section class="mid-panel conn-panel">
+      <div class="lbl" style="padding:0 0 12px 0">Connection Module</div>
+      <div class="conn-grid">
+        <div class="conn-card">
+          <div class="conn-val" style="color:var(--cyan)" id="targetsVal">0</div>
+          <div class="conn-key">Targets</div>
+          <div class="conn-bar" style="background:var(--bg)">
+            <div class="progress-bar" style="width:72%;background:var(--cyan)"></div>
+          </div>
+        </div>
+        <div class="conn-card">
+          <div class="conn-val" style="color:var(--green)" id="openVal">0</div>
+          <div class="conn-key">Open Ports</div>
+          <div class="conn-bar" style="background:var(--bg)">
+            <div class="progress-bar" style="width:45%;background:var(--green)"></div>
+          </div>
+        </div>
+        <div class="conn-card">
+          <div class="conn-val" style="color:var(--red)" id="vulnVal">0</div>
+          <div class="conn-key">Vulnerabilities</div>
+          <div class="conn-bar" style="background:var(--bg)">
+            <div class="progress-bar" style="width:100%;background:var(--red)"></div>
+          </div>
+        </div>
+        <div class="conn-card">
+          <div class="conn-val" style="color:var(--yellow)">94<span style="font-size:11px;color:var(--text3)">%</span></div>
+          <div class="conn-key">CA Coverage</div>
+          <div class="conn-bar" style="background:var(--bg)">
+            <div class="progress-bar" style="width:94%;background:var(--yellow)"></div>
+          </div>
+        </div>
+      </div>
+      <div class="target-grid">
+        <div class="target-row">
+          <span class="dot dot-green"></span>
+          <span class="target-ip">10.10.0.11</span>
+          <span class="target-port">:636</span>
+          <span class="badge b-blue" style="font-size:9px">LDAPS</span>
+        </div>
+        <div class="target-row">
+          <span class="dot dot-red"></span>
+          <span class="target-ip">10.10.0.12</span>
+          <span class="target-port">:443</span>
+          <span class="badge b-red" style="font-size:9px">CA-WEB</span>
+        </div>
+        <div class="target-row">
+          <span class="dot dot-yellow"></span>
+          <span class="target-ip">10.10.0.15</span>
+          <span class="target-port">:88</span>
+          <span class="badge b-orange" style="font-size:9px">KDC</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- VULNERABILITIES -->
+    <section class="mid-panel vuln-panel">
+      <div class="lbl">Vulnerabilities — ESC Module Analysis</div>
+      <div class="vuln-list" id="vulnList"></div>
+    </section>
+
+  </main>
+
+  <!-- RIGHT: CONFIGURATION -->
+  <aside class="panel right-panel">
+    <div class="lbl">Configuration</div>
+
+    <!-- Severity Ring -->
+    <div class="stat-ring">
+      <div class="ring-wrap">
+        <svg width="90" height="90" viewBox="0 0 90 90">
+          <circle cx="45" cy="45" r="38" fill="none" stroke="rgba(148,163,184,0.08)" stroke-width="6"/>
+          <circle cx="45" cy="45" r="38" fill="none" stroke="#ef4444" stroke-width="6"
+                  stroke-dasharray="238.76" stroke-dashoffset="59.69" stroke-linecap="round"/>
+        </svg>
+        <div class="ring-center">
+          <div class="ring-num">15</div>
+          <div class="ring-sub">ESC</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Severity Bars -->
+    <div class="sev-bar-wrap">
+      <div class="sev-row"><span class="sev-label">CRITICAL</span><div class="sev-track"><div class="sev-fill" style="width:80%;background:var(--red)"></div></div><span class="sev-count" style="color:var(--red)">4</span></div>
+      <div class="sev-row"><span class="sev-label">HIGH</span><div class="sev-track"><div class="sev-fill" style="width:100%;background:var(--orange)"></div></div><span class="sev-count" style="color:var(--orange)">5</span></div>
+      <div class="sev-row"><span class="sev-label">MEDIUM</span><div class="sev-track"><div class="sev-fill" style="width:80%;background:var(--yellow)"></div></div><span class="sev-count" style="color:var(--yellow)">4</span></div>
+      <div class="sev-row"><span class="sev-label">LOW</span><div class="sev-track"><div class="sev-fill" style="width:40%;background:var(--green)"></div></div><span class="sev-count" style="color:var(--green)">2</span></div>
+    </div>
+
+    <button class="scan-btn" onclick="runFullScan()">⬡ Run Full Scan</button>
+    <button class="export-btn" onclick="exportReport()">↓ Export Report</button>
+
+    <!-- Scan Settings -->
+    <div class="cfg-section">
+      <div class="cfg-title">Scan Settings</div>
+      <div class="cfg-row">
+        <span class="cfg-label">Auto-exploit</span>
+        <label class="toggle"><input type="checkbox" id="autoExp"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+      </div>
+      <div class="cfg-row">
+        <span class="cfg-label">Deep Scan</span>
+        <label class="toggle"><input type="checkbox" id="deepScan" checked><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+      </div>
+      <div class="cfg-row">
+        <span class="cfg-label">Stealth Mode</span>
+        <label class="toggle"><input type="checkbox" id="stealth"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+      </div>
+      <div class="cfg-row">
+        <span class="cfg-label">Save PoC</span>
+        <label class="toggle"><input type="checkbox" id="savePoc" checked><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+      </div>
+    </div>
+
+    <!-- Target / CA -->
+    <div class="cfg-section">
+      <div class="cfg-title">Target Domain</div>
+      <input class="cfg-input" id="domainInput" value="corp.oxsium.local">
+      <div style="margin-top:8px">
+        <div class="cfg-title" style="margin-bottom:4px">CA Server</div>
+        <input class="cfg-input" id="caInput" value="10.10.0.12\OXSIUM-CA">
+      </div>
+    </div>
+
+    <!-- Output Format -->
+    <div class="cfg-section">
+      <div class="cfg-title">Output Format</div>
+      <select class="cfg-select">
+        <option>JSON Report</option>
+        <option>HTML Report</option>
+        <option>CSV Export</option>
+        <option>BloodHound JSON</option>
+      </select>
+    </div>
+
+    <!-- Console -->
+    <div class="cfg-section">
+      <div class="cfg-title">Console</div>
+      <div class="log-box active" id="globalLogBox" style="max-height:120px">
+        <div class="log-line info">[*] Oxsium Certificate Service loaded</div>
+        <div class="log-line info">[*] ESC1-ESC15 modules initialized</div>
+        <div class="log-line warn">[!] 4 CRITICAL vulnerabilities detected</div>
+        <div class="log-line">[*] Awaiting command...</div>
+      </div>
+    </div>
+  </aside>
+
+</div><!-- /.shell -->
+
+<script src="Oxsium-Certificate.js"></script>
+</body>
+</html>

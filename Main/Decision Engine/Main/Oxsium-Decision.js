@@ -23,6 +23,10 @@
 let GRAPH_DATA   = { nodes: [], links: [] };
 let ATTACK_PATHS = [];
 
+// Qlobal scope-a dəm (digər modullar tərəfindən istifadə olunur)
+window.GRAPH_DATA   = GRAPH_DATA;
+window.ATTACK_PATHS = ATTACK_PATHS;
+
 // ── Node rəng xəritəsi ───────────────────────────────────────
 const NODE_COLORS = {
     user:     { fill: '#6366f1', glow: '#6366f1', stroke: '#818cf8' },
@@ -45,6 +49,10 @@ const NODE_COLORS = {
 function loadGraphData(graphData, attackPaths) {
     GRAPH_DATA   = graphData   || { nodes: [], links: [] };
     ATTACK_PATHS = attackPaths || [];
+
+    // Qlobal scope-a yenilə
+    window.GRAPH_DATA   = GRAPH_DATA;
+    window.ATTACK_PATHS = ATTACK_PATHS;
 
     const rootNode = GRAPH_DATA.nodes?.find(n => n.root);
     if (rootNode && typeof window !== 'undefined' && window.Oxsium !== undefined) {
@@ -125,7 +133,11 @@ function renderPathCards() {
             <div class="path-chain">${chainHTML}</div>
         `;
 
-        card.addEventListener('click', () => selectPath(path, card));
+        card.addEventListener('click', () => {
+            // Path card seçimi — sağ panel sonradan uygulanacak
+            document.querySelectorAll('.path-card').forEach(c => c.classList.remove('active'));
+            card.classList.add('active');
+        });
         list.appendChild(card);
     });
 

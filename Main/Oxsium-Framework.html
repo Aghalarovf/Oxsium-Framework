@@ -43,6 +43,9 @@
     <button class="main-tab active" data-tab="connect" onclick="switchMainTab('connect', this)">
       <span class="tab-dot"></span> Connect
     </button>
+    <button class="main-tab" data-tab="certificate" onclick="openCertificatePage()">
+      <span class="tab-dot"></span> Certificate
+    </button>
     <button class="main-tab" data-tab="decision-engine" onclick="openDecisionEnginePage()" title="Open the Decision Engine page in a separate window">
       <span class="tab-dot"></span> Decision Engine
     </button>
@@ -109,7 +112,7 @@
 
       <div class="nav-item" id="nav-acl" onclick="switchTab('acl')">
         <img class="nav-icon" src="assets/Icons/acl.png" alt="ACL" onerror="this.onerror=null;this.src='assets/favicon.png'">
-        Access Control List
+        ACEs
         <span class="nav-count" id="nav-acl-count">—</span>
       </div>
     </div>

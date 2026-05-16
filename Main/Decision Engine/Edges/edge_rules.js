@@ -175,6 +175,10 @@ function formatEdgeLabel(rel) {
     const max = EDGE_RULES.label.maxLength;
     if (!rel) return '';
     const key = String(rel).trim().toLowerCase();
+    // Normalize DS-Replication / DCSync variants to canonical label
+    if (/ds[-_ ]?replication.*get[-_ ]?changes/i.test(key) || key.includes('dcsync')) {
+        return 'DS-Replication-Get-Changes-All';
+    }
     // Override key-credential related rights to a friendlier label
     if (key.includes('keycredential') || EDGE_LABEL_OVERRIDES[key]) {
         return EDGE_LABEL_OVERRIDES[key] || 'Shadow Credentials';

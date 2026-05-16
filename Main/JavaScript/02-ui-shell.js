@@ -314,6 +314,46 @@ function switchTab(tab) {
   }
 }
 
+function openCertificatePanel(btn) {
+  if (!state.connected) {
+    if (typeof showToast === 'function') showToast('Connect first to view certificate tools', 'info');
+    switchMainTab('connect', document.querySelector('.main-tab[data-tab="connect"]'));
+    return;
+  }
+
+  switchMainTab('connect', document.querySelector('.main-tab[data-tab="connect"]'));
+
+  const certPanel = document.getElementById('cert-panel');
+  if (certPanel) {
+    certPanel.style.display = 'block';
+    certPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  if (btn) {
+    document.querySelectorAll('.main-tab').forEach(el => el.classList.remove('active'));
+    btn.classList.add('active');
+  }
+}
+
+function openCertificatePage() {
+  const targetUrl = new URL('Certificate Service/Main/Oxsium-Certificate.html', window.location.href).href;
+  const page = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+  if (page) {
+    page.focus();
+    return;
+  }
+
+  const fallbackLink = document.createElement('a');
+  fallbackLink.href = targetUrl;
+  fallbackLink.target = '_blank';
+  fallbackLink.rel = 'noopener noreferrer';
+  fallbackLink.click();
+
+  if (typeof showToast === 'function') {
+    showToast('Certificate page could not be opened. Your browser may be blocking popups.', 'error');
+  }
+}
+
 /* ── Enumeration tab state ── */
 function updateEnumerationTabState() {
   const enumBtn = document.querySelector('.main-tab[data-tab="enumeration"]');
