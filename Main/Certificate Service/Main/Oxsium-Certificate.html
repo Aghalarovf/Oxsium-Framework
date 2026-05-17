@@ -11,17 +11,34 @@
 <div class="shell">
 
   <!-- TOP BAR -->
-  <header class="panel top-panel">
-    <div class="topbar-left-slim">
-      <div class="dot dot-green"></div>
-      <span class="engine-status">ENGINE ACTIVE</span>
-    </div>
-    <div class="certificate-brand ml-auto">
-      <div class="certificate-brand-divider"></div>
-      <div class="certificate-brand-icon">
-        <img src="../../assets/favicon.png" alt="Oxsium" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
+  <header class="panel top-panel panel-glow">
+    <div class="topbar-left">
+      <div class="engine-pill">
+        <span class="engine-dot"></span>
+        <span class="engine-text">ENGINE ACTIVE</span>
       </div>
-      <div class="certificate-brand-text">
+      <div style="width:1px;height:18px;background:var(--border2)"></div>
+      <div class="target-display" style="max-width:250px">
+        <span class="tgt-label">CA</span>
+        <span class="tgt-val" id="caDisplayTop" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block">—</span>
+      </div>
+      <div style="width:1px;height:18px;background:var(--border2)"></div>
+      <div class="target-display" style="max-width:250px">
+        <span class="tgt-label">Domain</span>
+        <span class="tgt-val" id="domainDisplayTop" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block">—</span>
+      </div>
+      <div style="width:1px;height:18px;background:var(--border2)"></div>
+      <div class="target-display" style="max-width:250px">
+        <span class="tgt-label">User</span>
+        <span class="tgt-val" id="userDisplayTop" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block">—</span>
+      </div>
+    </div>
+
+    <div class="certificate-brand">
+      <div class="certificate-brand-icon">
+        <img src="../../assets/favicon.png" alt="Oxsium" onerror="this.style.display='none'">
+      </div>
+      <div>
         <div class="certificate-brand-name">OXSIUM</div>
         <div class="certificate-brand-sub">FRAMEWORK · v2.1</div>
       </div>
@@ -36,55 +53,41 @@
 
     <!-- CONNECTION MODULE -->
     <section class="mid-panel conn-panel">
-      <div class="lbl" style="padding:0 0 12px 0">Connection Module</div>
+      <div class="lbl">Connection Module</div>
       <div class="conn-grid">
-        <div class="conn-card">
-          <div class="conn-val" style="color:var(--cyan)" id="targetsVal">0</div>
+        <div class="conn-card" id="card-targets">
+          <div class="conn-val" style="color:var(--c5)" id="targetsVal">0</div>
           <div class="conn-key">Targets</div>
-          <div class="conn-bar" style="background:var(--bg)">
-            <div class="progress-bar" style="width:72%;background:var(--cyan)"></div>
+          <div class="conn-bar">
+            <div class="progress-bar" id="pb-targets" style="width:0%;background:var(--c4)"></div>
           </div>
         </div>
-        <div class="conn-card">
-          <div class="conn-val" style="color:var(--green)" id="openVal">0</div>
+        <div class="conn-card" id="card-open">
+          <div class="conn-val" style="color:var(--c6)" id="openVal">0</div>
           <div class="conn-key">Open Ports</div>
-          <div class="conn-bar" style="background:var(--bg)">
-            <div class="progress-bar" style="width:45%;background:var(--green)"></div>
+          <div class="conn-bar">
+            <div class="progress-bar" id="pb-open" style="width:0%;background:var(--c5)"></div>
           </div>
         </div>
-        <div class="conn-card">
-          <div class="conn-val" style="color:var(--red)" id="vulnVal">0</div>
+        <div class="conn-card" id="card-vuln">
+          <div class="conn-val" style="color:var(--sev-crit)" id="vulnVal">0</div>
           <div class="conn-key">Vulnerabilities</div>
-          <div class="conn-bar" style="background:var(--bg)">
-            <div class="progress-bar" style="width:100%;background:var(--red)"></div>
+          <div class="conn-bar">
+            <div class="progress-bar" id="pb-vuln" style="width:0%;background:var(--sev-crit)"></div>
           </div>
         </div>
-        <div class="conn-card">
-          <div class="conn-val" style="color:var(--yellow)">94<span style="font-size:11px;color:var(--text3)">%</span></div>
+        <div class="conn-card" id="card-ca">
+          <div class="conn-val" style="color:var(--c4)" id="caVal">0<span style="font-size:11px;color:var(--text4)">%</span></div>
           <div class="conn-key">CA Coverage</div>
-          <div class="conn-bar" style="background:var(--bg)">
-            <div class="progress-bar" style="width:94%;background:var(--yellow)"></div>
+          <div class="conn-bar">
+            <div class="progress-bar" id="pb-ca" style="width:0%;background:var(--c3)"></div>
           </div>
         </div>
       </div>
-      <div class="target-grid">
+      <div class="target-grid" id="targetGrid">
         <div class="target-row">
-          <span class="dot dot-green"></span>
-          <span class="target-ip">10.10.0.11</span>
-          <span class="target-port">:636</span>
-          <span class="badge b-blue" style="font-size:9px">LDAPS</span>
-        </div>
-        <div class="target-row">
-          <span class="dot dot-red"></span>
-          <span class="target-ip">10.10.0.12</span>
-          <span class="target-port">:443</span>
-          <span class="badge b-red" style="font-size:9px">CA-WEB</span>
-        </div>
-        <div class="target-row">
-          <span class="dot dot-yellow"></span>
-          <span class="target-ip">10.10.0.15</span>
-          <span class="target-port">:88</span>
-          <span class="badge b-orange" style="font-size:9px">KDC</span>
+          <span style="width:5px;height:5px;border-radius:50%;background:var(--text4);flex-shrink:0"></span>
+          <span class="target-ip" style="color:var(--text4)">No targets connected</span>
         </div>
       </div>
     </section>
@@ -101,16 +104,41 @@
   <aside class="panel right-panel">
     <div class="lbl">Configuration</div>
 
+    <!-- Target / CA -->
+    <div class="cfg-section">
+      <div class="cfg-title">Target Domain</div>
+      <input class="cfg-input" id="domainInput" placeholder="e.g. corp.oxsium.local"
+             oninput="document.getElementById('domainDisplayTop').textContent=(this.value||'—').substring(0,35)">
+      <div style="margin-top:8px">
+        <div class="cfg-title" style="margin-bottom:4px">CA Server</div>
+        <input class="cfg-input" id="caInput" placeholder="e.g. 10.10.0.12\OXSIUM-CA"
+               oninput="document.getElementById('caDisplayTop').textContent=(this.value||'—').substring(0,35)">
+      </div>
+    </div>
+
+    <div class="cfg-section">
+      <div class="cfg-title">Credentials</div>
+      <div style="margin-bottom:8px">
+        <div class="cfg-title" style="margin-bottom:4px">Username</div>
+        <input class="cfg-input" id="usernameInput" placeholder="e.g. corp\\user"
+               oninput="document.getElementById('userDisplayTop').textContent=(this.value||'—').substring(0,35)">
+      </div>
+      <div>
+        <div class="cfg-title" style="margin-bottom:4px">Password</div>
+        <input class="cfg-input" id="secretInput" placeholder="e.g. Password123!" type="password" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+
     <!-- Severity Ring -->
     <div class="stat-ring">
       <div class="ring-wrap">
         <svg width="90" height="90" viewBox="0 0 90 90">
-          <circle cx="45" cy="45" r="38" fill="none" stroke="rgba(148,163,184,0.08)" stroke-width="6"/>
-          <circle cx="45" cy="45" r="38" fill="none" stroke="#ef4444" stroke-width="6"
-                  stroke-dasharray="238.76" stroke-dashoffset="59.69" stroke-linecap="round"/>
+          <circle cx="45" cy="45" r="38" fill="none" stroke="rgba(6,182,212,0.07)" stroke-width="5"/>
+          <circle class="ring-arc" cx="45" cy="45" r="38" fill="none" stroke="var(--c4)" stroke-width="5"
+            stroke-dasharray="238.76" stroke-dashoffset="238.76" stroke-linecap="round" id="ringArc"/>
         </svg>
         <div class="ring-center">
-          <div class="ring-num">15</div>
+          <div class="ring-num" id="ringNum">0</div>
           <div class="ring-sub">ESC</div>
         </div>
       </div>
@@ -118,14 +146,50 @@
 
     <!-- Severity Bars -->
     <div class="sev-bar-wrap">
-      <div class="sev-row"><span class="sev-label">CRITICAL</span><div class="sev-track"><div class="sev-fill" style="width:80%;background:var(--red)"></div></div><span class="sev-count" style="color:var(--red)">4</span></div>
-      <div class="sev-row"><span class="sev-label">HIGH</span><div class="sev-track"><div class="sev-fill" style="width:100%;background:var(--orange)"></div></div><span class="sev-count" style="color:var(--orange)">5</span></div>
-      <div class="sev-row"><span class="sev-label">MEDIUM</span><div class="sev-track"><div class="sev-fill" style="width:80%;background:var(--yellow)"></div></div><span class="sev-count" style="color:var(--yellow)">4</span></div>
-      <div class="sev-row"><span class="sev-label">LOW</span><div class="sev-track"><div class="sev-fill" style="width:40%;background:var(--green)"></div></div><span class="sev-count" style="color:var(--green)">2</span></div>
+      <div class="sev-row">
+        <span class="sev-label">CRITICAL</span>
+        <div class="sev-track"><div class="sev-fill" id="sf-crit" style="width:0%;background:var(--sev-crit)"></div></div>
+        <span class="sev-count" id="sc-crit" style="color:var(--sev-crit)">0</span>
+      </div>
+      <div class="sev-row">
+        <span class="sev-label">HIGH</span>
+        <div class="sev-track"><div class="sev-fill" id="sf-high" style="width:0%;background:var(--sev-high)"></div></div>
+        <span class="sev-count" id="sc-high" style="color:var(--sev-high)">0</span>
+      </div>
+      <div class="sev-row">
+        <span class="sev-label">MEDIUM</span>
+        <div class="sev-track"><div class="sev-fill" id="sf-med" style="width:0%;background:var(--sev-med)"></div></div>
+        <span class="sev-count" id="sc-med" style="color:var(--sev-med)">0</span>
+      </div>
+      <div class="sev-row">
+        <span class="sev-label">LOW</span>
+        <div class="sev-track"><div class="sev-fill" id="sf-low" style="width:0%;background:var(--sev-low)"></div></div>
+        <span class="sev-count" id="sc-low" style="color:var(--sev-low)">0</span>
+      </div>
     </div>
 
     <button class="scan-btn" onclick="runFullScan()">⬡ Run Full Scan</button>
     <button class="export-btn" onclick="exportReport()">↓ Export Report</button>
+
+    <div class="cfg-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div class="cfg-title" style="margin-bottom:0">Saved Users</div>
+        <button class="export-btn" style="padding:6px 10px;min-height:auto" onclick="loadSavedUsers()">↻ Load</button>
+      </div>
+      <div id="savedUsersPanel" style="margin-top:10px;display:flex;flex-direction:column;gap:8px;max-height:180px;overflow:auto">
+        <div class="log-line info">[*] Click Load to show saved credentials</div>
+      </div>
+    </div>
+
+    <!-- Console -->
+    <div class="cfg-section">
+      <div class="cfg-title">Console</div>
+      <div class="log-box active" id="globalLogBox" style="max-height:110px">
+        <div class="log-line info">[*] Not connected to any CA server</div>
+        <div class="log-line info">[*] ESC modules inactive — awaiting connection</div>
+        <div class="log-line">[*] Connect to a CA to begin discovery...</div>
+      </div>
+    </div>
 
     <!-- Scan Settings -->
     <div class="cfg-section">
@@ -145,38 +209,6 @@
       <div class="cfg-row">
         <span class="cfg-label">Save PoC</span>
         <label class="toggle"><input type="checkbox" id="savePoc" checked><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
-      </div>
-    </div>
-
-    <!-- Target / CA -->
-    <div class="cfg-section">
-      <div class="cfg-title">Target Domain</div>
-      <input class="cfg-input" id="domainInput" value="corp.oxsium.local">
-      <div style="margin-top:8px">
-        <div class="cfg-title" style="margin-bottom:4px">CA Server</div>
-        <input class="cfg-input" id="caInput" value="10.10.0.12\OXSIUM-CA">
-      </div>
-    </div>
-
-    <!-- Output Format -->
-    <div class="cfg-section">
-      <div class="cfg-title">Output Format</div>
-      <select class="cfg-select">
-        <option>JSON Report</option>
-        <option>HTML Report</option>
-        <option>CSV Export</option>
-        <option>BloodHound JSON</option>
-      </select>
-    </div>
-
-    <!-- Console -->
-    <div class="cfg-section">
-      <div class="cfg-title">Console</div>
-      <div class="log-box active" id="globalLogBox" style="max-height:120px">
-        <div class="log-line info">[*] Oxsium Certificate Service loaded</div>
-        <div class="log-line info">[*] ESC1-ESC15 modules initialized</div>
-        <div class="log-line warn">[!] 4 CRITICAL vulnerabilities detected</div>
-        <div class="log-line">[*] Awaiting command...</div>
       </div>
     </div>
   </aside>
