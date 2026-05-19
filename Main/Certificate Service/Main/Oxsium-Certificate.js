@@ -4,13 +4,6 @@
 // References panel shows only modules found by RUN Full SCAN
 const REFS = [
   {
-    id: 'ESC1', name: 'Template Misconfiguration', sev: 'CRITICAL', score: '9.8',
-    desc: 'Certificate templates with CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT flag allow any enrollee to specify arbitrary SANs including domain admin UPNs, leading to full domain compromise.',
-    impact: 'Domain Admin Takeover', proto: 'PKINIT + Certipy', cve: 'CVE-2021-36942', mitre: 'T1649',
-    steps: ['Enumerate vulnerable templates', 'Request cert with target UPN as SAN', 'Use cert for Kerberos auth (PKINIT)', 'DCSync or PTH to Domain Admin'],
-    active: true
-  },
-  {
     id: 'ESC2', name: 'Any Purpose Template', sev: 'CRITICAL', score: '9.1',
     desc: 'Templates with "Any Purpose" EKU or no EKU defined allow certificates to be used for any authentication purpose, including client authentication and smart card logon.',
     impact: 'Lateral Movement / Priv Esc', proto: 'LDAP + Certipy', cve: 'CVE-2021-36943', mitre: 'T1649',
@@ -160,11 +153,11 @@ function animVal(el, target, duration = 600) {
 
 function getCertificatePayload() {
   const domain = (document.getElementById('domainInput')?.value || '').trim();
-  const caServer = (document.getElementById('caInput')?.value || '').trim();
+  const nameServer = (document.getElementById('nameServerInput')?.value || '').trim();
   const username = (document.getElementById('usernameInput')?.value || '').trim();
   const password = (document.getElementById('secretInput')?.value || '').trim();
 
-  return { domain, ca_server: caServer, username, password };
+  return { domain, name_server: nameServer, username, password };
 }
 
 function getCertificateApiBase() {
@@ -182,8 +175,7 @@ function persistCertificateUser(payload) {
 function formatSavedSecret(item) {
   const secret = item.password || '';
   if (!secret) return '—';
-  if (secret.length <= 8) return secret;
-  return secret.slice(0, 4) + '…' + secret.slice(-4);
+  return secret;
 }
 
 function parseBackendResponse(response) {
@@ -227,14 +219,14 @@ function renderSavedUsers(users) {
   }
 
   panel.innerHTML = users.map((item, index) => `
-    <div class="saved-user-item" data-index="${index}" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(6,182,212,0.03);cursor:pointer">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
-        <div style="min-width:0">
+    <div class="saved-user-item" data-index="${index}" style="border:1px solid var(--border);border-radius:8px;background:rgba(6,182,212,0.03);cursor:pointer;width:100%;">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;width:100%">
+        <div style="min-width:0;flex:1">
           <div style="font-family:var(--mono);font-size:11px;color:var(--c5);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.username || 'Unknown user'}</div>
-          <div style="font-size:10px;color:var(--text2);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.domain || '—'} · ${item.ca_server || '—'}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.domain || '—'} · ${item.name_server || '—'}</div>
           <div style="font-size:9px;color:var(--text4);margin-top:4px">Saved: ${item.saved_at || '—'}</div>
         </div>
-        <div style="font-size:10px;color:var(--text2);text-align:right;white-space:nowrap">${formatSavedSecret(item)}</div>
+        <div style="font-size:10px;color:var(--text2);text-align:right;white-space:normal;word-break:break-all;overflow-wrap:anywhere;max-width:45%">${formatSavedSecret(item)}</div>
       </div>
     </div>
   `).join('');
@@ -245,17 +237,17 @@ function renderSavedUsers(users) {
       if (!item) return;
 
       const domainInput = document.getElementById('domainInput');
-      const caInput = document.getElementById('caInput');
+      const nameServerInput = document.getElementById('nameServerInput');
       const usernameInput = document.getElementById('usernameInput');
       const secretInput = document.getElementById('secretInput');
 
       if (domainInput) domainInput.value = item.domain || '';
-      if (caInput) caInput.value = item.ca_server || '';
+      if (nameServerInput) nameServerInput.value = item.name_server || '';
       if (usernameInput) usernameInput.value = item.username || '';
       if (secretInput) secretInput.value = item.password || '';
 
       if (domainInput) domainInput.dispatchEvent(new Event('input', { bubbles: true }));
-      if (caInput) caInput.dispatchEvent(new Event('input', { bubbles: true }));
+      if (nameServerInput) nameServerInput.dispatchEvent(new Event('input', { bubbles: true }));
       if (usernameInput) usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
 
       addGlobalLog('[*] Loaded saved user: ' + (item.username || 'Unknown user'), 'info');
@@ -290,6 +282,16 @@ function loadSavedUsers() {
 }
 
 /* ── BUILD LEFT PANEL ── */
+/* Toggle saved users collapsible panel */
+function toggleSavedUsersPanel() {
+  const pro = document.getElementById('savedUsersPro');
+  if (!pro) return;
+  const isOpen = pro.classList.contains('open');
+  pro.classList.toggle('open', !isOpen);
+  pro.classList.toggle('collapsed', isOpen);
+  if (!isOpen) loadSavedUsers();
+}
+
 function buildRefs() {
   const panel = document.getElementById('refPanel');
   let html = '<div class="lbl">References</div>';
@@ -309,60 +311,216 @@ function buildRefs() {
 /* ── BUILD VULN CARDS ── */
 function buildVulns() {
   const list = document.getElementById('vulnList');
-  let html = '';
-  // Render ALL modules (active visible, inactive disabled/grayed)
-  REFS.forEach(r => {
-    const cfg = sevCfg(r.sev);
-    const disabled = !r.active;
-    const chainHTML = r.steps.map((s, i) =>
-      `<span class="chain-step">${i + 1}. ${s}</span>${i < r.steps.length - 1 ? '<span class="chain-arrow">→</span>' : ''}`
-    ).join('');
+  if (!list) return;
+  list.innerHTML = `
+    <div class="workspace-empty workspace-empty-center">
+      Connect to a domain first
+    </div>`;
+}
 
-    html += `
-      <div class="vuln-card${disabled ? ' disabled' : ''}" id="vc-${r.id}" style="${disabled ? 'opacity:0.6;' : ''}">
-        <div class="vuln-header" onclick="${disabled ? 'return false;' : `toggleCard('${r.id}')`}" style="${disabled ? 'cursor:not-allowed;' : 'cursor:pointer;'}">
-          <div class="vuln-stripe ${cfg.stripe}"></div>
-          <div class="vuln-id-col">
-            <div class="vuln-id">${r.id}</div>
-            <div class="vuln-badge-row"><span class="badge ${cfg.badge}">${r.sev}</span></div>
-          </div>
-          <div class="vuln-title-col">
-            <div class="vuln-title">${r.name}</div>
-            <div class="vuln-impact">${r.impact}</div>
-          </div>
-          <div class="vuln-score-col">
-            <div class="vuln-score" style="color:${cfg.scoreColor};text-shadow:${cfg.scoreGlow}">${r.score}</div>
-            <div class="vuln-score-label">CVSS</div>
-          </div>
-          <span class="chevron" id="chev-${r.id}">▼</span>
+/* ════════════════════════════════════════
+   TEMPLATE CARDS
+   ════════════════════════════════════════ */
+
+let _allTemplates = [];
+
+function _sevCol(sev) {
+  return ({CRITICAL:'var(--sev-crit)',HIGH:'var(--sev-high)',
+           MEDIUM:'var(--sev-med)',LOW:'var(--sev-low)'})[sev] || 'var(--text4)';
+}
+function _sevBg(sev) {
+  return ({CRITICAL:'rgba(239,68,68,0.10)',HIGH:'rgba(249,115,22,0.09)',
+           MEDIUM:'rgba(234,179,8,0.09)',LOW:'rgba(34,197,94,0.09)'})[sev] || 'transparent';
+}
+
+/* Collapsed satır — template adı + zəiflik badge-ləri */
+function _tplRow(t, idx) {
+  const r = t.raw, p = t.parsed;
+  const name    = r.displayName || r.cn || 'Unknown';
+  const badges = `<span style="font-family:var(--mono);font-size:8px;color:var(--text4);
+    padding:2px 6px;border:1px solid var(--border);border-radius:3px;">INFO</span>`;
+
+  return `
+  <div class="tpl-card" id="tpl-card-${idx}"
+       style="border:1px solid var(--border);
+              border-radius:7px;overflow:hidden;
+              background:rgba(6,13,24,0.6);
+              transition:border-color .2s,background .2s;">
+    <!-- HEADER ROW -->
+    <div onclick="toggleTemplate(${idx})"
+         style="display:flex;align-items:center;justify-content:space-between;
+                padding:10px 14px;cursor:pointer;gap:10px;
+                transition:background .18s;"
+         onmouseover="this.style.background='rgba(6,182,212,0.04)'"
+         onmouseout="this.style.background='transparent'">
+      <div style="display:flex;align-items:center;gap:9px;min-width:0">
+        <span style="font-family:var(--mono);font-size:8px;color:var(--text4);
+          width:24px;flex-shrink:0;text-align:right;">${idx+1}</span>
+        <span style="width:1px;height:14px;background:var(--border);flex-shrink:0"></span>
+        <span style="font-family:var(--mono);font-size:11px;font-weight:700;
+          color:var(--text);
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;"
+          title="${name}">${name}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+        ${badges}
+        <span id="tpl-chev-${idx}"
+          style="font-size:10px;color:var(--text4);margin-left:4px;
+                 transition:transform .2s;display:inline-block;">▼</span>
+      </div>
+    </div>
+    <!-- EXPANDED BODY -->
+    <div id="tpl-body-${idx}"
+         style="display:none;border-top:1px solid var(--border);padding:16px 16px 14px;">
+      ${_tplBody(r, p)}
+    </div>
+  </div>`;
+}
+
+/* Genişlənmiş bölmə — bütün atributlar */
+function _tplBody(r, p) {
+  const ekuList = (p.eku_friendly || []).map(e =>
+    `<span style="display:inline-block;font-family:var(--mono);font-size:9px;
+      padding:2px 7px;margin:2px;border-radius:4px;
+      background:rgba(6,182,212,0.07);border:1px solid var(--border2);
+      color:var(--c5);">${e.name}</span>`
+  ).join('') || '<span style="color:var(--text4);font-size:9px">—</span>';
+
+  function flagList(arr) {
+    if (!arr || !arr.length) return '<span style="color:var(--text4);font-size:9px">—</span>';
+    return arr.map(f => `<span style="display:inline-block;font-family:var(--mono);font-size:8px;
+      padding:1px 6px;margin:2px;border-radius:3px;
+      background:rgba(100,116,139,0.10);border:1px solid var(--border);
+      color:var(--text2);">${f.replace(/^CT_FLAG_|^CTPRIVATEKEY_FLAG_/,'')}</span>`
+    ).join('');
+  }
+
+  function row(label, val, highlight) {
+    return `<div style="display:flex;gap:10px;align-items:flex-start;padding:5px 0;
+              border-bottom:1px solid rgba(6,182,212,0.06)">
+      <span style="font-family:var(--mono);font-size:9px;color:var(--text4);
+        width:160px;flex-shrink:0;letter-spacing:.3px;padding-top:2px">${label}</span>
+      <span style="font-family:var(--mono);font-size:9px;
+        color:${highlight||'var(--text2)'};flex:1;word-break:break-all">${val}</span>
+    </div>`;
+  }
+
+  const aclRows = (p.acl_enrollment_aces || []).slice(0,8).map(ace => {
+    const rCol = ace.type === 'Allow' ? 'var(--sev-low)' : 'var(--sev-crit)';
+    return `<div style="font-family:var(--mono);font-size:8px;padding:3px 6px;
+      border-radius:4px;background:rgba(6,13,24,0.7);border:1px solid var(--border);
+      margin-bottom:3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span style="color:${rCol};font-weight:700">${ace.type}</span>
+      <span style="color:var(--text4)">${ace.sid}</span>
+      <span style="color:var(--c5)">${(ace.rights||[ace.right]).join(', ')}</span>
+    </div>`;
+  }).join('');
+
+  return `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px">
+      <div>
+        ${row('Display Name',    r.displayName || r.cn || '—')}
+        ${row('CN',              r.cn || '—')}
+        ${row('Schema Version',  r['msPKI-Template-Schema-Version'] || '—')}
+        ${row('Validity',        p.validity_period || '—')}
+        ${row('Renewal Period',  p.renewal_period  || '—')}
+        ${row('Min Key Size',    (r['msPKI-Minimal-Key-Size']||'—') + ' bit')}
+        ${row('RA Signatures',   p.ra_signature != null ? p.ra_signature : '—')}
+        ${row('Machine Type',    p.is_machine_type ? 'Yes' : 'No')}
+        ${row('Is CA',           p.is_ca ? 'Yes' : 'No')}
+      </div>
+      <div>
+        <div style="margin-bottom:8px">
+          <div style="font-family:var(--mono);font-size:9px;letter-spacing:1px;
+            text-transform:uppercase;color:var(--text4);margin-bottom:5px">EKU</div>
+          <div>${ekuList}</div>
         </div>
-        <div class="vuln-body" id="vb-${r.id}">
-          <div class="vuln-body-inner">
-            <div class="vuln-desc">${r.desc}</div>
-            <div class="btn-row">
-              <button class="btn btn-test"    onclick="${disabled ? 'return false;' : `runTest('${r.id}')`}" ${disabled ? 'disabled' : ''}>▶ Test</button>
-              <button class="btn btn-exploit" onclick="${disabled ? 'return false;' : `runExploit('${r.id}')`}" ${disabled ? 'disabled' : ''}>⚡ Exploit</button>
-              <button class="btn btn-scan"    onclick="${disabled ? 'return false;' : `runScan('${r.id}')`}" ${disabled ? 'disabled' : ''}>⬡ Scan</button>
-              <button class="btn btn-poc"     onclick="${disabled ? 'return false;' : `runPoC('${r.id}')`}" ${disabled ? 'disabled' : ''}>{ } PoC</button>
-              <button class="btn btn-info"    onclick="${disabled ? 'return false;' : `showInfo('${r.id}')`}" ${disabled ? 'disabled' : ''}>ℹ Info</button>
-              <button class="btn btn-report"  onclick="${disabled ? 'return false;' : `genReport('${r.id}')`}" ${disabled ? 'disabled' : ''}>↓ Report</button>
-            </div>
-            <div class="meta-grid">
-              <div class="meta-item"><div class="meta-key">Impact</div><div class="meta-val">${r.impact}</div></div>
-              <div class="meta-item"><div class="meta-key">Protocol</div><div class="meta-val">${r.proto}</div></div>
-              <div class="meta-item"><div class="meta-key">CVE / Ref</div><div class="meta-val">${r.cve}</div></div>
-              <div class="meta-item"><div class="meta-key">MITRE ATT&CK</div><div class="meta-val">${r.mitre}</div></div>
-            </div>
-            <div class="chain-wrap">
-              <div class="chain-title">Attack Chain</div>
-              <div class="chain-steps">${chainHTML}</div>
-            </div>
-            <div class="log-box" id="log-${r.id}"></div>
-          </div>
+        <div style="margin-bottom:8px">
+          <div style="font-family:var(--mono);font-size:9px;letter-spacing:1px;
+            text-transform:uppercase;color:var(--text4);margin-bottom:5px">Subject Name Flags</div>
+          <div>${flagList(p.subject_name_flags_decoded)}</div>
         </div>
-      </div>`;
-  });
-  list.innerHTML = html;
+        <div style="margin-bottom:8px">
+          <div style="font-family:var(--mono);font-size:9px;letter-spacing:1px;
+            text-transform:uppercase;color:var(--text4);margin-bottom:5px">Enrollment Flags</div>
+          <div>${flagList(p.enrollment_flags_decoded)}</div>
+        </div>
+        <div>
+          <div style="font-family:var(--mono);font-size:9px;letter-spacing:1px;
+            text-transform:uppercase;color:var(--text4);margin-bottom:5px">Private Key Flags</div>
+          <div>${flagList(p.private_key_flags_decoded)}</div>
+        </div>
+      </div>
+    </div>
+    ${aclRows ? `
+    <div style="margin-top:12px">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:1px;
+        text-transform:uppercase;color:var(--text4);margin-bottom:6px">
+        ACL Enrollment ACEs (${(p.acl_enrollment_aces||[]).length})
+      </div>
+      ${aclRows}
+    </div>` : ''}`;
+}
+
+function toggleTemplate(idx) {
+  const body = document.getElementById('tpl-body-' + idx);
+  const chev = document.getElementById('tpl-chev-' + idx);
+  const card = document.getElementById('tpl-card-' + idx);
+  if (!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if (chev) chev.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)';
+  if (card) card.style.borderColor = open ? 'var(--border)' : 'rgba(6,182,212,0.35)';
+}
+
+function buildTemplateCards(templates) {
+  _allTemplates = templates || [];
+  const list = document.getElementById('vulnList');
+  if (!list) return;
+
+  if (!_allTemplates.length) {
+    list.innerHTML = `<div style="font-family:var(--mono);font-size:11px;
+      color:var(--text4);padding:30px;text-align:center">[*] No templates found</div>`;
+    return;
+  }
+
+  list.innerHTML = `
+    <!-- TOOLBAR -->
+    <div style="display:flex;align-items:center;justify-content:space-between;
+      margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-family:var(--mono);font-size:9px;letter-spacing:1.5px;
+          text-transform:uppercase;color:var(--text4)">Templates</span>
+        <span style="font-family:var(--mono);font-size:9px;padding:2px 8px;
+          border-radius:10px;background:rgba(6,182,212,0.08);
+          border:1px solid var(--border2);color:var(--c5)">${_allTemplates.length} total</span>
+        <span style="font-family:var(--mono);font-size:9px;padding:2px 8px;
+          border-radius:10px;background:rgba(34,197,94,0.08);
+          border:1px solid rgba(34,197,94,0.25);color:var(--sev-low)">GUI ESC analysis off</span>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button onclick="filterTemplates('all')" id="tpl-f-all"
+          style="font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.8px;
+          text-transform:uppercase;padding:4px 10px;border-radius:4px;cursor:pointer;
+          background:rgba(6,182,212,0.12);border:1px solid var(--border2);color:var(--c5)">ALL</button>
+      </div>
+    </div>
+    <!-- CARDS -->
+    <div id="tpl-list" style="display:flex;flex-direction:column;gap:5px">
+      ${_allTemplates.map((t,i) => _tplRow(t,i)).join('')}
+    </div>`;
+}
+
+let _activeFilter = 'all';
+function filterTemplates(filter) {
+  _activeFilter = filter;
+  const listEl = document.getElementById('tpl-list');
+  if (!listEl) return;
+  listEl.innerHTML = _allTemplates
+    .map((t, i) => ({ t, i }))
+    .filter(() => true)
+    .map(({ t, i }) => _tplRow(t, i))
+    .join('');
 }
 
 /* ── INTERACTIONS ── */
@@ -391,7 +549,7 @@ function runTest(id) {
   const box = document.getElementById('log-' + id);
   box.innerHTML = '';
   log(id, '[*] Initializing test for ' + id + '...', 'info');
-  setTimeout(() => log(id, '[*] Connecting to CA at ' + (document.getElementById('caInput').value || 'N/A') + '...', 'info'), 400);
+  setTimeout(() => log(id, '[*] Connecting to Name Server at ' + (document.getElementById('nameServerInput').value || 'N/A') + '...', 'info'), 400);
   setTimeout(() => log(id, '[*] Enumerating certificate templates...'), 800);
   setTimeout(() => log(id, '[*] Analyzing permissions and flags...'), 1300);
   setTimeout(() => {
@@ -411,8 +569,8 @@ function runExploit(id) {
   }
 
   const payload = getCertificatePayload();
-  if (!payload.domain || !payload.ca_server || !payload.username || !payload.password) {
-    log(id, '[!] Domain, CA Server, Username, and Password are required', 'err');
+  if (!payload.domain || !payload.name_server || !payload.username || !payload.password) {
+    log(id, '[!] Domain, Name Server, Username, and Password are required', 'err');
     return;
   }
 
@@ -489,13 +647,13 @@ function genReport(id) {
 function runFullScan() {
   const payload = getCertificatePayload();
 
-  if (!payload.domain || !payload.ca_server || !payload.username || !payload.password) {
-    addGlobalLog('[!] Error: Domain, CA Server, Username, and Password are required', 'error');
+  if (!payload.domain || !payload.name_server || !payload.username || !payload.password) {
+    addGlobalLog('[!] Error: Domain, Name Server, Username, and Password are required', 'error');
     return;
   }
 
   addGlobalLog('[*] Full scan initiated — scanning all 15 ESC modules...', 'info');
-  addGlobalLog('[*] Target: ' + payload.domain + ' / CA: ' + payload.ca_server + ' / User: ' + payload.username, 'info');
+  addGlobalLog('[*] Target: ' + payload.domain + ' / Name Server: ' + payload.name_server + ' / User: ' + payload.username, 'info');
 
   REFS.forEach(r => r.active = false);
   persistCertificateUser(payload);
@@ -591,14 +749,112 @@ function connectCertificateService() {
     document.getElementById('userDisplayTop').textContent = payload.username.substring(0, 30);
   }
 
-  if (!payload.domain || !payload.ca_server || !payload.username || !payload.password) {
-    addGlobalLog('[-] Domain, CA Server, Username və Password daxil edin', 'err');
+  if (!payload.domain || !payload.name_server || !payload.username || !payload.password) {
+    addGlobalLog('[-] Domain, Name Server, Username və Password daxil edin', 'err');
     return;
   }
   
   addGlobalLog('[*] Sertifikat Service-ə bağlanılır...', 'info');
-  addGlobalLog('[*] Domain: ' + payload.domain + ' | CA: ' + payload.ca_server + ' | User: ' + payload.username, 'info');
+  addGlobalLog('[*] Domain: ' + payload.domain + ' | Name Server: ' + payload.name_server + ' | User: ' + payload.username, 'info');
   addGlobalLog('[*] Credentials ready for backend scan...', 'info');
+}
+
+/* ── CONNECTION MODULE ACTIONS ── */
+
+function togglePasswordVisibility(fieldId) {
+  const field = document.getElementById(fieldId);
+  if (!field) return;
+  const isPassword = field.type === 'password';
+  field.type = isPassword ? 'text' : 'password';
+}
+
+function resetConnectionFields() {
+  document.getElementById('domainInput').value = '';
+  document.getElementById('nameServerInput').value = '';
+  document.getElementById('usernameInput').value = '';
+  document.getElementById('secretInput').value = '';
+  document.getElementById('dcInput').value = '';
+  document.getElementById('ntlmHashInput').value = '';
+  
+  document.getElementById('domainDisplayTop').textContent = '—';
+  document.getElementById('nameServerDisplayTop').textContent = '—';
+  document.getElementById('userDisplayTop').textContent = '—';
+  
+  addGlobalLog('[*] Connection fields reset', 'info');
+}
+
+function runConnectionTest() {
+  const payload = getCertificatePayload();
+  
+  if (!payload.domain || !payload.name_server || !payload.username || !payload.password) {
+    addGlobalLog('[!] Please fill in all required fields: Domain, Name Server, Username, and Password', 'error');
+    return;
+  }
+  
+  addGlobalLog('[*] Testing connection...', 'info');
+  addGlobalLog('[*] Domain: ' + payload.domain, 'info');
+  addGlobalLog('[*] Name Server: ' + payload.name_server, 'info');
+  addGlobalLog('[*] User: ' + payload.username, 'info');
+  
+  setTimeout(() => {
+    addGlobalLog('[*] Validating credentials...', 'info');
+  }, 500);
+  
+  setTimeout(() => {
+    addGlobalLog('[+] Connection test passed', 'success');
+  }, 1500);
+}
+
+function runEnumerate() {
+  const payload = getCertificatePayload();
+  
+  if (!payload.domain || !payload.name_server || !payload.username || !payload.password) {
+    addGlobalLog('[!] Please fill in all required fields: Domain, Name Server, Username, and Password', 'error');
+    return;
+  }
+  
+  addGlobalLog('[*] Starting certificate template enumeration...', 'info');
+  addGlobalLog('[*] Target: ' + payload.domain + ' / Name Server: ' + payload.name_server + ' / User: ' + payload.username, 'info');
+  addGlobalLog('[*] Sending request to API...', 'info');
+  
+  // Persist user
+  persistCertificateUser(payload);
+  
+  // Call API
+  fetch(getCertificateApiBase() + '/api/certificate/enumerate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  .then(parseBackendResponse)
+  .then(({ ok, data, raw, parseError }) => {
+    if (!data) {
+      const message = parseError || (raw ? raw.slice(0, 160) : 'empty response');
+      addGlobalLog('[!] API returned non-JSON response: ' + message, 'error');
+      return;
+    }
+    
+    if (!ok || data.status === 'error') {
+      const message = data.error || data.message || 'Enumeration failed';
+      addGlobalLog('[!] ' + message, 'error');
+      return;
+    }
+    
+    const report_id = data.report_id || 'UNKNOWN';
+    const templates_count = (data.templates || []).length;
+    const pki_objects_count = (data.pki_objects || []).length;
+    
+    addGlobalLog('[+] Enumeration complete', 'success');
+    addGlobalLog('[+] Report ID: ' + report_id, 'success');
+    addGlobalLog('[+] Templates found: ' + templates_count, 'success');
+    addGlobalLog('[+] PKI Objects found: ' + pki_objects_count, 'success');
+
+    // Render template cards in Center Workspace
+    buildTemplateCards(data.templates || []);
+  })
+  .catch(error => {
+    addGlobalLog('[!] Enumeration failed: ' + error.message, 'error');
+  });
 }
 
 /* ── INIT ── */

@@ -5,6 +5,568 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Certificate Service — Oxsium Framework</title>
   <link rel="stylesheet" href="Oxsium-Certificate.css">
+  <style>
+    /* ── ENUMERATE METHOD SELECTOR ── */
+    .enum-method-section {
+      padding: 14px 16px;
+      background: rgba(6,13,24,0.6);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      position: relative;
+      overflow: hidden;
+    }
+    .enum-method-section::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(6,182,212,0.35), transparent);
+    }
+
+    .enum-method-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .enum-method-title {
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: var(--text4);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .enum-method-title::before {
+      content: '';
+      display: block;
+      width: 3px; height: 10px;
+      background: var(--c4);
+      border-radius: 2px;
+      box-shadow: 0 0 6px var(--c4);
+    }
+
+    .enum-method-badge {
+      font-family: var(--mono);
+      font-size: 8px;
+      padding: 2px 7px;
+      background: rgba(6,182,212,0.08);
+      border: 1px solid rgba(6,182,212,0.2);
+      border-radius: 20px;
+      color: var(--c5);
+      letter-spacing: 0.5px;
+    }
+
+    .enum-method-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .method-card {
+      position: relative;
+      padding: 11px 10px 10px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      cursor: pointer;
+      transition: all .2s;
+      text-align: center;
+      overflow: hidden;
+    }
+
+    .method-card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(6,182,212,0.06) 0%, transparent 60%);
+      opacity: 0;
+      transition: opacity .25s;
+    }
+
+    .method-card:hover {
+      border-color: var(--border2);
+      background: var(--bg4);
+      transform: translateY(-1px);
+    }
+
+    .method-card:hover::after { opacity: 1; }
+
+    .method-card.selected {
+      border-color: var(--c3);
+      background: rgba(6,182,212,0.08);
+      box-shadow: 0 0 14px rgba(6,182,212,0.15), inset 0 0 0 1px rgba(6,182,212,0.1);
+    }
+
+    .method-card.selected::after { opacity: 1; }
+
+    .method-card.selected .method-icon { color: var(--c4); filter: drop-shadow(0 0 5px rgba(6,182,212,0.5)); }
+    .method-card.selected .method-name { color: var(--c5); }
+    .method-card.selected .method-dot { background: var(--c4); box-shadow: 0 0 6px var(--c4); }
+
+    .method-icon {
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 24px;
+    }
+
+    .method-icon img {
+      width: 20px;
+      height: 20px;
+      object-fit: contain;
+      image-rendering: auto;
+      transition: filter .2s, opacity .2s, transform .2s;
+    }
+
+    .method-card.selected .method-icon img {
+      filter: drop-shadow(0 0 5px rgba(6,182,212,0.55)) brightness(1.15);
+    }
+
+    .method-card.disabled .method-icon img {
+      filter: grayscale(100%) brightness(0.72);
+      opacity: 0.72;
+    }
+
+    .method-card.disabled {
+      opacity: 0.42;
+      filter: grayscale(80%);
+      background: rgba(20,24,32,0.9);
+      border-color: rgba(148,163,184,0.16);
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    .method-card.disabled .method-icon,
+    .method-card.disabled .method-name,
+    .method-card.disabled .method-desc {
+      color: var(--text4);
+      text-shadow: none;
+      filter: none;
+    }
+
+    .method-card.disabled .method-dot {
+      background: var(--text4);
+      box-shadow: none;
+    }
+
+    .method-card.disabled .method-selected-bar {
+      opacity: 0;
+    }
+
+    .method-selected-bar {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--c4), transparent);
+      opacity: 0;
+      transition: opacity .2s;
+    }
+    .method-card.selected .method-selected-bar { opacity: 1; }
+
+    .method-name {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--text2);
+      text-transform: uppercase;
+      transition: color .2s;
+      display: block;
+    }
+
+    .method-desc {
+      font-family: var(--mono);
+      font-size: 8px;
+      color: var(--text4);
+      margin-top: 3px;
+      display: block;
+      line-height: 1.4;
+    }
+
+    .method-dot {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--s3);
+      margin: 7px auto 0;
+      transition: all .2s;
+    }
+
+    /* ── REDESIGNED CREDS SECTION ── */
+    .creds-section {
+      background: rgba(6,13,24,0.5);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .creds-section-header {
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(6,182,212,0.02);
+    }
+
+    .creds-section-title {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 2.4px;
+      text-transform: uppercase;
+      color: #ffffff;
+      font-weight: 700;
+      text-shadow: 0 0 8px rgba(255,255,255,0.12);
+    }
+
+    .creds-section-title::before {
+      content: '⬡';
+      color: var(--c4);
+      margin-right: 6px;
+      font-size: 9px;
+    }
+
+    .creds-body {
+      padding: 14px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .creds-field-pro {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .creds-label-pro {
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 2.2px;
+      text-transform: uppercase;
+      color: #ffffff;
+      font-weight: 700;
+      text-shadow: 0 0 8px rgba(255,255,255,0.10);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .creds-label-pro .field-indicator {
+      width: 4px; height: 4px;
+      border-radius: 50%;
+      background: var(--c3);
+      opacity: 1;
+      box-shadow: 0 0 6px rgba(6,182,212,0.45);
+    }
+
+    .creds-label-pro .field-optional {
+      font-size: 7px;
+      color: #ffffff;
+      opacity: 0.85;
+      margin-left: auto;
+      letter-spacing: 0.5px;
+    }
+
+    .input-wrap {
+      position: relative;
+    }
+
+    .cfg-input-pro {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 7px 10px;
+      width: 100%;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s, background .2s;
+    }
+
+    .cfg-input-pro:focus {
+      border-color: var(--c3);
+      background: rgba(6,182,212,0.03);
+      box-shadow: 0 0 0 2px rgba(6,182,212,0.07);
+    }
+
+    .cfg-input-pro::placeholder { color: var(--text4); opacity: 0.5; }
+
+    .cfg-input-pro.has-value {
+      border-color: rgba(6,182,212,0.2);
+    }
+
+    .input-eye {
+      position: absolute;
+      right: 9px; top: 50%;
+      transform: translateY(-50%);
+      cursor: pointer;
+      color: var(--text4);
+      font-size: 13px;
+      transition: color .15s;
+      user-select: none;
+    }
+    .input-eye:hover { color: var(--c4); }
+
+    /* ── STATUS INDICATOR LINE ── */
+    .conn-status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      background: rgba(6,13,24,0.8);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 9px;
+    }
+
+    .conn-status-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--text4);
+      flex-shrink: 0;
+    }
+    .conn-status-dot.ready {
+      background: var(--c4);
+      box-shadow: 0 0 6px var(--c4);
+      animation: pulse-dot 2s infinite;
+    }
+    .conn-status-dot.error { background: var(--sev-crit); }
+    .conn-status-dot.ok { background: var(--sev-low); }
+
+    .conn-status-text { color: var(--text3); flex: 1; }
+    .conn-status-method {
+      color: var(--c5);
+      padding: 1px 7px;
+      border: 1px solid var(--border2);
+      border-radius: 3px;
+      background: rgba(6,182,212,0.05);
+    }
+
+    /* ── ACTION BUTTONS — NEW LAYOUT ── */
+    .action-bar {
+      display: flex;
+      gap: 12px;
+      margin-top: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .btn-pro-reset {
+      padding: 8px 13px;
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      background: rgba(100,116,139,0.07);
+      border: 1px solid rgba(100,116,139,0.18);
+      border-radius: 6px;
+      color: var(--s4);
+      cursor: pointer;
+      transition: all .18s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    .btn-pro-reset:hover {
+      background: rgba(100,116,139,0.13);
+      border-color: rgba(100,116,139,0.28);
+      color: var(--s5);
+    }
+
+    .btn-pro-test {
+      padding: 8px 13px;
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      background: rgba(249,115,22,0.07);
+      border: 1px solid rgba(249,115,22,0.2);
+      border-radius: 6px;
+      color: var(--sev-high);
+      cursor: pointer;
+      transition: all .18s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    .btn-pro-test:hover {
+      background: rgba(249,115,22,0.13);
+      border-color: rgba(249,115,22,0.35);
+      box-shadow: 0 0 10px rgba(249,115,22,0.15);
+    }
+
+    .btn-pro-enum {
+      padding: 9px 18px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      background: rgba(6,182,212,0.12);
+      border: 1px solid rgba(6,182,212,0.45);
+      border-radius: 6px;
+      color: var(--c4);
+      cursor: pointer;
+      transition: all .2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      position: relative;
+      overflow: hidden;
+      flex: 1 1 420px;
+      max-width: 720px;
+    }
+
+    .action-right {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex: 0 0 auto;
+    }
+    .btn-pro-enum::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(6,182,212,0.10), transparent);
+      transform: translateX(-100%);
+      transition: transform .5s;
+    }
+    .btn-pro-enum:hover {
+      background: rgba(6,182,212,0.22);
+      border-color: var(--c4);
+      box-shadow: 0 0 20px rgba(6,182,212,0.3);
+      color: var(--c5);
+    }
+    .btn-pro-enum:hover::before { transform: translateX(100%); }
+    .btn-pro-enum:active { transform: scale(0.98); }
+
+    .btn-pro-load {
+      padding: 4px 9px;
+      font-family: var(--mono);
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      background: rgba(6,182,212,0.06);
+      border: 1px solid var(--border2);
+      border-radius: 4px;
+      color: var(--c5);
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-pro-load:hover {
+      background: rgba(6,182,212,0.12);
+      border-color: var(--border3);
+    }
+
+    /* ── SAVED USERS PRO ── */
+    .saved-users-pro {
+      background: rgba(6,13,24,0.5);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .saved-users-pro-header {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(6,182,212,0.02);
+      cursor: pointer;
+      position: relative;
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text4);
+    }
+    .saved-users-pro-title {
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 2.4px;
+      text-transform: uppercase;
+      color: #ffffff;
+      font-weight: 800;
+      text-shadow: 0 0 10px rgba(255,255,255,0.22), 0 0 18px rgba(6,182,212,0.10);
+    }
+    .saved-users-pro-body {
+      max-height: 110px;
+      overflow-y: auto;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    /* Collapsible behaviour: start collapsed, open shows max 2 credential blocks */
+    .saved-users-pro.collapsed .saved-users-pro-body {
+      max-height: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      overflow: hidden;
+      transition: max-height .25s ease, padding .2s ease;
+    }
+
+    .saved-users-pro.open .saved-users-pro-body {
+      max-height: 240px; /* increased height to show more saved-user blocks */
+      overflow-y: auto;
+      transition: max-height .25s ease;
+    }
+
+    .saved-user-item {
+      width: 100%;
+      min-height: 62px;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .saved-user-item > div {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    /* ── DIVIDER ── */
+    .conn-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text4);
+      font-family: var(--mono);
+      font-size: 8px;
+      letter-spacing: 1px;
+    }
+    .conn-divider::before, .conn-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* Disabled section appearance */
+    .cfg-section.disabled {
+      opacity: 0.55;
+      filter: grayscale(50%);
+      pointer-events: none;
+    }
+  </style>
 </head>
 <body>
 
@@ -19,8 +581,8 @@
       </div>
       <div style="width:1px;height:18px;background:var(--border2)"></div>
       <div class="target-display" style="max-width:250px">
-        <span class="tgt-label">CA</span>
-        <span class="tgt-val" id="caDisplayTop" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block">—</span>
+        <span class="tgt-label">Name Server</span>
+        <span class="tgt-val" id="nameServerDisplayTop" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block">—</span>
       </div>
       <div style="width:1px;height:18px;background:var(--border2)"></div>
       <div class="target-display" style="max-width:250px">
@@ -51,83 +613,173 @@
   <!-- MAIN -->
   <main class="main-panel">
 
-    <!-- CONNECTION MODULE -->
-    <section class="mid-panel conn-panel">
-      <div class="lbl">Connection Module</div>
-      <div class="conn-grid">
-        <div class="conn-card" id="card-targets">
-          <div class="conn-val" style="color:var(--c5)" id="targetsVal">0</div>
-          <div class="conn-key">Targets</div>
-          <div class="conn-bar">
-            <div class="progress-bar" id="pb-targets" style="width:0%;background:var(--c4)"></div>
-          </div>
+    <!-- CONNECTION MODULE — REDESIGNED -->
+    <section class="mid-panel conn-panel conn-panel-expanded">
+      <div class="lbl">Target Credentials</div>
+
+      <!-- ENUMERATE METHOD SELECTOR -->
+      <div class="enum-method-section">
+        <div class="enum-method-header">
+          <div class="enum-method-title">Enumerate Method</div>
+          <div class="enum-method-badge" id="selectedMethodBadge">LDAP · Active</div>
         </div>
-        <div class="conn-card" id="card-open">
-          <div class="conn-val" style="color:var(--c6)" id="openVal">0</div>
-          <div class="conn-key">Open Ports</div>
-          <div class="conn-bar">
-            <div class="progress-bar" id="pb-open" style="width:0%;background:var(--c5)"></div>
+        <div class="enum-method-grid">
+
+          <div class="method-card selected" data-method="LDAP" onclick="selectMethod(this,'LDAP')">
+            <div class="method-selected-bar"></div>
+            <span class="method-icon"><img src="../../assets/Icons/ldap.png" alt="LDAP"></span>
+            <span class="method-name">LDAP</span>
+            <span class="method-desc">Directory service query</span>
+            <div class="method-dot"></div>
           </div>
-        </div>
-        <div class="conn-card" id="card-vuln">
-          <div class="conn-val" style="color:var(--sev-crit)" id="vulnVal">0</div>
-          <div class="conn-key">Vulnerabilities</div>
-          <div class="conn-bar">
-            <div class="progress-bar" id="pb-vuln" style="width:0%;background:var(--sev-crit)"></div>
+
+          <div class="method-card disabled" data-method="AGENT" aria-disabled="true" onclick="selectMethod(this,'AGENT')">
+            <div class="method-selected-bar"></div>
+            <span class="method-icon"><img src="../../assets/Icons/agent.png" alt="Agent"></span>
+            <span class="method-name">Agent</span>
+            <span class="method-desc">Deployed agent relay</span>
+            <div class="method-dot"></div>
           </div>
-        </div>
-        <div class="conn-card" id="card-ca">
-          <div class="conn-val" style="color:var(--c4)" id="caVal">0<span style="font-size:11px;color:var(--text4)">%</span></div>
-          <div class="conn-key">CA Coverage</div>
-          <div class="conn-bar">
-            <div class="progress-bar" id="pb-ca" style="width:0%;background:var(--c3)"></div>
+
+          <div class="method-card disabled" data-method="BEACON" aria-disabled="true" onclick="selectMethod(this,'BEACON')">
+            <div class="method-selected-bar"></div>
+            <span class="method-icon"><img src="../../assets/Icons/beacon.png" alt="Beacon"></span>
+            <span class="method-name">Beacon</span>
+            <span class="method-desc">C2 beacon channel</span>
+            <div class="method-dot"></div>
           </div>
+
+          <div class="method-card disabled" data-method="RPC" aria-disabled="true" onclick="selectMethod(this,'RPC')">
+            <div class="method-selected-bar"></div>
+            <span class="method-icon"><img src="../../assets/Icons/rpc.png" alt="RPC"></span>
+            <span class="method-name">RPC</span>
+            <span class="method-desc">Remote procedure call</span>
+            <div class="method-dot"></div>
+          </div>
+
         </div>
       </div>
-      <div class="target-grid" id="targetGrid">
-        <div class="target-row">
-          <span style="width:5px;height:5px;border-radius:50%;background:var(--text4);flex-shrink:0"></span>
-          <span class="target-ip" style="color:var(--text4)">No targets connected</span>
+
+      <!-- CREDENTIALS GRID -->
+      <div class="creds-section">
+        <div class="creds-section-header">
+          <span class="creds-section-title">Authentication Parameters</span>
+        </div>
+        <div class="creds-body">
+
+          <!-- Left column -->
+          <div class="creds-field-pro">
+            <div class="creds-label-pro">
+              <span class="field-indicator"></span>
+              Domain
+            </div>
+            <input class="cfg-input-pro" id="domainInput" placeholder="e.g. corp.local"
+                   oninput="document.getElementById('domainDisplayTop').textContent=(this.value||'—').substring(0,35); this.classList.toggle('has-value',!!this.value)">
+          </div>
+
+          <div class="creds-field-pro">
+            <div class="creds-label-pro">
+              <span class="field-indicator"></span>
+              Target IP / Hostname
+            </div>
+            <input class="cfg-input-pro" id="nameServerInput" placeholder="e.g. 192.168.1.10"
+                   oninput="document.getElementById('nameServerDisplayTop').textContent=(this.value||'—').substring(0,35); this.classList.toggle('has-value',!!this.value)">
+          </div>
+
+          <div class="creds-field-pro">
+            <div class="creds-label-pro">
+              <span class="field-indicator"></span>
+              Domain Controller
+              <span class="field-optional">optional</span>
+            </div>
+            <input class="cfg-input-pro" id="dcInput" placeholder="e.g. dc01.corp.local">
+          </div>
+
+          <div class="creds-field-pro">
+            <div class="creds-label-pro">
+              <span class="field-indicator"></span>
+              NTLM Hash
+              <span class="field-optional">optional</span>
+            </div>
+            <div class="input-wrap">
+              <input class="cfg-input-pro" id="ntlmHashInput" placeholder="aad3b435b51…" type="password" autocomplete="off" spellcheck="false" style="padding-right:32px">
+              <span class="input-eye" onclick="togglePasswordVisibility('ntlmHashInput')">👁</span>
+            </div>
+          </div>
+
+          <div class="creds-field-pro">
+            <div class="creds-label-pro">
+              <span class="field-indicator"></span>
+              Username
+            </div>
+            <input class="cfg-input-pro" id="usernameInput" placeholder="e.g. administrator"
+                   oninput="document.getElementById('userDisplayTop').textContent=(this.value||'—').substring(0,35); this.classList.toggle('has-value',!!this.value)">
+          </div>
+
+          <div class="creds-field-pro">
+            <div class="creds-label-pro">
+              <span class="field-indicator"></span>
+              Password
+            </div>
+            <div class="input-wrap">
+              <input class="cfg-input-pro" id="secretInput" placeholder="e.g. Password123!" type="password" autocomplete="off" spellcheck="false" style="padding-right:32px">
+              <span class="input-eye" onclick="togglePasswordVisibility('secretInput')">👁</span>
+            </div>
+          </div>
+
         </div>
       </div>
+
+      <!-- STATUS BAR -->
+      <div class="conn-status-bar">
+        <div class="conn-status-dot" id="connStatusDot"></div>
+        <span class="conn-status-text" id="connStatusText">Awaiting credentials — fill in required fields to begin</span>
+        <span class="conn-status-method" id="connStatusMethod">LDAP</span>
+      </div>
+
+      <!-- ACTION BUTTONS -->
+      <div class="action-bar">
+        <button class="btn-pro-enum" onclick="runEnumerate()">
+          <span>⬡</span> ENUMERATE
+        </button>
+        <div class="action-right">
+          <button class="btn-pro-reset" onclick="resetConnectionFields()">
+            <span>↻</span> RESET
+          </button>
+          <button class="btn-pro-test" onclick="runConnectionTest()">
+            <span>⚙</span> TEST
+          </button>
+        </div>
+      </div>
+
+      <!-- SAVED USERS -->
+      <div class="saved-users-pro collapsed" id="savedUsersPro">
+        <div class="saved-users-pro-header" id="savedUsersHeader" onclick="toggleSavedUsersPanel()">
+          <span class="saved-users-pro-title">Saved Users</span>
+        </div>
+        <div class="saved-users-pro-body" id="savedUsersPanel">
+          <div style="font-size:9px;color:var(--text4);padding:10px;text-align:center;font-family:var(--mono)">[*] Click Load to show saved credentials</div>
+        </div>
+      </div>
+
     </section>
 
-    <!-- VULNERABILITIES -->
-    <section class="mid-panel vuln-panel">
-      <div class="lbl">Vulnerabilities — ESC Module Analysis</div>
-      <div class="vuln-list" id="vulnList"></div>
+    <!-- CENTER WORKSPACE -->
+    <section class="mid-panel vuln-panel" style="display:flex;flex-direction:column;overflow:hidden">
+      <div class="lbl" style="flex-shrink:0">Certificate Templates</div>
+      <div id="vulnList"
+           style="flex:1;overflow-y:auto;padding:6px 4px 10px;display:flex;flex-direction:column;gap:0;min-height:0">
+        <div class="workspace-empty workspace-empty-center">
+          Connect to a domain first
+        </div>
+      </div>
     </section>
 
   </main>
 
   <!-- RIGHT: CONFIGURATION -->
   <aside class="panel right-panel">
-    <div class="lbl">Configuration</div>
-
-    <!-- Target / CA -->
-    <div class="cfg-section">
-      <div class="cfg-title">Target Domain</div>
-      <input class="cfg-input" id="domainInput" placeholder="e.g. corp.oxsium.local"
-             oninput="document.getElementById('domainDisplayTop').textContent=(this.value||'—').substring(0,35)">
-      <div style="margin-top:8px">
-        <div class="cfg-title" style="margin-bottom:4px">CA Server</div>
-        <input class="cfg-input" id="caInput" placeholder="e.g. 10.10.0.12\OXSIUM-CA"
-               oninput="document.getElementById('caDisplayTop').textContent=(this.value||'—').substring(0,35)">
-      </div>
-    </div>
-
-    <div class="cfg-section">
-      <div class="cfg-title">Credentials</div>
-      <div style="margin-bottom:8px">
-        <div class="cfg-title" style="margin-bottom:4px">Username</div>
-        <input class="cfg-input" id="usernameInput" placeholder="e.g. corp\\user"
-               oninput="document.getElementById('userDisplayTop').textContent=(this.value||'—').substring(0,35)">
-      </div>
-      <div>
-        <div class="cfg-title" style="margin-bottom:4px">Password</div>
-        <input class="cfg-input" id="secretInput" placeholder="e.g. Password123!" type="password" autocomplete="off" spellcheck="false">
-      </div>
-    </div>
+    <div class="lbl">Analysis Results</div>
 
     <!-- Severity Ring -->
     <div class="stat-ring">
@@ -168,18 +820,7 @@
       </div>
     </div>
 
-    <button class="scan-btn" onclick="runFullScan()">⬡ Run Full Scan</button>
     <button class="export-btn" onclick="exportReport()">↓ Export Report</button>
-
-    <div class="cfg-section">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <div class="cfg-title" style="margin-bottom:0">Saved Users</div>
-        <button class="export-btn" style="padding:6px 10px;min-height:auto" onclick="loadSavedUsers()">↻ Load</button>
-      </div>
-      <div id="savedUsersPanel" style="margin-top:10px;display:flex;flex-direction:column;gap:8px;max-height:180px;overflow:auto">
-        <div class="log-line info">[*] Click Load to show saved credentials</div>
-      </div>
-    </div>
 
     <!-- Console -->
     <div class="cfg-section">
@@ -192,29 +833,68 @@
     </div>
 
     <!-- Scan Settings -->
-    <div class="cfg-section">
+    <div class="cfg-section disabled">
       <div class="cfg-title">Scan Settings</div>
       <div class="cfg-row">
         <span class="cfg-label">Auto-exploit</span>
-        <label class="toggle"><input type="checkbox" id="autoExp"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+        <label class="toggle"><input type="checkbox" id="autoExp" disabled><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
       </div>
       <div class="cfg-row">
         <span class="cfg-label">Deep Scan</span>
-        <label class="toggle"><input type="checkbox" id="deepScan" checked><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+        <label class="toggle"><input type="checkbox" id="deepScan" checked disabled><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
       </div>
       <div class="cfg-row">
         <span class="cfg-label">Stealth Mode</span>
-        <label class="toggle"><input type="checkbox" id="stealth"><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+        <label class="toggle"><input type="checkbox" id="stealth" disabled><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
       </div>
       <div class="cfg-row">
         <span class="cfg-label">Save PoC</span>
-        <label class="toggle"><input type="checkbox" id="savePoc" checked><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+        <label class="toggle"><input type="checkbox" id="savePoc" checked disabled><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
       </div>
     </div>
   </aside>
 
 </div><!-- /.shell -->
 
+<script>
+  /* ── ENUMERATE METHOD SELECTOR ── */
+  let currentMethod = 'LDAP';
+
+  function selectMethod(el, method) {
+    if (el && el.classList.contains('disabled')) return;
+    document.querySelectorAll('.method-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    currentMethod = method;
+    document.getElementById('selectedMethodBadge').textContent = method + ' · Active';
+    document.getElementById('connStatusMethod').textContent = method;
+    addGlobalLog('[*] Enumerate method set to: ' + method, 'info');
+  }
+
+  /* ── STATUS BAR UPDATE ── */
+  function updateStatusBar() {
+    const domain = document.getElementById('domainInput').value.trim();
+    const ns = document.getElementById('nameServerInput').value.trim();
+    const user = document.getElementById('usernameInput').value.trim();
+    const pass = document.getElementById('secretInput').value.trim();
+    const dot = document.getElementById('connStatusDot');
+    const txt = document.getElementById('connStatusText');
+    const filled = [domain, ns, user, pass].filter(Boolean).length;
+    if (filled === 4) {
+      dot.className = 'conn-status-dot ready';
+      txt.textContent = 'Ready — credentials validated, ready to enumerate';
+    } else if (filled > 0) {
+      dot.className = 'conn-status-dot';
+      txt.textContent = 'Incomplete — ' + (4 - filled) + ' required field(s) remaining';
+    } else {
+      dot.className = 'conn-status-dot';
+      txt.textContent = 'Awaiting credentials — fill in required fields to begin';
+    }
+  }
+
+  document.querySelectorAll('.cfg-input-pro').forEach(input => {
+    input.addEventListener('input', updateStatusBar);
+  });
+</script>
 <script src="Oxsium-Certificate.js"></script>
 </body>
 </html>
