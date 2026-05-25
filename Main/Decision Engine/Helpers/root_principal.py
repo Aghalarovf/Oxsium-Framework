@@ -1,12 +1,21 @@
 # & "c:\Users\senag\Desktop\Decision Engine\.venv\bin\python.exe" .\Helpers\root_principal.py server 5000
 
 import json
+import platform
 import subprocess
 import sys
 from pathlib import Path
 
 
 PORT = 5100
+
+
+def resolve_graph_engine_executable(base_dir) -> Path:
+    base_path = Path(base_dir).resolve()
+    engine_dir = base_path / "Engine"
+    if platform.system().lower().startswith("win"):
+        return engine_dir / "graph_engine.exe"
+    return engine_dir / "graph_engine"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -117,16 +126,18 @@ def start_api_server(port=PORT, host="localhost", base_dir=None):
         actual_base = base_dir if base_dir else Path(__file__).resolve().parent.parent
         actual_base = Path(actual_base).resolve()  # Ensure it's absolute
         
-        engine_exe = actual_base / "Engine" / "graph_engine.exe"
+        engine_exe = resolve_graph_engine_executable(actual_base)
         out_file = actual_base / "Engine" / "graph_objects.json"
 
         print(f"[Analyze] actual_base={actual_base}")
+        print(f"[Analyze] platform={platform.system()}")
         print(f"[Analyze] engine_exe={engine_exe} exists={engine_exe.exists()}")
         print(f"[Analyze] out_file={out_file}")
 
         if not engine_exe.exists():
             print(f"[Analyze] Engine executable not found at {engine_exe}")
-            return jsonify({"success": False, "error": f"Engine not found: {engine_exe}"}), 404
+            expected_name = "graph_engine.exe" if platform.system().lower().startswith("win") else "graph_engine"
+            return jsonify({"success": False, "error": f"Engine not found: {engine_exe} (expected {expected_name} for this OS)"}), 404
 
         cmd = [str(engine_exe), "-r", sid]
         if name:
