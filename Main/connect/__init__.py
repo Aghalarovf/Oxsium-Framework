@@ -17,16 +17,15 @@ from connect.ldap_core     import (
 )
 from connect.protocols     import (
     connect_ldap, connect_ldap_fast,
-    connect_winrm, connect_smb, connect_ssh, connect_local,
+    connect_local,
     PROTOCOL_HANDLERS,
 )
 from connect.shell         import (
-    run_local_command, run_winrm_command, run_ssh_command,
+    run_local_command,
     _collect_powershell_profile, _apply_powershell_profile,
 )
 from connect.tools         import (
     run_local_inventory_c_tool,
-    run_smb_checker_tool,
     run_ntlm_checker_tool,
     run_kerberos_checker_tool,
 )
@@ -44,11 +43,11 @@ __all__ = [
     "_collect_ldap_environment", "_collect_ldap_environment_with_fallback",
     "_collect_counts_via_enumeration_fallback",
     "connect_ldap", "connect_ldap_fast",
-    "connect_winrm", "connect_smb", "connect_ssh", "connect_local",
+    "connect_local",
     "PROTOCOL_HANDLERS",
-    "run_local_command", "run_winrm_command", "run_ssh_command",
+    "run_local_command",
     "_collect_powershell_profile", "_apply_powershell_profile",
-        "run_local_inventory_c_tool", "run_smb_checker_tool",
+        "run_local_inventory_c_tool",
         "run_ntlm_checker_tool", "run_kerberos_checker_tool",
     "_read_old_users", "_write_old_users",
         "_read_dcsync_history", "run_dcsync_tool",

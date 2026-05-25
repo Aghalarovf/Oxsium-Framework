@@ -59,7 +59,7 @@ from connect.ldap_core     import (
 )
 from connect.protocols     import connect_ldap_fast, connect_local, PROTOCOL_HANDLERS
 from connect.shell         import (
-    run_local_command, run_winrm_command, run_ssh_command,
+    run_local_command,
     _collect_powershell_profile, _apply_powershell_profile,
 )
 from connect.tools         import run_local_inventory_c_tool, run_smb_checker_tool, run_ntlm_checker_tool, run_kerberos_checker_tool, run_simple_protocol_probe, SIMPLE_PROTOCOL_CHECKERS
@@ -70,6 +70,19 @@ from connect.flask_helpers import (
 from connect.connection_fast import run_connect_strategy
 from connect.connection_deep import apply_deep_defaults, enrich_with_env_probe
 from connect.dcsync        import _read_dcsync_history, run_dcsync_tool, save_kerberos_key
+
+
+
+def _probe_ldap_ports(ip: str, timeout: float = 4.0) -> list[dict]:
+    ports = []
+    for port in (389, 636):
+        result = _tcp_probe(ip, port, timeout)
+        ports.append({"port": port, "result": result, "port_open": result == "open"})
+    return ports
+
+
+def _ldap_ports_refused(ports: list[dict]) -> bool:
+    return bool(ports) and all(port_info.get("result") == "closed" for port_info in ports)
 
 
 
@@ -718,6 +731,36 @@ def test_connection():
     if proto not in Config.PROTO_PORTS:
         return jsonify({"error": f"Unknown protocol: {proto}"}), 400
 
+    if proto == "ldap":
+        ports = _probe_ldap_ports(ip)
+        port_open = any(port_info["port_open"] for port_info in ports)
+        detected_via = next((port_info["port"] for port_info in ports if port_info["port_open"]), ports[0]["port"] if ports else 0)
+
+        if port_open:
+            return jsonify({
+                "host_up": True,
+                "detected_via": detected_via,
+                "port_open": True,
+                "port": 389,
+                "protocol": proto,
+                "reachable": True,
+                "retries": 1,
+                "ports": ports,
+            })
+
+        return jsonify({
+            "error": "LDAP connection refused; ports 389 and 636 are closed",
+            "host_up": any(port_info["result"] == "closed" for port_info in ports),
+            "detected_via": detected_via,
+            "port_open": False,
+            "port": 389,
+            "protocol": proto,
+            "reachable": False,
+            "attempts": 1,
+            "last_result": ports[-1]["result"] if ports else "filtered",
+            "ports": ports,
+        }), 503
+
     port        = Config.PROTO_PORTS[proto]
     max_retries = 3
     last_result = "filtered"
@@ -777,6 +820,10 @@ def connect():
     connect_mode = str(req.get("connect_mode", "deep")).lower()
     skip_counts  = bool(req.get("skip_counts_probe", False))
 
+    # Debug: log incoming connect mode and skip_counts_probe to help diagnose
+    # client/server mismatch issues when Deep connect returns incomplete data.
+    logger.info("/api/connect called: ip=%s proto=%s connect_mode=%s skip_counts_probe=%s", ip, proto, connect_mode, skip_counts)
+
     if password and hash_value:
         return jsonify({"error": "Use either password or NTLM hash, not both"}), 400
     if not password and not hash_value:
@@ -788,6 +835,20 @@ def connect():
         return jsonify({"error": "Invalid input formats"}), 400
     if proto not in PROTOCOL_HANDLERS:
         return jsonify({"error": f"Unsupported protocol: {proto}"}), 400
+
+    if proto == "ldap":
+        ldap_ports = _probe_ldap_ports(ip, timeout=Config.LDAP_CONNECT_TIMEOUT)
+        if _ldap_ports_refused(ldap_ports):
+            return jsonify({
+                "success": False,
+                "error": "LDAP connection refused; ports 389 and 636 are closed",
+                "protocol": proto,
+                "ports": ldap_ports,
+                "port_open": False,
+                "host_up": False,
+                "reachable": False,
+                "code": 503,
+            }), 503
 
     result = run_connect_strategy(
         connect_mode=connect_mode,
@@ -915,13 +976,24 @@ def list_gpos():
         if is_local_request(req)
         else _run_enumeration_with_target_fallback(req, gpos.get_domain_gpos)
     )
-    _write_domain_object_snapshot(
-        filename="domain_gpos.json",
-        result=result,
-        is_local=is_local_request(req),
-        data_key="gpos",
-        legacy_path=LEGACY_DOMAIN_GPOS_JSON,
-    )
+
+    # Tam nəticəni saxla — all_cpasswords, wmi_filters, inheritance_blocked,
+    # ou_inheritance, sysvol_available kimi əlavə sahələr _write_domain_object_snapshot
+    # tərəfindən itirilir, ona görə birbaşa yazırıq.
+    out_path = DOMAIN_OBJECT_DIR / "domain_gpos.json"
+    try:
+        DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            json.dumps(result, indent=2, default=str), encoding="utf-8"
+        )
+        if LEGACY_DOMAIN_GPOS_JSON.exists() and LEGACY_DOMAIN_GPOS_JSON != out_path:
+            try:
+                LEGACY_DOMAIN_GPOS_JSON.unlink()
+            except Exception as exc:
+                logger.warning("Could not remove legacy GPO snapshot %s: %s", LEGACY_DOMAIN_GPOS_JSON, exc)
+    except Exception as exc:
+        logger.warning("Could not write GPO snapshot to %s: %s", out_path, exc)
+
     return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
 
 
@@ -1079,7 +1151,7 @@ def shell_command():
 
     command  = req.get("command", "").strip()
     mode     = req.get("mode", "remote").lower()
-    protocol = req.get("protocol", "winrm").lower()
+    protocol = req.get("protocol", "local").lower()
 
     if not command:
         return jsonify({"error": "Command is required"}), 400
@@ -1088,21 +1160,7 @@ def shell_command():
         result = run_local_command(command)
         return jsonify(result) if result.get("success") else (jsonify(result), 500)
 
-    ip       = req.get("ip")
-    domain   = req.get("domain")
-    user     = req.get("username")
-    password = req.get("password")
-    if not ip or not user or not password or not domain:
-        return jsonify({"error": "Missing shell connection fields"}), 400
-
-    if protocol == "winrm":
-        result = run_winrm_command(ip, user, password, domain, command)
-    elif protocol == "ssh":
-        result = run_ssh_command(ip, user, password, command)
-    else:
-        return jsonify({"success": False, "error": f"Shell is not supported for protocol: {protocol}"}), 400
-
-    return jsonify(result) if result.get("success") else (jsonify(result), 500)
+    return jsonify({"success": False, "error": f"Shell is not supported for protocol: {protocol}"}), 400
 
 
 @app.route("/api/decision-engine/graph", methods=["POST"])

@@ -133,25 +133,25 @@
     background: currentColor;
 }
 
-/* Certificate tab - grayed out but functional */
+/* Certificate tab - normal button treatment */
 .main-tab[data-tab="certificate"] {
-    color: var(--text-dim);
-    background: rgba(255, 255, 255, 0.02);
-    border-color: rgba(148, 163, 184, 0.18);
-    opacity: 0.72;
+    color: var(--text-sec);
+    background: var(--bg-card);
+    border-color: var(--border);
+    opacity: 1;
 }
 
 .main-tab[data-tab="certificate"]:hover {
-    color: var(--text-sec);
-    border-color: rgba(148, 163, 184, 0.25);
-    background: rgba(255, 255, 255, 0.04);
-    opacity: 0.85;
+    color: var(--text-pri);
+    border-color: var(--border-hi);
+    background: var(--bg-panel);
+    opacity: 1;
 }
 
 .main-tab[data-tab="certificate"].active {
-    color: var(--accent);
-    border-color: var(--accent-dim);
-    background: var(--accent-glow);
+    color: var(--text-pri);
+    border-color: var(--border-hi);
+    background: var(--bg-panel);
     opacity: 1;
 }
 

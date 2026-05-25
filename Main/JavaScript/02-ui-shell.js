@@ -20,7 +20,7 @@ function switchMode(m) {
 
 function selectProto(p) {
   state.protocol = p;
-  ['winrm','psexec','smb','ssh'].forEach(x => {
+  ['ldap','rpc','agent','beacon'].forEach(x => {
     document.getElementById(`proto-${x}`).className = 'proto-btn' + (x === p ? ' selected' : '');
   });
   document.getElementById('sb-proto').textContent = p.toUpperCase();
@@ -175,9 +175,9 @@ function switchMainTab(tab, btn) {
     const term = document.getElementById('shell-terminal');
     if (term) {
       if (!state.connected) {
-        term.innerHTML = '<div class="shell-line shell-warn">Shell unavailable: connect with WinRM or Local session first.</div>';
-      } else if (!['local','winrm'].includes(state.protocol)) {
-        term.innerHTML = '<div class="shell-line shell-warn">Shell is only available for WinRM or Local sessions.</div>';
+          term.innerHTML = '<div class="shell-line shell-warn">Shell unavailable: connect with Local session first.</div>';
+        } else if (state.protocol !== 'local') {
+          term.innerHTML = '<div class="shell-line shell-warn">Shell is only available for Local sessions.</div>';
       } else if (term.children.length === 0 || term.textContent.includes('Connect first')) {
         term.innerHTML = '<div class="shell-line shell-info">Ready. Enter commands and press Enter.</div>';
       }
@@ -395,7 +395,7 @@ function clearShellOutput() {
 function updateShellTabState() {
   const input   = document.getElementById('shell-input');
   const btn     = document.getElementById('btn-shell-send');
-  const enabled = state.connected && ['local','winrm'].includes(state.protocol);
+  const enabled = state.connected && state.protocol === 'local';
   if (input) input.disabled = !enabled;
   if (btn)   btn.disabled   = !enabled;
 }

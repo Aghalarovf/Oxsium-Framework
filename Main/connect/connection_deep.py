@@ -41,5 +41,9 @@ def enrich_with_env_probe(
         result["ldap_target"] = env.get("ldap_target")
         return
 
+    if "refused" in str(env_probe.get("error", "")).lower():
+        result["env_probe_error"] = env_probe.get("error", "LDAP env probe failed")
+        return
+
     result["counts"] = collect_counts_via_enumeration_fallback(req)
     result["env_probe_error"] = env_probe.get("error", "LDAP env probe failed")

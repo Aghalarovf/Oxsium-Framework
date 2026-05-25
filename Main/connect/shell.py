@@ -2,11 +2,6 @@ import json
 import platform
 import subprocess
 
-from connect.config import Config
-from connect.utils import is_ntlm_hash, get_netbios_bind_user
-from connect.network import check_port
-
-
 # ---------------------------------------------------------------------------
 # PowerShell profile script (run on the remote host to gather AD context)
 # ---------------------------------------------------------------------------
@@ -95,54 +90,6 @@ def run_local_command(command: str) -> dict:
         return {'success': False, 'error': str(e)}
 
 
-def run_winrm_command(ip: str, user: str, password: str, domain: str, command: str) -> dict:
-    try:
-        import winrm
-    except ImportError:
-        return {'success': False, 'error': 'pywinrm not installed'}
-
-    if not check_port(ip, 5985):
-        return {'success': False, 'error': 'WinRM port (5985) is closed'}
-
-    try:
-        bind_user = get_netbios_bind_user(user, domain)
-        session   = winrm.Session(f'http://{ip}:5985/wsman', auth=(bind_user, password), transport='ntlm')
-        result    = session.run_ps(command)
-        stdout    = result.std_out.decode(errors='ignore').strip()
-        stderr    = result.std_err.decode(errors='ignore').strip()
-        if result.status_code != 0:
-            return {
-                'success': False,
-                'error':   stderr or f'Command failed with code {result.status_code}',
-                'output':  stdout,
-            }
-        return {'success': True, 'output': stdout, 'stderr': stderr}
-    except Exception as e:
-        return {'success': False, 'error': f'WinRM shell error: {e}'}
-
-
-def run_ssh_command(ip: str, user: str, password: str, command: str) -> dict:
-    try:
-        import paramiko
-    except ImportError:
-        return {'success': False, 'error': 'paramiko not installed'}
-
-    if not check_port(ip, 22):
-        return {'success': False, 'error': 'SSH port (22) is closed'}
-
-    try:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(ip, port=22, username=user, password=password, timeout=Config.LDAP_CONNECT_TIMEOUT)
-        stdin, stdout, stderr = client.exec_command(command)
-        output = stdout.read().decode(errors='ignore').strip()
-        error  = stderr.read().decode(errors='ignore').strip()
-        client.close()
-        return {'success': True, 'output': output, 'stderr': error}
-    except Exception as e:
-        return {'success': False, 'error': f'SSH shell error: {e}'}
-
-
 # ---------------------------------------------------------------------------
 # PowerShell profile collection & application
 # ---------------------------------------------------------------------------
@@ -186,27 +133,6 @@ def _collect_powershell_profile(req: dict, result: dict) -> dict:
         if ps_result.get("success"):
             return _parse_json_object_output(ps_result.get("output", ""))
         return {}
-
-    ip       = str(req.get("ip", "")).strip()
-    user     = str(req.get("username", "")).strip()
-    password = str(req.get("password", ""))
-    domain   = str(req.get("domain", result.get("domain", ""))).strip()
-
-    # Prefer WinRM PowerShell profile even if session protocol is SMB/LDAP/SSH.
-    if ip and user and password and domain and not is_ntlm_hash(password):
-        winrm_res = run_winrm_command(ip, user, password, domain, _POWERSHELL_PROFILE_SCRIPT)
-        if winrm_res.get("success"):
-            return _parse_json_object_output(winrm_res.get("output", ""))
-
-    # Optional SSH fallback for Windows OpenSSH endpoints.
-    if proto == "ssh" and ip and user and password:
-        compact_cmd = _POWERSHELL_PROFILE_SCRIPT.replace('"', '`"').replace("\n", "; ")
-        ssh_res = run_ssh_command(
-            ip, user, password,
-            f'powershell -NoProfile -ExecutionPolicy Bypass -Command "{compact_cmd}"',
-        )
-        if ssh_res.get("success"):
-            return _parse_json_object_output(ssh_res.get("output", ""))
 
     return {}
 

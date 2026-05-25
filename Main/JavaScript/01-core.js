@@ -104,6 +104,24 @@ function setEnvironmentDomainController(value, cls = 'accent') {
 }
 window.setEnvironmentDomainController = setEnvironmentDomainController;
 
+function formatLdapPortFailure(data, fallback = 'LDAP connection failed') {
+  const ports = Array.isArray(data?.ports) ? data.ports : [];
+  if (ports.length === 0) return data?.error || fallback;
+
+  const openPorts = ports.filter(p => p?.port_open).map(p => p.port);
+  const closedPorts = ports.filter(p => !p?.port_open).map(p => p.port);
+
+  if (closedPorts.length > 0 && openPorts.length === 0) {
+    return `LDAP connection failed because ports ${closedPorts.join(' and ')} are closed or refused. Check the domain controller firewall or LDAP service.`;
+  }
+
+  if (openPorts.length > 0 && closedPorts.length > 0) {
+    return `LDAP connection is partial: port ${openPorts.join(', ')} is reachable, but port ${closedPorts.join(', ')} is closed or refused.`;
+  }
+
+  return data?.error || fallback;
+}
+
 function updateStats(data) {
   const set = (id, val, cls) => {
     const el = document.getElementById(id);
@@ -117,8 +135,6 @@ function updateStats(data) {
     let kerberos = input?.kerberos_enabled;
     let ntlm     = input?.ntlm_enabled;
     let smb      = input?.smb_enabled;
-    if (typeof smb     !== 'boolean' && (proto === 'smb' || proto === 'psexec')) smb = true;
-    if (typeof ntlm    !== 'boolean' && (proto === 'smb' || proto === 'psexec' || proto === 'winrm' || smb === true)) ntlm = true;
     if (typeof kerberos !== 'boolean') {
       if (proto === 'ldap' || proto === 'ldaps') kerberos = true;
       else if (proto === 'local') kerberos = false;
@@ -416,9 +432,8 @@ function updateModeButtonState() {
   const remoteBtn = document.getElementById('mode-remote');
   const localBtn  = document.getElementById('mode-local');
   if (!remoteBtn || !localBtn) return;
-  // Local session mode is intentionally disabled in this build.
   remoteBtn.disabled = false; remoteBtn.classList.remove('disabled');
-  localBtn.disabled  = true;  localBtn.classList.add('disabled');
+  localBtn.disabled  = false; localBtn.classList.remove('disabled');
 }
 
 function handleConnectClick(event, connectMode = 'deep') {
@@ -484,7 +499,7 @@ async function doConnect(connectMode = 'deep') {
       startSessionTimer();
       state._pass = password || '';
       state._hash = hash     || '';
-      const savedEntry = { domain, ip, username };
+      const savedEntry = { domain, ip, username, protocol: state.protocol };
       if (dcHost)   savedEntry.dc       = dcHost;
       if (password) savedEntry.password = password;
       if (hash)     savedEntry.hash     = hash;
@@ -502,13 +517,18 @@ async function doConnect(connectMode = 'deep') {
         addLog('Fast connect: enumeration deferred — click Enumeration tab to scan.', 'info');
       }
     } else {
-      throw new Error(data.error || data.message || 'LDAP Authentication Failed!');
+      const error = new Error(data.error || data.message || 'LDAP Authentication Failed!');
+      error.ports = data.ports;
+      error.host_up = data.host_up;
+      error.protocol = data.protocol || state.protocol;
+      throw error;
     }
   } catch (err) {
     state.connected = false;
     setConnState('error');
-    addLog(`Connection failed: ${err.message}`, 'err');
-    showToast(err.message, 'error');
+    const friendly = formatLdapPortFailure(err, err?.message || 'LDAP connection failed');
+    addLog(`Connection failed: ${friendly}`, 'err');
+    showToast(friendly, 'error');
   } finally {
     state.connecting = false;
     setBtnLoading(false, connectMode);
@@ -582,7 +602,7 @@ async function testConn() {
   if (!validate()) return;
   const ip     = document.getElementById('f-ip').value.trim();
   const domain = document.getElementById('f-domain').value.trim();
-  const proto  = state.protocol || 'winrm';
+  const proto  = state.protocol || 'ldap';
 
   addLog(`[TEST] ---- Connectivity test started for ${ip} ----`, 'info');
   addLog(`[TEST] Step 1: Probing host ${ip} via TCP multi-port scan...`, 'info');
@@ -594,7 +614,11 @@ async function testConn() {
       body: JSON.stringify({ ip, protocol: proto, domain }),
     });
     data = await resp.json();
-    if (!resp.ok) { addLog(`[TEST] Server error: ${data.error || 'Unknown'}`, 'err'); showToast('Test failed', 'error'); return; }
+    if (!resp.ok && !Array.isArray(data.ports)) {
+      addLog(`[TEST] Server error: ${data.error || 'Unknown'}`, 'err');
+      showToast('Test failed', 'error');
+      return;
+    }
   } catch (err) {
     addLog(`[TEST] Cannot reach API backend: ${err.message}`, 'err');
     showToast('API backend not running', 'error');
@@ -605,9 +629,42 @@ async function testConn() {
     const via = data.detected_via ? ` (detected via TCP/${data.detected_via})` : '';
     addLog(`[TEST] Step 1: Host ${ip} is UP${via}`, 'ok');
   } else {
+    if (Array.isArray(data.ports) && data.ports.length > 0) {
+      const friendly = formatLdapPortFailure(data, 'LDAP ports are not reachable');
+      addLog(`[TEST] ${friendly}`, 'err');
+      addLog(`[TEST] ---- Test complete ----`, 'info');
+      showToast(friendly, 'error');
+      return;
+    }
     addLog(`[TEST] Step 1: Host ${ip} is UNREACHABLE`, 'err');
     addLog(`[TEST] ---- Test complete ----`, 'info');
     showToast('Host unreachable', 'error');
+    return;
+  }
+
+  if (Array.isArray(data.ports) && data.ports.length > 0) {
+    const protoUpper = (data.protocol || proto).toUpperCase();
+    let openCount = 0;
+    data.ports.forEach(portInfo => {
+      const portLabel = `${protoUpper} port ${portInfo.port}`;
+      const stateLabel = portInfo.port_open ? 'OPEN' : (portInfo.result === 'closed' ? 'CLOSED (connection refused)' : 'CLOSED or filtered');
+      addLog(`[TEST] Step 2: Checking ${portLabel}...`, 'info');
+      if (portInfo.port_open) {
+        openCount += 1;
+        addLog(`[TEST] Step 2: ${portLabel} is OPEN`, 'ok');
+      } else {
+        addLog(`[TEST] Step 2: ${portLabel} is ${stateLabel}`, 'err');
+      }
+    });
+    if (openCount > 0) {
+      addLog(`[TEST] ---- Test complete: OK ----`, 'ok');
+      showToast(`${openCount} LDAP port(s) open`, 'success');
+    } else {
+      const friendly = formatLdapPortFailure(data, 'LDAP ports are closed');
+      addLog(`[TEST] ${friendly}`, 'err');
+      addLog(`[TEST] ---- Test complete: port closed ----`, 'info');
+      showToast(friendly, 'error');
+    }
     return;
   }
 
@@ -619,10 +676,10 @@ async function testConn() {
     addLog(`[TEST] ---- Test complete: OK ----`, 'ok');
     showToast(`${portLabel} is open`, 'success');
   } else {
-    addLog(`[TEST] Step 2: ${portLabel} is CLOSED or filtered`, 'err');
-    addLog(`[TEST] Hint: Host is up but ${protoUpper} service may be blocked`, 'warn');
+    const friendly = formatLdapPortFailure(data, `${portLabel} is closed or refused`);
+    addLog(`[TEST] ${friendly}`, 'err');
     addLog(`[TEST] ---- Test complete: port closed ----`, 'info');
-    showToast(`${portLabel} is closed`, 'error');
+    showToast(friendly, 'error');
   }
 }
 
@@ -651,7 +708,7 @@ function renderSavedUsers(items) {
     <div class="saved-user-item" onclick="applySavedUser(${idx}, event)">
       <div class="saved-user-top">
         <span class="saved-user-name">${u.username || '—'}</span>
-        <span class="saved-user-proto">${(u.protocol || 'winrm').toUpperCase()}</span>
+        <span class="saved-user-proto">${(u.protocol || 'ldap').toUpperCase()}</span>
       </div>
       <div class="saved-user-meta">${u.domain || '—'} @ ${u.ip || '—'}</div>
       <div class="saved-user-meta">DC: ${u.dc || '—'}</div>
@@ -685,7 +742,9 @@ function applySavedUser(index, event) {
     const el = document.getElementById(id);
     if (el) el.classList.remove('show');
   });
-  if (u.protocol && ['winrm','psexec','smb','ssh'].includes(u.protocol)) selectProto(u.protocol);
+  const protocolAliases = { winrm: 'ldap', psexec: 'rpc', smb: 'agent', ssh: 'beacon' };
+  const savedProto = protocolAliases[String(u.protocol || '').toLowerCase()] || String(u.protocol || '').toLowerCase();
+  if (savedProto && ['ldap','ldaps','rpc','agent','beacon','local'].includes(savedProto)) selectProto(savedProto);
   updateAuthInputLockState();
   const box = document.getElementById('saved-users-list');
   if (box) box.style.display = 'none';

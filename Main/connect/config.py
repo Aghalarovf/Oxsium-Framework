@@ -33,12 +33,11 @@ class Config:
 
     PROTO_PORTS: dict[str, int] = {
         "kerberos": 88,
-        "winrm":  5985,
-        "psexec": 445,
-        "smb":    445,
-        "ssh":    22,
         "ldap":   389,
         "ldaps":  636,
+        "rpc":    135,
+        "agent":  445,
+        "beacon": 22,
     }
     LDAP_CONNECT_TIMEOUT: int = int(os.getenv("LDAP_CONNECT_TIMEOUT", 5))
     LDAP_RECEIVE_TIMEOUT: int = int(os.getenv("LDAP_RECEIVE_TIMEOUT", 10))

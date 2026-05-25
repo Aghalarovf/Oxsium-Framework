@@ -2,10 +2,12 @@ import logging
 import re
 
 from ldap3 import Server, Connection, ALL, BASE, SUBTREE
+from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
 
 from connect.config import Config
 from connect.utils import (
     domain_to_dn, get_netbios_bind_user, is_ntlm_hash,
+    build_ldap_bind_users,
     ldap_escape_filter, _is_ipv4_text, _pick_dc_fqdn_from_entries,
 )
 from connect.network import check_port
@@ -86,11 +88,69 @@ def _is_retryable_ldap_error(message: str) -> bool:
         "timed out",
         "can't contact",
         "server unavailable",
+        "could not connect to the server",
+        "cannot connect to ldap server",
+        "unable to connect",
         "refused",
         "unreachable",
         "invalid server address",
     )
     return any(m in msg for m in retry_markers)
+
+
+def _is_ldap_bind_failure(message: str) -> bool:
+    msg = (message or "").lower()
+    return any(marker in msg for marker in (
+        "invalidcredentials",
+        "automatic bind not successful",
+        "invalid credentials",
+        "ldapbinderror",
+    ))
+
+
+def _collect_ldap_environment_for_target(
+    ldap_target: str,
+    username: str,
+    password: str,
+    domain: str,
+    use_ssl: bool = False,
+) -> dict:
+    last_error = None
+    for bind_user in build_ldap_bind_users(username, domain):
+        try:
+            env = _collect_ldap_environment(
+                ldap_target,
+                username,
+                password,
+                domain,
+                use_ssl=use_ssl,
+                bind_user=bind_user,
+            )
+            env["ldap_target"] = ldap_target
+            env["bind_user"] = bind_user
+            return {"success": True, "data": env}
+        except (LDAPInvalidCredentialsResult, LDAPBindError) as exc:
+            last_error = exc
+            if _is_ldap_bind_failure(str(exc)):
+                continue
+            break
+        except Exception as exc:
+            last_error = exc
+            if _is_retryable_ldap_error(str(exc)):
+                return {"success": False, "error": str(exc), "code": 503}
+            break
+
+    if last_error and _is_ldap_bind_failure(str(last_error)):
+        return {
+            "success": False,
+            "error": (
+                f"LDAP bind failed for {username}; tried UPN, NETBIOS, and raw username formats. "
+                f"Verify the AD logon name (for example user@domain or DOMAIN\\user)."
+            ),
+            "code": 401,
+        }
+
+    return {"success": False, "error": str(last_error) if last_error else "LDAP env probe failed"}
 
 
 def _run_enumeration_with_target_fallback(req: dict, enum_fn):
@@ -106,6 +166,8 @@ def _run_enumeration_with_target_fallback(req: dict, enum_fn):
             return result
 
         last_result = result
+        if int(result.get("code") or 0) == 503:
+            continue
         # Stop on hard failures (invalid credentials, auth failures, etc.).
         if not _is_retryable_ldap_error(result.get("error", "")):
             break
@@ -144,9 +206,10 @@ def _collect_ldap_environment(
     password: str,
     domain: str,
     use_ssl: bool = False,
+    bind_user: str | None = None,
 ) -> dict:
     base_dn   = domain_to_dn(domain)
-    bind_user = get_netbios_bind_user(username, domain)
+    bind_user = bind_user or get_netbios_bind_user(username, domain)
 
     auth_type    = "SIMPLE"
     bind_secret  = password
@@ -184,7 +247,7 @@ def _collect_ldap_environment(
         search_base="",
         search_filter="(objectClass=*)",
         search_scope=BASE,
-        attributes=["dnsHostName", "domainFunctionality", "supportedSASLMechanisms"],
+        attributes=["dnsHostName", "msDS-Behavior-Version", "supportedSASLMechanisms"],
     )
     if conn.entries:
         root = conn.entries[0]
@@ -195,7 +258,7 @@ def _collect_ldap_environment(
         except Exception:
             pass
         try:
-            dfl = getattr(root, "domainFunctionality", None)
+            dfl = getattr(root, "msDS_Behavior_Version", None)
             if dfl and dfl.value is not None:
                 domain_level_raw = str(dfl.value)
         except Exception:
@@ -294,15 +357,21 @@ def _collect_ldap_environment(
 def _collect_ldap_environment_with_fallback(req: dict) -> dict:
     last_error = None
     for target in _build_ldap_targets(req):
-        try:
-            env = _collect_ldap_environment(
-                target, req["username"], req["password"], req["domain"]
-            )
-            env["ldap_target"] = target
-            return {"success": True, "data": env}
-        except Exception as exc:
-            last_error = exc
-            logger.warning("LDAP env probe failed on %s: %s", target, exc)
+        result = _collect_ldap_environment_for_target(
+            target,
+            req["username"],
+            req["password"],
+            req["domain"],
+        )
+        if result.get("success"):
+            return result
+
+        last_error = result.get("error")
+        logger.warning("LDAP env probe failed on %s: %s", target, last_error)
+        if int(result.get("code") or 0) == 401 or _is_ldap_bind_failure(str(last_error)):
+            break
+        if "refused" in str(last_error).lower():
+            break
 
     return {"success": False, "error": str(last_error) if last_error else "LDAP env probe failed"}
 

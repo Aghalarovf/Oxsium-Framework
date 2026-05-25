@@ -25,6 +25,7 @@
 <link rel="stylesheet" href="css/decision_tree.css">
 <link rel="stylesheet" href="css/modals.css">
 <link rel="stylesheet" href="css/misc.css">
+<link rel="stylesheet" href="css/payload.css">
 
 </head>
 <body>
@@ -43,7 +44,7 @@
     <button class="main-tab active" data-tab="connect" onclick="switchMainTab('connect', this)">
       <span class="tab-dot"></span> Connect
     </button>
-    <button class="main-tab" data-tab="certificate" onclick="openCertificatePage()" title="Open the Certificate Service page in a separate window">
+    <button class="main-tab active" data-tab="certificate" onclick="openCertificatePage()" title="Open the Certificate Service page in a separate window">
       <span class="tab-dot"></span> Certificate
     </button>
     <button class="main-tab" data-tab="decision-engine" onclick="openDecisionEnginePage()" title="Open the Decision Engine page in a separate window">
@@ -145,11 +146,9 @@
         <button class="mode-btn active" id="mode-remote" onclick="switchMode('remote')">
           <img src="assets/Icons/remote.png" alt="Remote" style="width:14px;height:14px;vertical-align:middle;margin-right:8px" onerror="this.onerror=null;this.src='assets/favicon.png'"> Remote
         </button>
-        <span class="mode-btn-shell" title="Coming Soon ...">
-          <button class="mode-btn disabled" id="mode-local" disabled aria-disabled="true" tabindex="-1">
-            ◎ Local Session
-          </button>
-        </span>
+        <button class="mode-btn" id="mode-local" onclick="switchMode('local')" type="button">
+          <img src="assets/Icons/payload.png" alt="Payload" style="width:14px;height:14px;vertical-align:middle;margin-right:8px" onerror="this.onerror=null;this.src='assets/favicon.png'"> Payload
+        </button>
       </div>
 
       <!-- REMOTE CONNECT -->
@@ -218,23 +217,23 @@
           <div class="card-title">Connection Protocol</div>
 
           <div class="protocol-grid">
-            <button class="proto-btn selected proto-winrm" id="proto-winrm" onclick="selectProto('winrm')" type="button">
-              <span class="proto-name">WinRM</span>
-              <span class="proto-port">5985 / 5986</span>
+            <button class="proto-btn selected proto-ldap" id="proto-ldap" onclick="selectProto('ldap')" type="button">
+              <span class="proto-name">LDAP</span>
+              <span class="proto-port">389 / 636</span>
             </button>
 
-            <button class="proto-btn proto-psexec" id="proto-psexec" onclick="selectProto('psexec')" type="button">
-              <span class="proto-name">PSExec</span>
+            <button class="proto-btn proto-rpc" id="proto-rpc" onclick="selectProto('rpc')" type="button">
+              <span class="proto-name">RPC</span>
+              <span class="proto-port">135</span>
+            </button>
+
+            <button class="proto-btn proto-agent" id="proto-agent" onclick="selectProto('agent')" type="button">
+              <span class="proto-name">Agent</span>
               <span class="proto-port">445</span>
             </button>
 
-            <button class="proto-btn proto-smb" id="proto-smb" onclick="selectProto('smb')" type="button">
-              <span class="proto-name">SMB</span>
-              <span class="proto-port">445</span>
-            </button>
-
-            <button class="proto-btn proto-ssh" id="proto-ssh" onclick="selectProto('ssh')" type="button">
-              <span class="proto-name">SSH</span>
+            <button class="proto-btn proto-beacon" id="proto-beacon" onclick="selectProto('beacon')" type="button">
+              <span class="proto-name">Beacon</span>
               <span class="proto-port">22</span>
             </button>
           </div>
@@ -290,36 +289,489 @@
         </div>
       </div>
 
-      <!-- LOCAL CONNECT -->
+      <!-- LOCAL CONNECT / PAYLOAD -->
       <div id="local-form" style="display:none;">
-        <div class="local-card">
-          <div class="local-icon">
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-              <circle cx="13" cy="9" r="4" stroke="#00ff88" stroke-width="1.5"/>
-              <path d="M5 22c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="#00ff88" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
+
+  <!-- PAYLOAD TAB SEÇİCİ -->
+  <div class="payload-tab-bar">
+    <button class="payload-tab-btn active agent" id="ptab-agent" onclick="switchPayloadTab('agent')" type="button">
+      <span class="ptab-dot"></span>
+      <img src="assets/Icons/agent.png" alt="Agent" style="width:13px;height:13px;flex-shrink:0" onerror="this.onerror=null;this.src='assets/favicon.png'">
+      Agent
+    </button>
+    <button class="payload-tab-btn beacon" id="ptab-beacon" onclick="switchPayloadTab('beacon')" type="button">
+      <span class="ptab-dot"></span>
+      <img src="assets/Icons/beacon.png" alt="Beacon" style="width:13px;height:13px;flex-shrink:0" onerror="this.onerror=null;this.src='assets/favicon.png'">
+      Beacon
+    </button>
+  </div>
+
+  <!-- ══════════ AGENT PANEL ══════════ -->
+  <div id="payload-agent" class="payload-pane">
+
+    <!-- OUTPUT FORMAT -->
+    <div class="connect-card">
+      <div class="card-title">
+        <span class="card-accent-bar agent"></span>
+        Output Format
+      </div>
+      <div class="fmt-grid">
+        <button class="fmt-btn agent selected" data-fmt="exe" onclick="selectFmt('agent','exe',this)" type="button">.EXE</button>
+        <button class="fmt-btn agent" data-fmt="dll" onclick="selectFmt('agent','dll',this)" type="button">.DLL</button>
+        <button class="fmt-btn agent" data-fmt="ps1" onclick="selectFmt('agent','ps1',this)" type="button">.PS1</button>
+      </div>
+    </div>
+
+    <!-- AGENT CONFIG -->
+    <div class="connect-card">
+      <div class="card-title">
+        <span class="card-accent-bar agent"></span>
+        Agent Configuration
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Agent Name / ID</label>
+          <input class="form-input" id="ag-name" type="text" placeholder="oxsium-agent-001" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Target Platform</label>
+          <select class="form-input" id="ag-platform">
+              <option value="windows">Windows x64</option>
+              <option value="windows32">Windows x86</option>
+            </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Logo (Optional)</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="form-input" id="ag-logo-path" type="text" placeholder="No file selected" readonly>
+            <input id="ag-logo-file" type="file" accept="image/*" style="display:none" onchange="handleLogoFileChange(event)">
+            <button class="browse-btn" type="button" onclick="browseLogo()">Browse</button>
+            <div id="ag-logo-preview" style="width:28px;height:28px;overflow:hidden;border-radius:4px;display:none">
+              <img id="ag-logo-img" src="" alt="logo" style="width:100%;height:100%;object-fit:cover">
+            </div>
           </div>
-          <div class="local-title">Local Session Connect</div>
-          <div class="local-desc">
-            Attach to the current Windows session without credentials. Requires an active domain-joined session with appropriate privileges. The Python API backend must be running locally.
-          </div>
-          <div class="action-row" style="justify-content: center; gap: 12px;">
-            <button class="btn-green" onclick="doLocalConnect()" type="button">
-              <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-                <path d="M7.5 1v5.5M5 4l2.5-3L10 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                <path d="M2 9c0 2.2 1.8 4 4 4h3c2.2 0 4-1.8 4-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-              </svg>
-              Attach Local Session
-            </button>
-            <button id="btn-local-disconnect" class="btn-secondary" onclick="doDisconnect()" type="button">
+        </div>
+      </div>
+
+      
+
+    </div>
+
+    
+
+    <!-- PERSISTENCE -->
+    <div class="connect-card">
+      <div class="card-title">
+        <span class="card-accent-bar agent"></span>
+        Persistence
+      </div>
+      <div class="toggle-grid">
+        <label class="toggle-item">
+          <span class="toggle-switch">
+            <input type="checkbox" id="ag-persist-svc" checked>
+            <span class="toggle-track agent-track"></span>
+          </span>
+          <span class="toggle-label">Install as Service</span>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-switch">
+            <input type="checkbox" id="ag-persist-reg">
+            <span class="toggle-track agent-track"></span>
+          </span>
+          <span class="toggle-label">Startup Registry</span>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-switch">
+            <input type="checkbox" id="ag-persist-task">
+            <span class="toggle-track agent-track"></span>
+          </span>
+          <span class="toggle-label">Scheduled Task</span>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-switch">
+            <input type="checkbox" id="ag-persist-hook">
+            <span class="toggle-track agent-track"></span>
+          </span>
+          <span class="toggle-label">Login Hook (Linux)</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- SECURITY -->
+    <div class="connect-card">
+      <div class="card-title">
+        <span class="card-accent-bar agent"></span>
+        Security &amp; Evasion
+      </div>
+      <div class="form-row single" style="margin-bottom:12px">
+        <div class="form-group">
+          <label class="form-label">Encryption Key (AES-256)</label>
+          <div class="key-wrap">
+            <input class="form-input" id="ag-aes-key" type="text" placeholder="Click refresh to generate..." autocomplete="off" spellcheck="false" readonly>
+            <button class="key-gen-btn" onclick="genKey('ag-aes-key')" title="Generate new key" type="button">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M3 7h8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                <path d="M7 3v8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                <path d="M12 7A5 5 0 1 1 7 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                <path d="M7 2l2-2v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
-              Disconnect
             </button>
           </div>
         </div>
+      </div>
+      <div class="form-row single" style="margin-top:8px">
+        <div class="form-group">
+          <label class="form-label">Padding Size</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="form-input" id="ag-padding-size" type="text" placeholder="1024" autocomplete="off" spellcheck="false">
+            <div style="position:relative">
+              <button class="btn-secondary" id="ag-padding-unit-btn" type="button" onclick="togglePaddingUnits()">KB</button>
+              <div class="small-panel" id="ag-padding-units" style="display:none;position:absolute;right:0;top:36px;background:var(--panel-bg);border:1px solid var(--border);padding:6px;border-radius:6px;box-shadow:var(--shadow)">
+                <button class="btn-secondary" type="button" onclick="setPaddingUnit('KB')">KB</button>
+                <button class="btn-secondary" type="button" onclick="setPaddingUnit('MB')">MB</button>
+                <button class="btn-secondary" type="button" onclick="setPaddingUnit('GB')">GB</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="toggle-grid">
+        <label class="toggle-item">
+          <span class="toggle-switch">
+            <input type="checkbox" id="ag-sec-obf" checked>
+            <span class="toggle-track agent-track"></span>
+          </span>
+          <span class="toggle-label">Obfuscate Payload</span>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-switch">
+            <input type="checkbox" id="ag-sec-vm">
+            <span class="toggle-track agent-track"></span>
+          </span>
+          <span class="toggle-label">Anti-VM Check</span>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-switch">
+            <input type="checkbox" id="ag-sec-sandbox">
+            <span class="toggle-track agent-track"></span>
+          </span>
+          <span class="toggle-label">Anti-Sandbox</span>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-switch">
+            <input type="checkbox" id="ag-sec-del">
+            <span class="toggle-track agent-track"></span>
+          </span>
+          <span class="toggle-label">Self-Delete on Fail</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- OUTPUT PATH -->
+    <div class="connect-card">
+      <div class="card-title">
+        <span class="card-accent-bar agent"></span>
+        Output Path
+      </div>
+      <div class="form-row single">
+        <div class="form-group">
+          <label class="form-label">Destination</label>
+          <div class="output-path-wrap">
+            <input class="form-input" id="ag-output-path" type="text" placeholder="C:\oxsium\output\" autocomplete="off" spellcheck="false">
+            <button class="browse-btn" type="button">Browse</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ACTIONS -->
+    <div class="action-row">
+      <button class="btn-secondary" type="button" onclick="previewPayloadCmd('agent')">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style="margin-right:6px;vertical-align:middle">
+          <path d="M2 4l3 3-3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 10h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+        Preview CMD
+      </button>
+      <button class="btn-generate agent" type="button" onclick="generatePayload('agent')">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" style="margin-right:8px;vertical-align:middle">
+          <path d="M7.5 1v9M4 7l3.5 4 3.5-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 12h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        Generate Agent
+      </button>
+      <button class="btn-secondary" type="button" onclick="savePayloadTemplate('agent')">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style="margin-right:6px;vertical-align:middle">
+          <rect x="2" y="2" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M5 2v3h4V2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M3 9h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+        Save Template
+      </button>
+    </div>
+
+    <div class="saved-payloads-wrap" style="margin-top:10px">
+      <button class="btn-secondary btn-saved-users" type="button" onclick="toggleSavedPayloads('agent')">Saved Agent Templates</button>
+      <div class="saved-users-list" id="saved-agent-list" style="display:none;">
+        <div class="saved-users-title">Saved Agent Templates</div>
+        <div class="saved-users-scroll" id="saved-agent-scroll">
+          <div class="saved-user-empty">No saved agent templates yet.</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /payload-agent -->
+
+  <!-- ══════════ BEACON PANEL ══════════ -->
+  <div id="payload-beacon" class="payload-pane" style="display:none;">
+
+    <!-- BEACON TYPE -->
+    <div class="connect-card">
+      <div class="card-title">
+        <span class="card-accent-bar beacon"></span>
+        Beacon Type
+      </div>
+      <div class="beacon-type-grid">
+        <button class="beacon-type-btn selected" data-btype="https" onclick="selectBeaconType('https',this)" type="button">
+          <span class="btype-name">HTTPS</span>
+          <span class="btype-port">443</span>
+        </button>
+        <button class="beacon-type-btn" data-btype="http" onclick="selectBeaconType('http',this)" type="button">
+          <span class="btype-name">HTTP</span>
+          <span class="btype-port">80</span>
+        </button>
+        <button class="beacon-type-btn" data-btype="dns" onclick="selectBeaconType('dns',this)" type="button">
+          <span class="btype-name">DNS</span>
+          <span class="btype-port">53</span>
+        </button>
+        <button class="beacon-type-btn" data-btype="smb" onclick="selectBeaconType('smb',this)" type="button">
+          <span class="btype-name">SMB</span>
+          <span class="btype-port">445</span>
+        </button>
+      </div>
+      <div class="smb-section" id="smb-section" style="display:none;">
+        <div class="smb-label">SMB Configuration</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Named Pipe</label>
+            <input class="form-input" id="bc-pipe" type="text" placeholder="\\.\pipe\oxsium_beacon" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Linked Beacon Target</label>
+            <input class="form-input" id="bc-smb-target" type="text" placeholder="192.168.1.15" autocomplete="off" spellcheck="false">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CALLBACK CONFIG -->
+    <div class="connect-card">
+      <div class="card-title">
+        <span class="card-accent-bar beacon"></span>
+        Callback Configuration
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">C2 Server URL</label>
+          <input class="form-input" id="bc-c2url" type="text" placeholder="https://oxsium.local" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Listener Port</label>
+          <input class="form-input" id="bc-port" type="text" placeholder="22" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Sleep Time (sec)</label>
+          <div class="range-wrap">
+            <input type="range" class="beacon-range" id="bc-sleep-range" min="5" max="600" value="30"
+              oninput="syncRange('bc-sleep-range','bc-sleep','bc-sleep-val','s')">
+            <span class="range-val" id="bc-sleep-val">30s</span>
+          </div>
+          <input class="form-input" id="bc-sleep" type="text" placeholder="30" value="30"
+            oninput="syncInput('bc-sleep','bc-sleep-range','bc-sleep-val','s')"
+            autocomplete="off" spellcheck="false" style="margin-top:6px">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Jitter Range (%)</label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input class="form-input" id="bc-jitter-min" type="text" placeholder="10" style="width:70px;flex-shrink:0" autocomplete="off">
+            <span style="color:var(--text-dim);font-size:12px">—</span>
+            <input class="form-input" id="bc-jitter-max" type="text" placeholder="50" style="width:70px;flex-shrink:0" autocomplete="off">
+            <span style="color:var(--text-dim);font-size:11px">%</span>
+          </div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Max Retry</label>
+          <input class="form-input" id="bc-maxretry" type="text" placeholder="5" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Retry Delay (sec)</label>
+          <input class="form-input" id="bc-retrydelay" type="text" placeholder="60" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+    </div>
+
+    <!-- STEALTH OPTIONS -->
+    <div class="connect-card">
+      <div class="card-title">
+        <span class="card-accent-bar beacon"></span>
+        Stealth &amp; Evasion
+      </div>
+      <div class="form-row single" style="margin-bottom:12px">
+        <div class="form-group">
+          <label class="form-label">User-Agent String</label>
+          <div style="display:flex;gap:6px">
+            <input class="form-input" id="bc-ua" type="text" placeholder="Mozilla/5.0 (Windows NT 10.0; Win64; x64)..." autocomplete="off" spellcheck="false" style="flex:1">
+            <select class="form-input" id="bc-ua-preset" onchange="applyUaPreset(this.value)" style="width:110px;flex-shrink:0">
+              <option value="">Preset…</option>
+              <option value="chrome">Chrome 124</option>
+              <option value="firefox">Firefox 125</option>
+              <option value="edge">Edge 124</option>
+              <option value="curl">curl/8.7</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="toggle-grid">
+        <label class="toggle-item beacon-toggle">
+          <span class="toggle-switch">
+            <input type="checkbox" id="bc-mimic" checked>
+            <span class="toggle-track beacon-track"></span>
+          </span>
+          <span class="toggle-label">Mimic Browser Traffic</span>
+        </label>
+        <label class="toggle-item beacon-toggle">
+          <span class="toggle-switch">
+            <input type="checkbox" id="bc-enc" checked>
+            <span class="toggle-track beacon-track"></span>
+          </span>
+          <span class="toggle-label">Encrypted Comms</span>
+        </label>
+        <label class="toggle-item beacon-toggle">
+          <span class="toggle-switch">
+            <input type="checkbox" id="bc-rsleep">
+            <span class="toggle-track beacon-track"></span>
+          </span>
+          <span class="toggle-label">Random Sleep</span>
+        </label>
+        <label class="toggle-item beacon-toggle">
+          <span class="toggle-switch">
+            <input type="checkbox" id="bc-dnsfb">
+            <span class="toggle-track beacon-track"></span>
+          </span>
+          <span class="toggle-label">DNS Fallback</span>
+        </label>
+        <label class="toggle-item beacon-toggle">
+          <span class="toggle-switch">
+            <input type="checkbox" id="bc-antivm">
+            <span class="toggle-track beacon-track"></span>
+          </span>
+          <span class="toggle-label">Anti-VM Check</span>
+        </label>
+        <label class="toggle-item beacon-toggle">
+          <span class="toggle-switch">
+            <input type="checkbox" id="bc-antisb">
+            <span class="toggle-track beacon-track"></span>
+          </span>
+          <span class="toggle-label">Anti-Sandbox</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- ENCRYPTION -->
+    <div class="connect-card">
+      <div class="card-title">
+        <span class="card-accent-bar beacon"></span>
+        Encryption Key (AES-256)
+      </div>
+      <div class="form-row single">
+        <div class="form-group">
+          <label class="form-label">Shared Key</label>
+          <div class="key-wrap">
+            <input class="form-input" id="bc-aes-key" type="text" placeholder="Click refresh to generate..." autocomplete="off" spellcheck="false" readonly>
+            <button class="key-gen-btn" onclick="genKey('bc-aes-key')" title="Generate new key" type="button">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M12 7A5 5 0 1 1 7 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                <path d="M7 2l2-2v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- OUTPUT -->
+    <div class="connect-card">
+      <div class="card-title">
+        <span class="card-accent-bar beacon"></span>
+        Output
+      </div>
+      <div class="form-row single" style="margin-bottom:12px">
+        <div class="form-group">
+          <label class="form-label">Output Format</label>
+          <div class="fmt-grid">
+            <button class="fmt-btn beacon selected" data-fmt="exe" onclick="selectFmt('beacon','exe',this)" type="button">.EXE</button>
+            <button class="fmt-btn beacon" data-fmt="dll" onclick="selectFmt('beacon','dll',this)" type="button">.DLL</button>
+            <button class="fmt-btn beacon" data-fmt="ps1" onclick="selectFmt('beacon','ps1',this)" type="button">.PS1</button>
+            <button class="fmt-btn beacon" data-fmt="sh"  onclick="selectFmt('beacon','sh',this)"  type="button">.SH</button>
+            <button class="fmt-btn beacon" data-fmt="py"  onclick="selectFmt('beacon','py',this)"  type="button">.PY</button>
+          </div>
+        </div>
+      </div>
+      <div class="form-row single">
+        <div class="form-group">
+          <label class="form-label">Output Path</label>
+          <div class="output-path-wrap">
+            <input class="form-input" id="bc-output-path" type="text" placeholder="C:\oxsium\output\" autocomplete="off" spellcheck="false">
+            <button class="browse-btn" type="button">Browse</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ACTIONS -->
+    <div class="action-row">
+      <button class="btn-secondary" type="button" onclick="previewPayloadCmd('beacon')">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style="margin-right:6px;vertical-align:middle">
+          <path d="M2 4l3 3-3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 10h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+        Preview CMD
+      </button>
+      <button class="btn-generate beacon" type="button" onclick="generatePayload('beacon')">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" style="margin-right:8px;vertical-align:middle">
+          <path d="M7.5 1v9M4 7l3.5 4 3.5-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 12h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        Generate Beacon
+      </button>
+      <button class="btn-secondary" type="button" onclick="savePayloadTemplate('beacon')">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style="margin-right:6px;vertical-align:middle">
+          <rect x="2" y="2" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M5 2v3h4V2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M3 9h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+        Save Template
+      </button>
+    </div>
+
+    <div class="saved-payloads-wrap" style="margin-top:10px">
+      <button class="btn-secondary btn-saved-users" type="button" onclick="toggleSavedPayloads('beacon')">Saved Beacon Templates</button>
+      <div class="saved-users-list" id="saved-beacon-list" style="display:none;">
+        <div class="saved-users-title">Saved Beacon Templates</div>
+        <div class="saved-users-scroll" id="saved-beacon-scroll">
+          <div class="saved-user-empty">No saved beacon templates yet.</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /payload-beacon -->
+
       </div>
 
       <!-- LOG TERMINAL -->
@@ -342,7 +794,7 @@
     <!-- ══════════ POWERSHELL TAB ══════════ -->
     <div id="tab-powershell" class="powershell-wrap fade-in" style="display:none;">
       <div class="section-title">PowerShell Shell</div>
-      <div class="section-sub">Interactive remote PowerShell console. Use WinRM or Local session for commands.</div>
+      <div class="section-sub">Interactive local PowerShell console. Use Local session for commands.</div>
 
       <div class="shell-panel">
         <div class="shell-header">
@@ -1570,6 +2022,7 @@
 <script src="decision_engine/decision_engine_render.js"></script>
 <script src="decision_engine/decision_engine_view.js"></script>
 <script src="JavaScript/06-pentest.js"></script>
+<script src="JavaScript/12-payload.js"></script>
 
 <script>
 // ── ACL dangerous row highlighter ───────────────────────────────────────────
@@ -1610,14 +2063,12 @@ const _aclObserver = new MutationObserver((mutations) => {
     }
 });
 
-// acl-table-body hazir oldugda observer-i baslatmaq ucun
 function _aclStartObserver() {
     const body = document.getElementById('acl-table-body');
     if (body) {
         _aclObserver.observe(body, { childList: true, subtree: true });
-        _aclMarkAllDangerous(); // ilk defe movcud row-lari da tara
+        _aclMarkAllDangerous(); 
     } else {
-        // DOM heze hazir deyil, bir az goze
         requestAnimationFrame(_aclStartObserver);
     }
 }

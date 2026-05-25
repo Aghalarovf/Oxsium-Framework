@@ -12,7 +12,7 @@ let state = {
   connecting: false,
   justConnectedUntil: 0,
   mode: 'remote',
-  protocol: 'winrm',
+  protocol: 'ldap',
   domain: null,
   user: null,
   dc: null,

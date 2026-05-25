@@ -13,6 +13,39 @@ def get_netbios_bind_user(username: str, domain: str) -> str:
     return f"{netbios}\\{username}"
 
 
+def build_ldap_bind_users(username: str, domain: str) -> list[str]:
+    raw_user = str(username or "").strip()
+    domain = str(domain or "").strip()
+    candidates: list[str] = []
+
+    def add(candidate: str) -> None:
+        candidate = str(candidate or "").strip()
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    if not raw_user:
+        return candidates
+
+    add(raw_user)
+
+    if "@" in raw_user:
+        local_user = raw_user.split("@", 1)[0].strip()
+    elif "\\" in raw_user:
+        local_user = raw_user.split("\\", 1)[-1].strip()
+    else:
+        local_user = raw_user
+
+    if domain and "@" not in raw_user:
+        add(f"{local_user}@{domain}")
+
+    if domain:
+        netbios = domain.split('.')[0].upper()
+        add(f"{netbios}\\{local_user}")
+
+    add(local_user)
+    return candidates
+
+
 def domain_to_dn(domain: str) -> str:
     return ",".join(f"DC={p}" for p in domain.split("."))
 
