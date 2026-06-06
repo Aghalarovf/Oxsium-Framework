@@ -82,6 +82,55 @@ function browseLogo() {
   const fi = document.getElementById('ag-logo-file');
   if (fi) fi.click();
 }
+
+async function browseOutputPath() {
+  const inputEl = document.getElementById('ag-output-path');
+
+  // ── Modern browser: File System Access API ─────────────────────────────
+  if (window.showDirectoryPicker) {
+    try {
+      const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      // Build a best-effort Windows-style path from the directory name.
+      // Full absolute path is not exposed by the browser for security reasons;
+      // we ask the backend to resolve it via a temp probe if needed.
+      const name = dirHandle.name;
+      // Try to get the real path from the backend
+      try {
+        const resp = await fetch(`${API_BASE}/api/resolve-folder`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hint: name }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (data.success && data.path) {
+          inputEl.value = data.path;
+          return;
+        }
+      } catch (_) { /* fall through to name-only */ }
+      inputEl.value = name;
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        showToast('Could not open folder picker: ' + err.message, 'error');
+      }
+    }
+    return;
+  }
+
+  // ── Fallback: backend dialog via /api/browse-folder ────────────────────
+  try {
+    const resp = await fetch(`${API_BASE}/api/browse-folder`, { method: 'POST' });
+    const data = await resp.json().catch(() => ({}));
+    if (data.success && data.path) {
+      inputEl.value = data.path;
+    } else if (data.cancelled) {
+      // user closed the dialog — do nothing
+    } else {
+      showToast(data.error || 'Could not open folder picker.', 'error');
+    }
+  } catch (err) {
+    showToast('Network error: ' + err.message, 'error');
+  }
+}
 function handleLogoFileChange(e) {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
@@ -183,8 +232,9 @@ function previewPayloadCmd(target) {
 }
 
 /* GENERATE PAYLOAD */
-function generatePayload(target) {
+async function generatePayload(target) {
   const label = target === 'agent' ? 'Agent' : 'Beacon';
+
   if (target === 'beacon') {
     const urlEl = document.getElementById('bc-c2url');
     if (!urlEl || !urlEl.value.trim()) {
@@ -193,9 +243,119 @@ function generatePayload(target) {
       return;
     }
     urlEl && urlEl.classList.remove('error');
+    addLog(`[PAYLOAD] Generating ${label} — format: ${payloadState[target].fmt.toUpperCase()}`, 'info');
+    showToast(`${label} payload generation started…`, 'ok');
+    return;
   }
-  addLog(`[PAYLOAD] Generating ${label} — format: ${payloadState[target].fmt.toUpperCase()}`, 'info');
-  showToast(`${label} payload generation started…`, 'ok');
+
+  // ── Agent: collect config and call /api/generate-agent ──────────────────
+  const cfg = collectAgentConfig();
+
+  const fmt    = cfg.fmt || 'exe';
+  const name   = cfg.name.trim();
+  const output = cfg.output.trim();
+
+  if (!name) {
+    showToast('Agent Name / ID is required.', 'error');
+    document.getElementById('ag-name') && document.getElementById('ag-name').classList.add('error');
+    return;
+  }
+  document.getElementById('ag-name') && document.getElementById('ag-name').classList.remove('error');
+
+  if (!output) {
+    showToast('Output Path is required.', 'error');
+    document.getElementById('ag-output-path') && document.getElementById('ag-output-path').classList.add('error');
+    return;
+  }
+  document.getElementById('ag-output-path') && document.getElementById('ag-output-path').classList.remove('error');
+
+  addLog(`[PAYLOAD] Generating ${label} — format: ${fmt.toUpperCase()}, platform: ${cfg.platform}, output: ${output}`, 'info');
+  showToast('Agent build started — please wait…', 'ok');
+
+  const genBtn = document.querySelector('.btn-generate.agent');
+  if (genBtn) { genBtn.disabled = true; genBtn.textContent = 'Building…'; }
+
+  try {
+    // ── 1. Build işini başlat, job_id al ──────────────────────────────────
+    const startResp = await fetch(`${API_BASE}/api/generate-agent`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name:        cfg.name,
+        fmt:         fmt,
+        platform:    cfg.platform,
+        output:      cfg.output,
+        key:         cfg.key,
+        paddingSize: cfg.paddingSize,
+        paddingUnit: cfg.paddingUnit,
+      }),
+    });
+
+    const startText = await startResp.text();
+    let startData = {};
+    try { startData = JSON.parse(startText); } catch (_) {
+      addLog(`[PAYLOAD] Server error (HTTP ${startResp.status}):\n${startText.slice(0, 1000)}`, 'error');
+      showToast(`Server error (HTTP ${startResp.status})`, 'error');
+      return;
+    }
+
+    if (!startData.success) {
+      addLog(`[PAYLOAD] Build failed to start: ${startData.error || 'Unknown error'}`, 'error');
+      showToast(startData.error || 'Build failed to start', 'error');
+      return;
+    }
+
+    const jobId = startData.job_id;
+    addLog(`[PAYLOAD] Build job started (id: ${jobId})`, 'info');
+
+    // ── 2. Hər 1.5s-dən bir poll et, satırları log-a yaz ─────────────────
+    let offset = 0;
+    let dots   = 0;
+    const dotTimer = setInterval(() => {
+      dots = (dots + 1) % 4;
+      if (genBtn) genBtn.textContent = 'Building' + '.'.repeat(dots + 1);
+    }, 400);
+
+    await new Promise((resolve) => {
+      const poll = async () => {
+        try {
+          const r = await fetch(`${API_BASE}/api/agent-build-status?job_id=${jobId}&offset=${offset}`);
+          const d = await r.json().catch(() => ({}));
+
+          if (d.lines && d.lines.length > 0) {
+            d.lines.forEach(line => { if (line.trim()) addLog(`[BUILD] ${line}`, 'raw'); });
+            offset = d.offset;
+          }
+
+          if (d.status === 'done') {
+            clearInterval(dotTimer);
+            if (d.build_success) {
+              addLog(`[PAYLOAD] ✓ Build succeeded (exit 0)`, 'ok');
+              showToast('Agent generated successfully!', 'ok');
+            } else {
+              const errMsg = d.error || `Build failed (exit ${d.returncode ?? '?'})`;
+              addLog(`[PAYLOAD] ✗ Build failed: ${errMsg}`, 'error');
+              showToast(`Build failed: ${errMsg}`, 'error');
+            }
+            resolve();
+          } else {
+            setTimeout(poll, 1500);
+          }
+        } catch (pollErr) {
+          clearInterval(dotTimer);
+          addLog(`[PAYLOAD] Poll error: ${pollErr.message}`, 'error');
+          resolve();
+        }
+      };
+      poll();
+    });
+
+  } catch (err) {
+    addLog(`[PAYLOAD] Network error: ${err.message}`, 'error');
+    showToast(`Network error: ${err.message}`, 'error');
+  } finally {
+    if (genBtn) { genBtn.disabled = false; genBtn.textContent = 'Generate Agent'; }
+  }
 }
 
 /* CONFIG COLLECTORS */

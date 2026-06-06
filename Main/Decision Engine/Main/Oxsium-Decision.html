@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Decision Tree — Oxsium Framework</title>
+    <link rel="icon" type="image/png" href="../../assets/favicon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="Oxsium-Decision.css">
@@ -15,8 +16,18 @@
     <!-- ══ TOPBAR ══ -->
     <header class="topbar">
 
-        <!-- Left: status / engine info -->
+        <!-- Left: logo / status / engine info -->
         <div class="topbar-left">
+            <div class="logo-block">
+                <div class="logo-icon-wrap">
+                    <img src="../../assets/favicon.png" alt="Oxsium" onerror="this.style.display='none';this.parentElement.innerHTML='<svg viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'#38bdf8\' stroke-width=\'1.5\' width=\'16\' height=\'16\'><path d=\'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5\'/></svg>'">
+                </div>
+                <div class="logo-text-wrap">
+                    <div class="logo-name">OxsIum</div>
+                    <span class="logo-sub">Framework · v2.1</span>
+                </div>
+            </div>
+
             <div class="status-cluster">
                 <div class="status-dot"></div>
                 <span class="status-label">Engine Deactive</span>
@@ -60,7 +71,7 @@
 
         </div>
 
-        <!-- Right: action + logo -->
+        <!-- Right: action buttons -->
         <div class="topbar-right">
             <button class="reset-btn" id="reset-btn" aria-label="Reset" title="Reset">
                 <img src="../../assets/Icons/reset.png" alt="Reset" style="width:16px;height:16px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'">
@@ -80,16 +91,6 @@
                 <span class="btn-icon"></span>
                 Analyze Paths
             </button>
-
-            <div class="logo-block">
-                <div class="logo-icon-wrap">
-                    <img src="../../assets/favicon.png" alt="Oxsium" onerror="this.style.display='none';this.parentElement.innerHTML='<svg viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'#38bdf8\' stroke-width=\'1.5\' width=\'16\' height=\'16\'><path d=\'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5\'/></svg>'">
-                </div>
-                <div class="logo-text-wrap">
-                    <div class="logo-name">Oxsium</div>
-                    <span class="logo-sub">Framework · v2.1</span>
-                </div>
-            </div>
         </div>
     </header>
 
@@ -111,6 +112,10 @@
 
         <div class="scroll-area" id="path-list">
             <!-- injected by JS -->
+        </div>
+
+        <div class="panel-footer">
+            <span class="panel-footer-text">Oxsium Framework @ 2025</span>
         </div>
     </aside>
 
@@ -166,6 +171,21 @@
     <aside class="panel-right">
         <!-- Empty - ready for new content -->
     </aside>
+
+    <!-- ══ STATUS BAR ══ -->
+    <footer class="statusbar">
+        <div class="statusbar-left">
+            <span class="statusbar-pill"><span class="statusbar-dot"></span> Engine Ready</span>
+            <span>Mode: Decision Graph</span>
+        </div>
+        <div class="statusbar-center">
+            <span class="statusbar-pill" id="statusbar-center-text">Waiting for analysis</span>
+        </div>
+        <div class="statusbar-right">
+            <span>Nodes: <span id="statusbar-nodes">—</span></span>
+            <span>Depth: <span id="statusbar-depth">—</span></span>
+        </div>
+    </footer>
 
 </div>
 

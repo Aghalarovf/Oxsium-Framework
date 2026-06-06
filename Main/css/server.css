@@ -1,0 +1,149 @@
+/* ── SERVER TAB BUTTON COLOR ── */
+.payload-tab-btn.server { color: var(--accent); }
+.payload-tab-btn.server .ptab-dot { background: var(--accent); }
+.payload-tab-btn.server.active { border-bottom-color: var(--accent); color: var(--accent); }
+
+/* ── DUAL LAYOUT: removed — server is now its own tab ── */
+
+/* ── SERVER SECTION HEADERS ── */
+.server-section-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--head, 'Rajdhani', sans-serif);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+  padding-left: 2px;
+}
+
+/* ── SERVER CARD ── */
+.server-card {
+  margin-bottom: 0 !important;
+}
+
+/* ── SERVER INTERFACE LIST ── */
+.server-interface-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.srv-iface-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.srv-iface-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  background: rgba(var(--accent-rgb, 0,200,150), 0.08);
+  border: 1px solid rgba(var(--accent-rgb, 0,200,150), 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.srv-iface-info {
+  flex: 1;
+  min-width: 0;
+}
+.srv-iface-name {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-hi, #e0e0e0);
+  letter-spacing: .3px;
+  font-family: var(--head, 'Rajdhani', sans-serif);
+}
+.srv-iface-desc {
+  display: block;
+  font-size: 10px;
+  color: var(--text-dim, #666);
+  letter-spacing: .2px;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srv-iface-badge {
+  font-size: 9px;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-weight: 700;
+  flex-shrink: 0;
+  font-family: var(--mono, 'Space Mono', monospace);
+}
+.srv-iface-badge.active {
+  background: rgba(var(--accent-rgb, 0,200,150), 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb, 0,200,150), 0.25);
+}
+
+/* ── TRANSPORT TOGGLE ── */
+.transport-toggle-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+.transport-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text-dim, #888);
+  cursor: pointer;
+  font-family: var(--head, 'Rajdhani', sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.transport-btn svg { color: var(--text-dim, #888); transition: color .15s; }
+.transport-btn .transport-sub {
+  font-size: 9.5px;
+  font-weight: 400;
+  color: var(--text-dim, #666);
+  letter-spacing: .3px;
+  font-family: var(--mono, 'Space Mono', monospace);
+  transition: color .15s;
+}
+.transport-btn:hover {
+  border-color: rgba(var(--accent-rgb, 0,200,150), 0.3);
+  background: rgba(var(--accent-rgb, 0,200,150), 0.05);
+  color: var(--text-hi, #e0e0e0);
+}
+.transport-btn:hover svg { color: var(--accent); }
+.transport-btn.selected {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb, 0,200,150), 0.1);
+  color: var(--accent);
+}
+.transport-btn.selected svg { color: var(--accent); }
+.transport-btn.selected .transport-sub { color: var(--accent); opacity: .75; }
+
+/* Ensure transport-btn has an inline flex row for icon+name */
+.transport-btn {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.transport-btn .transport-sub {
+  flex-basis: 100%;
+  margin-top: 1px;
+  margin-left: 20px;
+}

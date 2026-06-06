@@ -670,6 +670,36 @@ static bool write_file(const fs::path& path, const std::string& content) {
     return static_cast<bool>(f);
 }
 
+static bool ensure_graph_engine_executable(const fs::path& root) {
+#ifdef _WIN32
+    (void)root;
+    return true;
+#else
+    const fs::path graph_engine = root / "Main" / "Decision Engine" / "Engine" / "graph_engine";
+    if (!fs::exists(graph_engine)) {
+        warn("Decision Engine graph_engine not found: " + graph_engine.string());
+        return false;
+    }
+
+    std::error_code ec;
+    fs::permissions(
+        graph_engine,
+        fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
+        fs::perm_options::add,
+        ec
+    );
+
+    if (ec) {
+        warn("Failed to set executable permission on graph_engine: " + ec.message());
+        return false;
+    }
+
+    ok("graph_engine marked as executable.");
+    bullet(ansi::PATH_CLR() + graph_engine.string() + ansi::RST());
+    return true;
+#endif
+}
+
 static std::string start_py_template() {
     return
         "from __future__ import annotations\n\n"
@@ -932,6 +962,9 @@ int main() {
         err("Could not generate launcher scripts. Aborting.");
         return 1;
     }
+
+    step_header(5, "Decision Engine Permissions");
+    ensure_graph_engine_executable(root);
 
     print_success(root);
     return 0;

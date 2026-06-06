@@ -12,3 +12,4 @@ requests-ntlm>=1.2,<2.0
 pyarrow>=18.0,<22.0
 pandas>=2.2,<3.0
 pycryptodomex>=3.20,<4.0
+nicegui>=2.0,<4.0

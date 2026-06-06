@@ -151,11 +151,21 @@ function animVal(el, target, duration = 600) {
   requestAnimationFrame(step);
 }
 
+function getInputValue(id, fallback = '') {
+  const field = document.getElementById(id);
+  return field ? (field.value || '').trim() : fallback;
+}
+
+function setInputValue(id, value) {
+  const field = document.getElementById(id);
+  if (field) field.value = value;
+}
+
 function getCertificatePayload() {
-  const domain = (document.getElementById('domainInput')?.value || '').trim();
-  const nameServer = (document.getElementById('nameServerInput')?.value || '').trim();
-  const username = (document.getElementById('usernameInput')?.value || '').trim();
-  const password = (document.getElementById('secretInput')?.value || '').trim();
+  const domain = getInputValue('domainInput');
+  const nameServer = getInputValue('nameServerInput');
+  const username = getInputValue('usernameInput');
+  const password = getInputValue('secretInput');
 
   return { domain, name_server: nameServer, username, password };
 }
@@ -219,7 +229,7 @@ function renderSavedUsers(users) {
   }
 
   panel.innerHTML = users.map((item, index) => `
-    <div class="saved-user-item" data-index="${index}" style="border:1px solid var(--border);border-radius:8px;background:rgba(6,182,212,0.03);cursor:pointer;width:100%;">
+    <div class="saved-user-item" data-index="${index}" style="border:1px solid var(--border);border-radius:8px;background:rgba(204,26,26,0.03);cursor:pointer;width:100%;">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;width:100%">
         <div style="min-width:0;flex:1">
           <div style="font-family:var(--mono);font-size:11px;color:var(--c5);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.username || 'Unknown user'}</div>
@@ -241,10 +251,10 @@ function renderSavedUsers(users) {
       const usernameInput = document.getElementById('usernameInput');
       const secretInput = document.getElementById('secretInput');
 
-      if (domainInput) domainInput.value = item.domain || '';
-      if (nameServerInput) nameServerInput.value = item.name_server || '';
-      if (usernameInput) usernameInput.value = item.username || '';
-      if (secretInput) secretInput.value = item.password || '';
+      setInputValue('domainInput', item.domain || '');
+      setInputValue('nameServerInput', item.name_server || '');
+      setInputValue('usernameInput', item.username || '');
+      setInputValue('secretInput', item.password || '');
 
       if (domainInput) domainInput.dispatchEvent(new Event('input', { bubbles: true }));
       if (nameServerInput) nameServerInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -344,14 +354,14 @@ function _tplRow(t, idx) {
   <div class="tpl-card" id="tpl-card-${idx}"
        style="border:1px solid var(--border);
               border-radius:7px;overflow:hidden;
-              background:rgba(6,13,24,0.6);
+              background:rgba(26,26,26,0.6);
               transition:border-color .2s,background .2s;">
     <!-- HEADER ROW -->
     <div onclick="toggleTemplate(${idx})"
          style="display:flex;align-items:center;justify-content:space-between;
                 padding:10px 14px;cursor:pointer;gap:10px;
                 transition:background .18s;"
-         onmouseover="this.style.background='rgba(6,182,212,0.04)'"
+         onmouseover="this.style.background='rgba(204,26,26,0.04)'"
          onmouseout="this.style.background='transparent'">
       <div style="display:flex;align-items:center;gap:9px;min-width:0">
         <span style="font-family:var(--mono);font-size:8px;color:var(--text4);
@@ -382,7 +392,7 @@ function _tplBody(r, p) {
   const ekuList = (p.eku_friendly || []).map(e =>
     `<span style="display:inline-block;font-family:var(--mono);font-size:9px;
       padding:2px 7px;margin:2px;border-radius:4px;
-      background:rgba(6,182,212,0.07);border:1px solid var(--border2);
+      background:rgba(204,26,26,0.07);border:1px solid var(--border2);
       color:var(--c5);">${e.name}</span>`
   ).join('') || '<span style="color:var(--text4);font-size:9px">—</span>';
 
@@ -397,7 +407,7 @@ function _tplBody(r, p) {
 
   function row(label, val, highlight) {
     return `<div style="display:flex;gap:10px;align-items:flex-start;padding:5px 0;
-              border-bottom:1px solid rgba(6,182,212,0.06)">
+              border-bottom:1px solid rgba(204,26,26,0.06)">
       <span style="font-family:var(--mono);font-size:9px;color:var(--text4);
         width:160px;flex-shrink:0;letter-spacing:.3px;padding-top:2px">${label}</span>
       <span style="font-family:var(--mono);font-size:9px;
@@ -408,7 +418,7 @@ function _tplBody(r, p) {
   const aclRows = (p.acl_enrollment_aces || []).slice(0,8).map(ace => {
     const rCol = ace.type === 'Allow' ? 'var(--sev-low)' : 'var(--sev-crit)';
     return `<div style="font-family:var(--mono);font-size:8px;padding:3px 6px;
-      border-radius:4px;background:rgba(6,13,24,0.7);border:1px solid var(--border);
+      border-radius:4px;background:rgba(26,26,26,0.7);border:1px solid var(--border);
       margin-bottom:3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <span style="color:${rCol};font-weight:700">${ace.type}</span>
       <span style="color:var(--text4)">${ace.sid}</span>
@@ -470,7 +480,7 @@ function toggleTemplate(idx) {
   const open = body.style.display !== 'none';
   body.style.display = open ? 'none' : 'block';
   if (chev) chev.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)';
-  if (card) card.style.borderColor = open ? 'var(--border)' : 'rgba(6,182,212,0.35)';
+  if (card) card.style.borderColor = open ? 'var(--border)' : 'rgba(204,26,26,0.35)';
 }
 
 function buildTemplateCards(templates) {
@@ -492,7 +502,7 @@ function buildTemplateCards(templates) {
         <span style="font-family:var(--mono);font-size:9px;letter-spacing:1.5px;
           text-transform:uppercase;color:var(--text4)">Templates</span>
         <span style="font-family:var(--mono);font-size:9px;padding:2px 8px;
-          border-radius:10px;background:rgba(6,182,212,0.08);
+          border-radius:10px;background:rgba(204,26,26,0.08);
           border:1px solid var(--border2);color:var(--c5)">${_allTemplates.length} total</span>
         <span style="font-family:var(--mono);font-size:9px;padding:2px 8px;
           border-radius:10px;background:rgba(34,197,94,0.08);
@@ -502,7 +512,7 @@ function buildTemplateCards(templates) {
         <button onclick="filterTemplates('all')" id="tpl-f-all"
           style="font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.8px;
           text-transform:uppercase;padding:4px 10px;border-radius:4px;cursor:pointer;
-          background:rgba(6,182,212,0.12);border:1px solid var(--border2);color:var(--c5)">ALL</button>
+          background:rgba(204,26,26,0.12);border:1px solid var(--border2);color:var(--c5)">ALL</button>
       </div>
     </div>
     <!-- CARDS -->
@@ -549,7 +559,7 @@ function runTest(id) {
   const box = document.getElementById('log-' + id);
   box.innerHTML = '';
   log(id, '[*] Initializing test for ' + id + '...', 'info');
-  setTimeout(() => log(id, '[*] Connecting to Name Server at ' + (document.getElementById('nameServerInput').value || 'N/A') + '...', 'info'), 400);
+  setTimeout(() => log(id, '[*] Connecting to Name Server at ' + (getInputValue('nameServerInput', 'N/A') || 'N/A') + '...', 'info'), 400);
   setTimeout(() => log(id, '[*] Enumerating certificate templates...'), 800);
   setTimeout(() => log(id, '[*] Analyzing permissions and flags...'), 1300);
   setTimeout(() => {
@@ -622,7 +632,7 @@ function runScan(id) {
 
 function runPoC(id) {
   log(id, '[*] Generating PoC for ' + id, 'info');
-  const domain = document.getElementById('domainInput').value || 'corp.local';
+  const domain = getInputValue('domainInput', 'corp.local') || 'corp.local';
   setTimeout(() => {
     log(id, 'certipy req -u "user@' + domain + '" \\');
     log(id, '  -p "Password1!" -dc-ip 10.10.0.11 \\');
@@ -769,12 +779,12 @@ function togglePasswordVisibility(fieldId) {
 }
 
 function resetConnectionFields() {
-  document.getElementById('domainInput').value = '';
-  document.getElementById('nameServerInput').value = '';
-  document.getElementById('usernameInput').value = '';
-  document.getElementById('secretInput').value = '';
-  document.getElementById('dcInput').value = '';
-  document.getElementById('ntlmHashInput').value = '';
+  setInputValue('domainInput', '');
+  setInputValue('nameServerInput', '');
+  setInputValue('usernameInput', '');
+  setInputValue('secretInput', '');
+  setInputValue('dcInput', '');
+  setInputValue('ntlmHashInput', '');
   
   document.getElementById('domainDisplayTop').textContent = '—';
   document.getElementById('nameServerDisplayTop').textContent = '—';

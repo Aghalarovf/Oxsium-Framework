@@ -2,6 +2,8 @@ import os
 import sys
 import json
 import re
+import zipfile
+import io
 from datetime import datetime
 from pathlib import Path
 
@@ -1390,6 +1392,263 @@ def save_saved_user():
         return jsonify({"success": False, "error": f"Failed to save old_users.json: {exc}"}), 500
 
     return jsonify({"success": True, "users": updated}), 200
+
+
+@app.route("/api/browse-folder", methods=["POST"])
+@limiter.limit("30 per minute")
+def browse_folder():
+    """
+    Opens a native Windows folder-picker dialog via tkinter and returns the selected path.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.lift()
+        root.attributes("-topmost", True)
+        root.focus_force()
+        folder = filedialog.askdirectory(title="Select Output Folder", parent=root)
+        root.destroy()
+
+        if not folder:
+            return jsonify({"success": False, "cancelled": True}), 200
+
+        from pathlib import Path as _Path
+        normalised = str(_Path(folder).resolve())
+        return jsonify({"success": True, "path": normalised}), 200
+
+    except Exception as exc:
+        logger.warning("browse-folder error: %s", exc)
+        return jsonify({"success": False, "error": str(exc), "code": 500}), 500
+
+
+@app.route("/api/resolve-folder", methods=["POST"])
+@limiter.limit("30 per minute")
+def resolve_folder():
+    """
+    Helper for the File System Access API path (browser security only exposes
+    the directory *name*, not the full path). We search common locations for a
+    directory matching the given hint name and return the first match.
+    """
+    req  = request.get_json(silent=True) or {}
+    hint = str(req.get("hint", "")).strip()
+
+    if not hint:
+        return jsonify({"success": False, "error": "Missing hint", "code": 400}), 400
+
+    import os as _os
+    search_roots = [
+        _os.path.expanduser("~\\Desktop"),
+        _os.path.expanduser("~\\Documents"),
+        _os.path.expanduser("~\\Downloads"),
+        _os.path.expanduser("~"),
+        "C:\\",
+    ]
+
+    for root_dir in search_roots:
+        candidate = _os.path.join(root_dir, hint)
+        if _os.path.isdir(candidate):
+            return jsonify({"success": True, "path": candidate}), 200
+
+    # Could not resolve — just return the hint so the frontend can still use it
+    return jsonify({"success": False, "error": f"Could not resolve folder: {hint}"}), 200
+
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Agent Generator  (async job system)
+# ---------------------------------------------------------------------------
+
+import subprocess
+import threading
+import uuid as _uuid_mod
+
+_AGENT_GENERATOR_DIR = Path(__file__).parent.parent / "Agent Generator"
+_BUILD_BAT           = _AGENT_GENERATOR_DIR / "Build.bat"
+
+# job_id -> { status, lines, returncode, error }
+_build_jobs: dict = {}
+_build_jobs_lock   = threading.Lock()
+_active_build_id   = None          # only one build at a time
+
+
+def _run_build_job(job_id: str, env: dict) -> None:
+    global _active_build_id
+    try:
+        proc = subprocess.Popen(
+            ["cmd.exe", "/c", str(_BUILD_BAT)],
+            cwd=str(_AGENT_GENERATOR_DIR),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,      # merge stderr into stdout
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        logger.info("generate-agent [%s]: PID %s started", job_id, proc.pid)
+
+        # Stream lines in real-time
+        for raw_line in proc.stdout:
+            line = raw_line.rstrip("\r\n")
+            with _build_jobs_lock:
+                _build_jobs[job_id]["lines"].append(line)
+
+        proc.wait(timeout=300)
+        rc = proc.returncode
+        logger.info("generate-agent [%s]: exit=%s", job_id, rc)
+
+        with _build_jobs_lock:
+            _build_jobs[job_id]["status"]     = "done"
+            _build_jobs[job_id]["returncode"] = rc
+            _build_jobs[job_id]["success"]    = (rc == 0)
+
+    except Exception as exc:
+        logger.exception("generate-agent [%s] error: %s", job_id, exc)
+        with _build_jobs_lock:
+            _build_jobs[job_id]["status"] = "done"
+            _build_jobs[job_id]["error"]  = str(exc)
+            _build_jobs[job_id]["success"] = False
+    finally:
+        global _active_build_id
+        _active_build_id = None
+
+
+@app.route("/api/generate-agent", methods=["POST"])
+@limiter.limit("10 per minute")
+def generate_agent():
+    global _active_build_id
+    req = request.get_json(silent=True) or {}
+
+    fmt         = str(req.get("fmt",      "exe")).strip().lower()
+    platform    = str(req.get("platform", "windows")).strip().lower()
+    output_path = str(req.get("output",   "")).strip()
+
+    if fmt not in ("exe",):
+        return jsonify({"success": False, "error": f"Unsupported format: {fmt}", "code": 400}), 400
+
+    if not _BUILD_BAT.exists():
+        return jsonify({"success": False, "error": f"Build.bat not found at {_BUILD_BAT}", "code": 500}), 500
+
+    with _build_jobs_lock:
+        if _active_build_id and _build_jobs.get(_active_build_id, {}).get("status") == "running":
+            return jsonify({"success": False, "error": "A build is already in progress.", "code": 429}), 429
+
+        job_id = str(_uuid_mod.uuid4())[:8]
+        _build_jobs[job_id] = {"status": "running", "lines": [], "returncode": None, "success": None, "error": None}
+        _active_build_id = job_id
+
+    env = os.environ.copy()
+    env["AG_NAME"]     = str(req.get("name",        "oxsium-agent-001")).strip()
+    env["AG_PLATFORM"] = platform
+    env["AG_FMT"]      = fmt
+    env["AG_OUTPUT"]   = output_path
+    env["AG_KEY"]      = str(req.get("key",          "")).strip()
+    env["AG_PADDING"]  = str(req.get("paddingSize",  "")).strip()
+    env["AG_PAD_UNIT"] = str(req.get("paddingUnit",  "KB")).strip()
+
+    logger.info("generate-agent [%s]: launching %s", job_id, _BUILD_BAT)
+    t = threading.Thread(target=_run_build_job, args=(job_id, env), daemon=True)
+    t.start()
+
+    return jsonify({"success": True, "job_id": job_id}), 200
+
+
+@app.route("/api/agent-build-status", methods=["GET"])
+def agent_build_status():
+    job_id = request.args.get("job_id", "").strip()
+    with _build_jobs_lock:
+        job = _build_jobs.get(job_id)
+    if not job:
+        return jsonify({"success": False, "error": "Unknown job_id", "code": 404}), 404
+
+    offset = int(request.args.get("offset", 0))
+    lines  = job["lines"][offset:]
+
+    return jsonify({
+        "success":    True,
+        "status":     job["status"],       # "running" | "done"
+        "lines":      lines,
+        "offset":     offset + len(lines),
+        "returncode": job["returncode"],
+        "build_success": job["success"],
+        "error":      job["error"],
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# ZIP Uploader  — faylları Domain Object qovluğuna çıxarır
+# ---------------------------------------------------------------------------
+
+@app.route("/api/upload-zip", methods=["POST"])
+@limiter.limit("30 per minute")
+def upload_zip():
+    """
+    Yüklənən ZIP faylını açır və içindəki bütün faylları
+    DOMAIN_OBJECT_DIR (/Main/Domain Object/) qovluğuna yerləşdirir.
+    Agent Generator altındakı Domain Objects yox, Ümumi Domain Object qovluğuna.
+    """
+    if "file" not in request.files:
+        return jsonify({"success": False, "error": "Fayl göndərilməyib.", "code": 400}), 400
+
+    uploaded = request.files["file"]
+
+    if not uploaded.filename:
+        return jsonify({"success": False, "error": "Fayl adı boşdur.", "code": 400}), 400
+
+    if not uploaded.filename.lower().endswith(".zip"):
+        return jsonify({"success": False, "error": "Yalnız ZIP faylı qəbul edilir.", "code": 400}), 400
+
+    try:
+        file_bytes = uploaded.read()
+        if len(file_bytes) == 0:
+            return jsonify({"success": False, "error": "ZIP fayl boşdur.", "code": 400}), 400
+
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            # Zip bomb müdafiəsi: max 500 MB
+            total_size = sum(info.file_size for info in zf.infolist())
+            if total_size > 500 * 1024 * 1024:
+                return jsonify({"success": False, "error": "ZIP faylı çox böyükdür (max 500 MB).", "code": 400}), 400
+
+            DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
+
+            extracted_files = []
+            skipped = []
+
+            for info in zf.infolist():
+                # Qovluqları atla
+                if info.filename.endswith("/"):
+                    continue
+
+                # Path traversal müdafiəsi
+                safe_name = Path(info.filename).name
+                if not safe_name or safe_name.startswith("."):
+                    skipped.append(info.filename)
+                    continue
+
+                dest_path = DOMAIN_OBJECT_DIR / safe_name
+
+                with zf.open(info) as src, open(dest_path, "wb") as dst:
+                    dst.write(src.read())
+
+                extracted_files.append(safe_name)
+                logger.info("upload-zip: %s -> %s", info.filename, dest_path)
+
+        return jsonify({
+            "success": True,
+            "extracted": extracted_files,
+            "skipped": skipped,
+            "destination": str(DOMAIN_OBJECT_DIR),
+            "count": len(extracted_files),
+        }), 200
+
+    except zipfile.BadZipFile:
+        return jsonify({"success": False, "error": "Keçərsiz ZIP faylı.", "code": 400}), 400
+    except Exception as exc:
+        logger.error("upload-zip error: %s", exc)
+        return jsonify({"success": False, "error": str(exc), "code": 500}), 500
 
 
 # ---------------------------------------------------------------------------

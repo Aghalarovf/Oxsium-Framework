@@ -1,7 +1,5 @@
 /* ============================================================
    acl.css — ACL tab specific styles
-              (.acl-wrap, acl-advanced-filters, acl-split,
-               acl-table, acl-sort-btn, acl-detail, acl-loading)
    ============================================================ */
 
 .acl-wrap    { display: flex; flex-direction: column; gap: 15px; height: 100%; }
@@ -10,7 +8,6 @@
 .acl-meta    { font-size: 12px; color: var(--text-dim); }
 .acl-toolbar { display: flex; gap: 10px; align-items: center; }
 
-/* Advanced filters */
 .acl-advanced-filters {
     display: grid;
     grid-template-columns: 220px 220px minmax(260px, 1fr);
@@ -54,7 +51,6 @@
 
 .acl-object-filter-scroll .chip { height: 24px; padding: 0 10px; font-size: 10px; }
 
-/* Table layout */
 .acl-split      { display: flex; gap: 15px; flex: 1; overflow: hidden; min-height: 0; }
 .acl-table-wrap { flex: 2; overflow-y: auto; }
 
@@ -66,14 +62,11 @@
 .acl-col-rights    { flex: 1; min-width: 0; }
 .acl-col-type      { flex: 0 0 110px; }
 
-/* Principal column nudge */
 .acl-col-principal,
 .acl-cell-principal { transform: translateX(5px); }
 
-/* Rights column header */
 .acl-col-rights-head { display: flex; align-items: center; gap: 8px; }
 
-/* Sort button */
 .acl-sort-btn {
     border: 1px solid var(--border);
     background: var(--bg-base);
@@ -90,7 +83,6 @@
 .acl-sort-btn:hover        { color: var(--text-hi); border-color: var(--accent); }
 .acl-sort-btn.active       { color: var(--accent); border-color: var(--accent); background: var(--accent-glow); }
 
-/* Table rows & cells */
 .acl-table-body { display: flex; flex-direction: column; gap: 0; }
 
 .acl-row { display: flex; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background-color 0.15s; border-left: 3px solid transparent; }
@@ -103,70 +95,63 @@
 .acl-cell-rights    { flex: 1; min-width: 0; color: var(--accent); }
 .acl-cell-type      { flex: 0 0 110px; color: var(--text-dim); }
 
-/* Empty / detail / loading */
 .acl-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 40px; text-align: center; color: var(--text-dim); font-size: 12px; }
 
 .acl-detail { flex: 1; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-base); display: flex; flex-direction: column; overflow: hidden; }
 
-.acl-loading { position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; gap: 12px; border-radius: 6px; }
+.acl-loading { position: absolute; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; gap: 12px; border-radius: 6px; }
 .acl-loading span { color: var(--text-sec); font-size: 11px; }
 
-/* Responsive */
 @media (max-width: 1280px) {
     .acl-advanced-filters { grid-template-columns: 1fr 1fr; }
     .acl-object-filter-wrap { grid-column: 1 / -1; }
 }
-/* ============================================================
-   ACL row — Dangerous rights glow (WriteDACL / WriteOwner / GenericAll)
-   JS tərəfindən .acl-row.dangerous class-ı əlavə edilir.
-   users.css-dəki dcsync-row-pulse ilə eyni dil və rəng palitrasında.
-   ============================================================ */
 
+/* Dangerous rights — blood-red glow */
 .acl-row.dangerous {
-    border-left: 3px solid rgba(255, 170, 0, 0.9);
-    background: linear-gradient(90deg, rgba(255, 204, 51, 0.11), rgba(255, 138, 0, 0.10));
+    border-left: 3px solid rgba(204, 26, 26, 0.9);
+    background: linear-gradient(90deg, rgba(180, 20, 20, 0.13), rgba(120, 10, 10, 0.10));
     animation: acl-danger-pulse 1.7s ease-in-out infinite;
     position: relative;
 }
 
 .acl-row.dangerous:hover {
-    background: linear-gradient(90deg, rgba(255, 204, 51, 0.20), rgba(255, 138, 0, 0.18));
-    border-left-color: rgba(255, 170, 0, 1);
+    background: linear-gradient(90deg, rgba(204, 26, 26, 0.22), rgba(150, 15, 15, 0.18));
+    border-left-color: rgba(220, 30, 30, 1);
 }
 
 .acl-row.dangerous.selected {
-    background: linear-gradient(90deg, rgba(255, 204, 51, 0.22), rgba(255, 138, 0, 0.20));
-    border-left-color: rgba(255, 204, 51, 1);
+    background: linear-gradient(90deg, rgba(204, 26, 26, 0.25), rgba(150, 15, 15, 0.20));
+    border-left-color: rgba(220, 50, 50, 1);
 }
 
-/* Rights badge-ləri dangerous row-da altın rəngə keçir */
 .acl-row.dangerous .acl-cell-rights {
-    color: #ffca3a;
-    text-shadow: 0 0 8px rgba(255, 204, 51, 0.45);
+    color: #e03030;
+    text-shadow: 0 0 8px rgba(204, 26, 26, 0.50);
 }
 
-/* Extended Rights top tier — yellow highlight without dangerous glow semantics */
+/* Extended Critical — lighter red highlight */
 .acl-row.extended-critical {
-    border-left: 3px solid rgba(255, 210, 77, 0.95);
-    background: linear-gradient(90deg, rgba(255, 215, 0, 0.16), rgba(255, 174, 0, 0.11));
-    box-shadow: inset 0 0 0 1px rgba(255, 210, 77, 0.12);
+    border-left: 3px solid rgba(180, 60, 60, 0.95);
+    background: linear-gradient(90deg, rgba(160, 40, 40, 0.16), rgba(120, 20, 20, 0.11));
+    box-shadow: inset 0 0 0 1px rgba(180, 60, 60, 0.12);
 }
 
 .acl-row.extended-critical:hover {
-    background: linear-gradient(90deg, rgba(255, 215, 0, 0.22), rgba(255, 174, 0, 0.15));
+    background: linear-gradient(90deg, rgba(180, 40, 40, 0.22), rgba(140, 20, 20, 0.15));
 }
 
 .acl-row.extended-critical.selected {
-    background: linear-gradient(90deg, rgba(255, 215, 0, 0.20), rgba(255, 174, 0, 0.14));
-    border-left-color: rgba(255, 225, 102, 1);
+    background: linear-gradient(90deg, rgba(180, 40, 40, 0.22), rgba(140, 20, 20, 0.16));
+    border-left-color: rgba(200, 80, 80, 1);
 }
 
 .acl-row.extended-critical .acl-cell-rights {
-    color: #ffd54d;
-    text-shadow: 0 0 10px rgba(255, 215, 0, 0.38);
+    color: #c85050;
+    text-shadow: 0 0 10px rgba(180, 40, 40, 0.40);
 }
 
 @keyframes acl-danger-pulse {
-    0%, 100% { box-shadow: inset 0 0 0 0 rgba(255, 170, 0, 0); }
-    50%       { box-shadow: inset 0 0 0 999px rgba(255, 170, 0, 0.07); }
+    0%, 100% { box-shadow: inset 0 0 0 0 rgba(204, 26, 26, 0); }
+    50%       { box-shadow: inset 0 0 0 999px rgba(204, 26, 26, 0.07); }
 }

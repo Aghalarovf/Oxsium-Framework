@@ -4,7 +4,6 @@
                    shared overrides for OUs/GPOs/Groups/Trusts/ACL
    ============================================================ */
 
-/* COMPUTERS TAB */
 .computers-wrap { display: flex; flex-direction: column; height: 100%; gap: 14px; }
 .computers-header { flex-shrink: 0; }
 .computers-title-row { display: flex; align-items: baseline; gap: 14px; margin-bottom: 12px; }
@@ -12,7 +11,6 @@
 .computers-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 .computers-split { display: flex; gap: 0; flex: 1; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); position: relative; min-height: 0; }
-
 .computers-table-wrap { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 .c-table-head { display: flex; align-items: center; padding: 0 16px; height: 38px; background: var(--bg-panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
@@ -28,23 +26,24 @@
 .c-row { display: flex; align-items: center; padding: 0 16px; height: 46px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; position: relative; }
 .c-row:hover { background: var(--bg-panel); border-left: 2px solid var(--border-hi); }
 
-.c-row.dc-row         { background: rgba(0, 180, 255, 0.1);  border-left: 2px solid rgba(0, 212, 255, 0.55); }
-.c-row.dc-row:hover   { background: rgba(0, 180, 255, 0.17); border-left: 2px solid var(--accent); }
+/* DC row — muted grey-blue tint */
+.c-row.dc-row         { background: rgba(80, 80, 90, 0.13); border-left: 2px solid rgba(120, 120, 140, 0.55); }
+.c-row.dc-row:hover   { background: rgba(80, 80, 90, 0.22); border-left: 2px solid rgba(160, 160, 180, 0.8); }
 
-.c-row.unconstrained-row       { border-left: 2px solid rgba(255,68,85,0.75); background: rgba(255,68,85,0.09); }
-.c-row.unconstrained-row:hover { background: rgba(255,68,85,0.15); border-left: 2px solid rgba(255,68,85,0.95); }
+/* Unconstrained — blood-red */
+.c-row.unconstrained-row       { border-left: 2px solid rgba(204,26,26,0.75); background: rgba(180,20,20,0.09); }
+.c-row.unconstrained-row:hover { background: rgba(204,26,26,0.15); border-left: 2px solid rgba(204,26,26,0.95); }
 
 .c-row.selected            { background: var(--accent-glow); border-left: 2px solid var(--accent); }
 .c-row.selected .c-name    { color: var(--accent); }
 
 .c-row.dcsync {
-   border-left: 2px solid rgba(255,170,0,0.9);
-   background: linear-gradient(90deg, rgba(255,204,51,0.11), rgba(255,138,0,0.10));
+   border-left: 2px solid rgba(200,30,30,0.9);
+   background: linear-gradient(90deg, rgba(180,20,20,0.11), rgba(120,10,10,0.09));
 }
-
 .c-row.dcsync:hover {
-   background: linear-gradient(90deg, rgba(255,204,51,0.20), rgba(255,138,0,0.18));
-   border-left-color: rgba(255,170,0,1);
+   background: linear-gradient(90deg, rgba(204,26,26,0.20), rgba(150,15,15,0.17));
+   border-left-color: rgba(220,30,30,1);
 }
 
 .c-name {
@@ -122,7 +121,7 @@
 .computers-loading {
    position: absolute;
    inset: 0;
-   background: rgba(6,10,14,0.85);
+   background: rgba(5,5,5,0.88);
    display: flex;
    flex-direction: column;
    align-items: center;
@@ -163,9 +162,9 @@
 
 .ou-detail, .gpo-detail, .group-detail, .trust-detail, .acl-detail { width: 340px; flex-shrink: 0; border-left: 1px solid var(--border); border-radius: 0; background: var(--bg-base); display: flex; flex-direction: column; overflow: hidden; animation: slide-in-right 0.2s cubic-bezier(0.4,0,0.2,1); }
 
-.ous-loading, .gpos-loading, .groups-loading, .trusts-loading, .acl-loading { position: absolute; inset: 0; background: rgba(6,10,14,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-sec); font-size: 11px; font-family: var(--ui); letter-spacing: 1px; text-transform: uppercase; z-index: 10; backdrop-filter: blur(2px); border-radius: 6px; }
+.ous-loading, .gpos-loading, .groups-loading, .trusts-loading, .acl-loading { position: absolute; inset: 0; background: rgba(5,5,5,0.88); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-sec); font-size: 11px; font-family: var(--ui); letter-spacing: 1px; text-transform: uppercase; z-index: 10; backdrop-filter: blur(2px); border-radius: 6px; }
 
-/* Square corners for OUs/GPOs/Groups/Trusts/ACL */
+/* Square corners */
 #tab-ous .search-input, #tab-gpo .search-input, #tab-groups .search-input, #tab-acl .search-input, #tab-trusts .search-input,
 .ous-split, .gpos-split, .groups-split, .acl-split, .trusts-split,
 .o-table-head, .g-table-head, .gr-table-head, .tr-table-head, .acl-table-head,
