@@ -1608,7 +1608,8 @@ def get_domain_gpos(ip, domain, username, password, config):
                     "sysvol_acl": [], "parse_errors": [],
                 }
 
-        return {
+        import json as _json
+        result = {
             "success":             True,
             "count":               len(gpos),
             "sysvol_available":    sysvol_available,
@@ -1617,6 +1618,37 @@ def get_domain_gpos(ip, domain, username, password, config):
             "inheritance_blocked": inheritance_blocked,
             "ou_inheritance":      ou_inheritance,
         }
+
+        # ── domain_gpos.jsonl-a yaz ──────────────────────────────────────────
+        try:
+            output_path = os.path.join(
+                str(config.DOMAIN_OBJECT_DIR), "domain_gpos.jsonl"
+            )
+            with open(output_path, "w", encoding="utf-8") as f:
+                # Meta sətir: success, count, sysvol_available
+                meta = {
+                    "success":          result["success"],
+                    "count":            result["count"],
+                    "sysvol_available": result["sysvol_available"],
+                }
+                f.write(_json.dumps(meta, ensure_ascii=False, default=str) + "\n")
+                # Hər GPO ayrı sətirdə
+                for gpo in result["gpos"]:
+                    f.write(_json.dumps(gpo, ensure_ascii=False, default=str) + "\n")
+                # all_cpasswords — tək sətir (ayrıca axtarış üçün)
+                if result["all_cpasswords"]:
+                    cp_line = {"all_cpasswords": result["all_cpasswords"]}
+                    f.write(_json.dumps(cp_line, ensure_ascii=False, default=str) + "\n")
+                # inheritance_blocked + ou_inheritance — tək sətir
+                inh_line = {
+                    "inheritance_blocked": result["inheritance_blocked"],
+                    "ou_inheritance":      result["ou_inheritance"],
+                }
+                f.write(_json.dumps(inh_line, ensure_ascii=False, default=str) + "\n")
+        except Exception as write_exc:
+            result["json_export_error"] = str(write_exc)
+
+        return result
 
     except LDAPException as e:
         return {"success": False, "error": f"LDAP error: {e}", "count": 0, "gpos": []}

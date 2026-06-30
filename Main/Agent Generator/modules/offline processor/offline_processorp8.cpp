@@ -1,28 +1,3 @@
-// ─── offline_processorp8.cpp ─────────────────────────────────────────────────
-// SECTION 35  parse_raw_gpo    — raw_gpos.ndjson → ProcessedGPO
-//             All transformation logic lives here. GPOCollector is a pure
-//             extractor that writes verbatim LDAP data; this file does:
-//               • hex → binary decode for objectGUID, ntSecurityDescriptor, objectSid
-//               • GUID binary → UUID string
-//               • SD binary  → isaclprotected + owner_sid
-//               • objectSid binary → "S-1-5-21-..." string (domain_sid)
-//               • DN extraction of "name" when LDAP attr was absent
-//               • generalized-time → ISO-8601 conversion
-//               • versionNumber integer split → user_version / computer_version
-//               • flags integer → user_settings_disabled / computer_settings_disabled
-//               • gPLink raw records → linked_containers / enforced / link_disabled
-//               • extension GUID strings → [{guid,name}] JSON arrays
-//               • high-value detection
-//               • risk_controls list
-//               • owner_sid → owner_name via lookup tables
-// SECTION 36  analyze_gpo_risk — risk scoring
-// SECTION 37  gpo_to_json      — serialization
-// SECTION 38  load_and_process_gpos
-// SECTION 39  process_gpos + process()
-//
-//  Input : raw_cache/raw_gpos.ndjson   (GPOCollector pure-extract output)
-//  Output: Domain Objects/domain_gpos.ndjson
-// ─────────────────────────────────────────────────────────────────────────────
 #include "offline_processor.h"
 #include <fstream>
 #include <sstream>
@@ -33,12 +8,6 @@
 #include <set>
 #include <iomanip>
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  Local helpers  (file-scope, not exposed in header)
-// ═════════════════════════════════════════════════════════════════════════════
-
-// ── hex_to_bytes ─────────────────────────────────────────────────────────────
-// "0102ff" → "\x01\x02\xff"
 static std::string hex_to_bytes(const std::string& hex) {
     std::string out;
     out.reserve(hex.size() / 2);
@@ -55,7 +24,6 @@ static std::string hex_to_bytes(const std::string& hex) {
     return out;
 }
 
-// ── sid_bytes_to_string ───────────────────────────────────────────────────────
 static std::string sid_bytes_to_string(const std::string& raw) {
     if (raw.size() < 8) return "";
     const auto* b = reinterpret_cast<const unsigned char*>(raw.data());
@@ -77,8 +45,6 @@ static std::string sid_bytes_to_string(const std::string& raw) {
     return o.str();
 }
 
-// ── guid_bytes_to_string ──────────────────────────────────────────────────────
-// 16-byte little-endian binary GUID → "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
 static std::string guid_bytes_to_string(const std::string& raw) {
     if (raw.size() != 16) return "";
     const auto* b = reinterpret_cast<const unsigned char*>(raw.data());
@@ -96,8 +62,6 @@ static std::string guid_bytes_to_string(const std::string& raw) {
     return o.str();
 }
 
-// ── parse_isaclprotected ──────────────────────────────────────────────────────
-// SE_DACL_PROTECTED = bit 0x1000 in the Control field (bytes 2-3 LE) of the SD.
 static bool parse_isaclprotected(const std::string& sd) {
     if (sd.size() < 4) return false;
     const auto* b = reinterpret_cast<const unsigned char*>(sd.data());
@@ -105,8 +69,6 @@ static bool parse_isaclprotected(const std::string& sd) {
     return (ctrl & 0x1000) != 0;
 }
 
-// ── parse_sd_owner ────────────────────────────────────────────────────────────
-// OffsetOwner is at bytes 4-7 (LE) in the SD binary.
 static std::string parse_sd_owner(const std::string& sd) {
     if (sd.size() < 20) return "";
     const auto* b = reinterpret_cast<const unsigned char*>(sd.data());
@@ -118,8 +80,6 @@ static std::string parse_sd_owner(const std::string& sd) {
     return sid_bytes_to_string(sd.substr(off));
 }
 
-// ── generalized_time_to_iso ───────────────────────────────────────────────────
-// "20260101100000.0Z" → "2026-01-01T10:00:00Z"
 static std::string generalized_time_to_iso(const std::string& gt) {
     if (gt.size() < 14) return gt;
     for (int i = 0; i < 14; ++i)
@@ -538,11 +498,11 @@ std::string OfflineProcessor::gpo_to_json(const ProcessedGPO& g) const
 bool OfflineProcessor::load_and_process_gpos(const std::string& raw_path,
                                               const std::string& out_path)
 {
-    log_info("[OfflineProcessor] Reading raw_gpos.ndjson: " + raw_path);
+    log_info("[OfflineProcessor] Reading raw_gpos.jsonl: " + raw_path);
 
     auto raw_lines = read_ndjson_lines(raw_path);
     if (raw_lines.empty()) {
-        log_warn("[OfflineProcessor] raw_gpos.ndjson empty or missing: " + raw_path);
+        log_warn("[OfflineProcessor] raw_gpos.jsonl empty or missing: " + raw_path);
         return false;
     }
 
@@ -595,13 +555,13 @@ bool OfflineProcessor::load_and_process_gpos(const std::string& raw_path,
 bool OfflineProcessor::process_gpos(const OfflineProcessorOptions& opts)
 {
     fs::create_directories(opts.output_dir);
-    load_raw_users_lookup (opts.raw_dir + "/raw_users.ndjson");
-    load_raw_groups_lookup(opts.raw_dir + "/raw_groups.ndjson");
+    load_raw_users_lookup (opts.raw_dir + "/raw_users.jsonl");
+    load_raw_groups_lookup(opts.raw_dir + "/raw_groups.jsonl");
     if (!opts.domain_name.empty()) domain_name_ = opts.domain_name;
     if (domain_name_.empty()) domain_name_ = base_dn_to_domain(base_dn_);
-    const std::string& ext8 = opts.output_ext.empty() ? "ndjson" : opts.output_ext;
+    const std::string& ext8 = opts.output_ext.empty() ? "jsonl" : opts.output_ext;
     return load_and_process_gpos(
-        opts.raw_dir    + "/raw_gpos.ndjson",
+        opts.raw_dir    + "/raw_gpos.jsonl",
         opts.output_dir + "/domain_gpos." + ext8);
 }
 
@@ -617,16 +577,16 @@ bool OfflineProcessor::process(const OfflineProcessorOptions& opts)
     if (domain_name_.empty()) domain_name_ = base_dn_to_domain(base_dn_);
 
     bool all_ok = true;
-    const std::string& ext = opts.output_ext.empty() ? "ndjson" : opts.output_ext;
-    all_ok &= load_and_process_users    (opts.raw_dir + "/raw_users.ndjson",     opts.output_dir + "/domain_users."     + ext);
-    all_ok &= load_and_process_groups   (opts.raw_dir + "/raw_groups.ndjson",    opts.output_dir + "/domain_groups."    + ext);
-    load_and_process_aces               (opts.raw_dir + "/raw_aces.ndjson",      opts.output_dir + "/domain_aces."      + ext);
-    all_ok &= load_and_process_computers(opts.raw_dir + "/raw_computers.ndjson", opts.output_dir + "/domain_computers." + ext);
-    all_ok &= load_and_process_ous      (opts.raw_dir + "/raw_ous.ndjson",       opts.output_dir + "/domain_ous."       + ext);
-    load_and_process_gpos               (opts.raw_dir + "/raw_gpos.ndjson",      opts.output_dir + "/domain_gpos."      + ext);
+    const std::string& ext = opts.output_ext.empty() ? "jsonl" : opts.output_ext;
+    all_ok &= load_and_process_users    (opts.raw_dir + "/raw_users.jsonl",     opts.output_dir + "/domain_users."     + ext);
+    all_ok &= load_and_process_groups   (opts.raw_dir + "/raw_groups.jsonl",    opts.output_dir + "/domain_groups."    + ext);
+    load_and_process_aces               (opts.raw_dir + "/raw_aces.jsonl",      opts.output_dir + "/domain_aces."      + ext);
+    all_ok &= load_and_process_computers(opts.raw_dir + "/raw_computers.jsonl", opts.output_dir + "/domain_computers." + ext);
+    all_ok &= load_and_process_ous      (opts.raw_dir + "/raw_ous.jsonl",       opts.output_dir + "/domain_ous."       + ext);
+    load_and_process_gpos               (opts.raw_dir + "/raw_gpos.jsonl",      opts.output_dir + "/domain_gpos."      + ext);
     process_network                     (opts);
-    all_ok &= load_and_process_cert_templates(opts.raw_dir + "/raw_cert_templates.ndjson", opts.output_dir + "/domain_cert_templates." + ext);
-    all_ok &= load_and_process_pki_objects   (opts.raw_dir + "/raw_pki_objects.ndjson",    opts.output_dir + "/domain_pki_objects."    + ext);
+    all_ok &= load_and_process_cert_templates(opts.raw_dir + "/raw_cert_templates.jsonl", opts.output_dir + "/domain_cert_templates." + ext);
+    all_ok &= load_and_process_pki_objects   (opts.raw_dir + "/raw_pki_objects.jsonl",    opts.output_dir + "/domain_pki_objects."    + ext);
     all_ok &= process_domaininfo(opts);
     process_trusts              (opts);
     return all_ok;

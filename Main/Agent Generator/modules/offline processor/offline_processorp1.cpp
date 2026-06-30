@@ -1,9 +1,3 @@
-// ─── offline_processorp1.cpp ─────────────────────────────────────────────────
-// SECTION 1  Generic string / JSON helpers
-// SECTION 2  Minimal JSON parser
-// SECTION 3  read_ndjson_lines  (NDJSON) + read_json_array (legacy JSON, compat)
-// SECTION 4  Lookup tables  — reads .ndjson files
-// ─────────────────────────────────────────────────────────────────────────────
 #include "offline_processor.h"
 #include <fstream>
 #include <sstream>
@@ -130,12 +124,6 @@ std::string OfflineProcessor::json_rights_arr(const std::vector<std::string>& v)
 }
 
 
-// =============================================================================
-//  Output format helpers
-//  is_json_ext  : returns true if out_path ends with ".json"
-//  write_objects: writes rows as NDJSON or pretty JSON array based on extension
-// =============================================================================
-
 bool OfflineProcessor::is_json_ext(const std::string& out_path) {
     if (out_path.size() < 5) return false;
     std::string tail = out_path.substr(out_path.size() - 5);
@@ -144,11 +132,6 @@ bool OfflineProcessor::is_json_ext(const std::string& out_path) {
     return tail == ".json";
 }
 
-// Writes rows to `out` in the format determined by out_path extension.
-//
-//  NDJSON (default):    one compact JSON object per line
-//  JSON   (.json ext):  pretty-printed array  [{ ... }, { ... }]
-//
 bool OfflineProcessor::write_objects(std::ofstream& out,
                                      const std::vector<std::string>& rows,
                                      const std::string& out_path,
@@ -331,18 +314,6 @@ std::vector<std::string> OfflineProcessor::jp_arr(const std::string& json,
     return result;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  SECTION 3 — read_ndjson_lines  +  read_json_array (legacy format compat)
-//
-//  read_ndjson_lines:
-//    Reads each line as a separate JSON object (NDJSON / JSON Lines).
-//    Empty lines and comment lines starting with '#' are skipped.
-//    Used for all collector outputs (.ndjson).
-//
-//  read_json_array:
-//    Reads the legacy wrapped-JSON format ("key": [...]).
-//    Kept for backward compatibility; no longer called for raw files.
-// ═════════════════════════════════════════════════════════════════════════════
 
 std::vector<std::string> OfflineProcessor::read_ndjson_lines(const std::string& path)
 {
@@ -415,10 +386,10 @@ std::vector<std::string> OfflineProcessor::read_json_array(const std::string& pa
 // ═════════════════════════════════════════════════════════════════════════════
 //  SECTION 4 — Lookup tables  (NDJSON version)
 //
-//  All raw files are now in .ndjson format:
-//    raw_users.ndjson  — each line is a user JSON object
-//    raw_groups.ndjson — each line is a group JSON object
-//    raw_aces.ndjson   — each line is an ACE JSON object
+//  All raw files are in .jsonl format:
+//    raw_users.jsonl  — each line is a user JSON object
+//    raw_groups.jsonl — each line is a group JSON object
+//    raw_aces.jsonl   — each line is an ACE JSON object
 //
 //  Field name mapping (collector → offline processor):
 //    UserCollector:
@@ -449,7 +420,7 @@ std::vector<std::string> OfflineProcessor::read_json_array(const std::string& pa
 bool OfflineProcessor::load_raw_users_lookup(const std::string& path) {
     auto objs = read_ndjson_lines(path);
     if (objs.empty()) {
-        log_warn("[OfflineProcessor] raw_users.ndjson empty or not found: " + path);
+        log_warn("[OfflineProcessor] raw_users.jsonl empty or not found: " + path);
         return false;
     }
 
@@ -496,7 +467,7 @@ bool OfflineProcessor::load_raw_users_lookup(const std::string& path) {
 bool OfflineProcessor::load_raw_groups_lookup(const std::string& path) {
     auto objs = read_ndjson_lines(path);
     if (objs.empty()) {
-        log_warn("[OfflineProcessor] raw_groups.ndjson empty or not found: " + path);
+        log_warn("[OfflineProcessor] raw_groups.jsonl empty or not found: " + path);
         return false;
     }
 
@@ -621,13 +592,13 @@ bool OfflineProcessor::load_raw_groups_lookup(const std::string& path) {
 }
 
 // ── load_raw_aces_lookup ──────────────────────────────────────────────────────
-//  Stores only domain root + AdminSDHolder ACEs from raw_aces.ndjson.
+//  Stores only domain root + AdminSDHolder ACEs from raw_aces.jsonl.
 //  Each line: {"target_dn":"...", "target_type":"...", "principal_sid":"...",
 //              "ace_qualifier":"Allow", "object_ace_type":"...", "is_inherited":false, ...}
 bool OfflineProcessor::load_raw_aces_lookup(const std::string& path) {
     auto lines = read_ndjson_lines(path);
     if (lines.empty()) {
-        log_warn("[OfflineProcessor] raw_aces.ndjson not found: " + path +
+        log_warn("[OfflineProcessor] raw_aces.jsonl not found: " + path +
                  " — ACE-based admin rules (3,4,6,7,9) will be disabled.");
         return false;
     }
@@ -651,6 +622,9 @@ bool OfflineProcessor::load_raw_aces_lookup(const std::string& path) {
         bool is_domain_root   = (!base_dn_.empty() && udn == upper(base_dn_));
         std::string ashdn     = "CN=ADMINSDHOLDER,CN=SYSTEM," + upper(base_dn_);
         bool is_adminsdholder = (udn == ashdn);
+        // Configuration NC: "CN=CONFIGURATION,DC=..." — also a DCSync ACE source
+        std::string config_nc_dn = "CN=CONFIGURATION," + upper(base_dn_);
+        bool is_config_nc     = (!base_dn_.empty() && udn == config_nc_dn);
 
         // DC object: target_type == "computer" and found in dn_to_class_ as "computer"
         // Machines under OU=Domain Controllers are DCs.
@@ -677,7 +651,7 @@ bool OfflineProcessor::load_raw_aces_lookup(const std::string& path) {
             }
         }
 
-        if (!is_domain_root && !is_adminsdholder && !is_dc_object) continue;
+        if (!is_domain_root && !is_adminsdholder && !is_dc_object && !is_config_nc) continue;
 
         // Convert ACE to RawAceEntry
         RawAceEntry ace;
@@ -686,7 +660,7 @@ bool OfflineProcessor::load_raw_aces_lookup(const std::string& path) {
 
         // rights_display → direct mask conversion is not possible,
         // mask is not needed here — ace_has_dangerous_right checks the mask.
-        // AceCollector raw_aces.ndjson has no mask, but we build a
+        // AceCollector raw_aces.jsonl has no mask, but we build a
         // heuristic mask from rights_display:
         const std::string& rd = jp_str(line, "rights_display");
         unsigned int mask = 0;
@@ -699,7 +673,9 @@ bool OfflineProcessor::load_raw_aces_lookup(const std::string& path) {
         else if (rd == "Control-Access"     ||
                  rd == "AllExtendedRights"  ||
                  rd == "All-Extended-Rights"||
-                 rd == "ExtendedRight")              mask = 0x00000100;
+                 rd == "ExtendedRight"      ||
+                 rd.find("DS-Replication-") != std::string::npos)
+                                                     mask = 0x00000100;
         else if (rd == "GenericWrite")               mask = OfflineAceRight::ACE_GENERIC_WRITE;
         else if (rd == "GenericRead")                mask = 0x00020094;
         else {
@@ -723,6 +699,7 @@ bool OfflineProcessor::load_raw_aces_lookup(const std::string& path) {
 
         if (is_domain_root)   domain_root_aces_.push_back(ace);
         if (is_adminsdholder) adminsdholder_aces_.push_back(ace);
+        if (is_config_nc)     config_nc_aces_.push_back(ace);
         if (is_dc_object)     dc_object_aces_[udn].push_back(ace);
     }
 
@@ -730,6 +707,8 @@ bool OfflineProcessor::load_raw_aces_lookup(const std::string& path) {
            std::to_string(domain_root_aces_.size()) +
            " ACEs, AdminSDHolder=" +
            std::to_string(adminsdholder_aces_.size()) +
+           " ACEs, Config NC=" +
+           std::to_string(config_nc_aces_.size()) +
            " ACEs, DC objects=" +
            std::to_string(dc_object_aces_.size()) + " objects.");
     return true;
@@ -737,10 +716,10 @@ bool OfflineProcessor::load_raw_aces_lookup(const std::string& path) {
 
 // ── build_lookup_tables ───────────────────────────────────────────────────────
 bool OfflineProcessor::build_lookup_tables(const std::string& raw_dir) {
-    // .ndjson files
-    load_raw_users_lookup (raw_dir + "/raw_users.ndjson");
-    bool groups_ok = load_raw_groups_lookup(raw_dir + "/raw_groups.ndjson");
-    bool aces_ok   = load_raw_aces_lookup  (raw_dir + "/raw_aces.ndjson");
+    // .jsonl files
+    load_raw_users_lookup (raw_dir + "/raw_users.jsonl");
+    bool groups_ok = load_raw_groups_lookup(raw_dir + "/raw_groups.jsonl");
+    bool aces_ok   = load_raw_aces_lookup  (raw_dir + "/raw_aces.jsonl");
     (void)aces_ok;
     return groups_ok;  // groups is mandatory, aces is optional
 }

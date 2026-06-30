@@ -1,8 +1,7 @@
 /* ============================================================
-   sidebar.css — .sidebar, nav-item, atk-item, badge
+   sidebar.css — Gold Edition
    ============================================================ */
 
-/* LEFT SIDEBAR */
 .sidebar {
     width: var(--sidebar-w);
     background: var(--bg-base);
@@ -10,6 +9,18 @@
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    position: relative;
+}
+
+/* Sağ tərəfdə nazik altın xətt */
+.sidebar::after {
+    content: '';
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 1px;
+    background: linear-gradient(180deg, transparent, var(--accent) 30%, var(--accent) 70%, transparent);
+    opacity: 0.18;
+    pointer-events: none;
 }
 
 .sidebar-section {
@@ -23,7 +34,7 @@
     font-weight: 700;
     letter-spacing: 2.2px;
     text-transform: uppercase;
-    color: var(--text-sec);
+    color: var(--accent-dim);
     padding: 0 14px 7px;
 }
 
@@ -41,30 +52,28 @@
     transition: all 0.15s;
     border-left: 2px solid transparent;
     position: relative;
-    text-shadow: 0 0 0 transparent;
 }
 
 .nav-item:hover {
     color: var(--text-hi);
-    background: linear-gradient(90deg, rgba(0,212,255,0.15), rgba(0,212,255,0.05));
-    border-left-color: rgba(0,212,255,0.75);
-    text-shadow: 0 0 8px rgba(0,212,255,0.45);
-    box-shadow: inset 0 0 0 1px rgba(0,212,255,0.2);
-    transform: translateX(1px);
+    background: linear-gradient(90deg, rgba(240,192,48,0.12), rgba(240,192,48,0.04));
+    border-left-color: rgba(240,192,48,0.7);
+    text-shadow: 0 0 8px rgba(240,192,48,0.35);
 }
 
 .nav-item.active {
     color: var(--accent);
     background: var(--accent-glow);
     border-left-color: var(--accent);
+    text-shadow: 0 0 10px rgba(240,192,48,0.30);
 }
 
 .nav-item.locked       { color: var(--text-dim); cursor: not-allowed; }
-.nav-item.locked:hover { background: none; color: var(--text-dim); }
+.nav-item.locked:hover { background: none; color: var(--text-dim); border-left-color: transparent; text-shadow: none; }
 
 .nav-icon {
     width: 17px; height: 17px;
-    opacity: 0.8;
+    opacity: 0.7;
     flex-shrink: 0;
 }
 
@@ -87,11 +96,7 @@
     background: var(--accent-glow);
 }
 
-.lock-icon {
-    margin-left: auto;
-    width: 11px; height: 11px;
-    opacity: 0.3;
-}
+.lock-icon { margin-left: auto; width: 11px; height: 11px; opacity: 0.25; }
 
 .sidebar-footer {
     margin-top: auto;
@@ -99,13 +104,9 @@
     border-top: 1px solid var(--border);
 }
 
-.sidebar-version {
-    font-size: 10px;
-    color: var(--text-dim);
-    letter-spacing: 0.5px;
-}
+.sidebar-version { font-size: 10px; color: var(--text-dim); letter-spacing: 0.5px; }
 
-/* Sidebar Attack Modules */
+/* Attack Modules */
 .sidebar-attacks {
     flex: 1;
     display: flex;
@@ -126,7 +127,7 @@
 }
 
 .atk-item:hover {
-    background: rgba(16, 21, 32, 0.95);
+    background: rgba(12, 10, 2, 0.95);
     transform: translateX(1px);
     border-left-color: var(--accent);
 }
@@ -150,7 +151,7 @@
     text-overflow: ellipsis;
 }
 
-.atk-item:hover .atk-name { color: var(--text-pri); }
+.atk-item:hover .atk-name { color: var(--accent); }
 
 .atk-count {
     font-family: var(--mono);
@@ -162,27 +163,24 @@
     letter-spacing: 0.3px;
 }
 
-.atk-count.accent { color: var(--accent);    border-color: var(--accent-dim);  background: var(--accent-glow); }
-.atk-count.red    { color: var(--red);       border-color: #662233;            background: rgba(255,68,85,0.08); }
-.atk-count.amber  { color: var(--amber);     border-color: var(--amber-dim);   background: rgba(255,170,0,0.06); }
-.atk-count.purple { color: #a78bfa;          border-color: #5b3ea8;            background: rgba(167,139,250,0.08); }
-.atk-count.orange { color: #fb923c;          border-color: #7c3d1e;            background: rgba(251,146,60,0.08); }
+.atk-count.accent { color: var(--accent);   border-color: var(--accent-dim);  background: var(--accent-glow); }
+.atk-count.red    { color: #c07820;          border-color: #5a3808;            background: rgba(220,140,20,0.08); }
+.atk-count.amber  { color: var(--amber);     border-color: var(--amber-dim);   background: rgba(240,192,48,0.06); }
+.atk-count.purple { color: #f0b840;          border-color: #8a6a18;            background: rgba(240,190,60,0.08); }
+.atk-count.orange { color: #d4a040;          border-color: #7a4e10;            background: rgba(212,160,64,0.08); }
 .atk-count.dim    { color: var(--text-dim);  border-color: var(--border);      background: transparent; }
 
 /* Badges */
 .badge {
     font-size: 10px;
-    color: var(--text-pri);
     font-family: var(--head);
-    background: rgba(255,170,0,0.12);
-    border: 1px solid var(--amber-dim);
     border-radius: 4px;
     padding: 5px 10px;
     display: inline-block;
     white-space: nowrap;
 }
 
-.badge.amber  { background: rgba(255,170,0,0.12);  border-color: var(--amber-dim);  color: var(--amber); }
-.badge.red    { background: rgba(255,68,85,0.1);   border-color: #662233;           color: var(--red); }
-.badge.green  { background: rgba(0,255,136,0.06);  border-color: var(--green-dim);  color: var(--green); }
-.badge.accent { background: var(--accent-glow);    border-color: var(--accent-dim); color: var(--accent); }
+.badge.amber  { background: rgba(240,192,48,0.10); border: 1px solid var(--amber-dim);  color: var(--amber); }
+.badge.red    { background: rgba(220,140,20,0.10); border: 1px solid #5a3808;           color: #c07820; }
+.badge.green  { background: rgba(200,170,60,0.08); border: 1px solid var(--green-dim);  color: var(--green); }
+.badge.accent { background: var(--accent-glow);    border: 1px solid var(--accent-dim); color: var(--accent); }

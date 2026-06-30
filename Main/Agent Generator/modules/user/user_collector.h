@@ -18,7 +18,7 @@ struct UserCollectorOptions {
 // ─────────────────────────────────────────────────────────────────────────────
 //  UserCollector  — Phase 1 / Extract
 //
-//  Output schema (raw_users.ndjson) — hər sətir bir user:
+//  Output schema (raw_users.jsonl) — hər sətir bir user:
 //
 //  {
 //    "username"              : "Administrator",
@@ -61,7 +61,7 @@ struct UserCollectorOptions {
 //    "generated_at"            : "2026-05-29T07:50:43Z"
 //  }
 //
-//  Bu schema domain_users.ndjson ilə uyğundur.
+//  Bu schema domain_users.jsonl ilə uyğundur.
 //  Admin analizi (is_admin, admin_rules) OfflineProcessor tərəfindən
 //  group membership-dən hesablanır.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,8 +78,8 @@ private:
 
     std::vector<std::string> required_attrs() const;
 
-    // Bir LDAP entry-ni NDJSON sətrinə çevirir
-    std::string user_to_ndjson(const LDAPEngine::AttrMap& entry,
+    // Bir LDAP entry-ni JSONL sətrinə çevirir
+    std::string user_to_jsonl(const LDAPEngine::AttrMap& entry,
                                const std::string& generated_at) const;
 
     // userAccountControl bitmask decoderlar

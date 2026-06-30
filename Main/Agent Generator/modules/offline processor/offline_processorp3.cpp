@@ -6,12 +6,13 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <ctime>
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  SECTION 9 — parse_raw_user
-//  Converts one user JSON object from raw_users.ndjson into a ProcessedUser.
+//  Converts one user JSON object from raw_users.jsonl into a ProcessedUser.
 //
-//  UserCollector field names (ndjson):
+//  UserCollector field names (jsonl):
 //    "username"        → sAMAccountName
 //    "dn"              → distinguishedName
 //    "display_name"    → displayName
@@ -79,12 +80,28 @@ ProcessedUser OfflineProcessor::parse_raw_user(const std::string& obj) const {
         if (pls == "0") u.must_change_pwd = true;
     }
 
-    // Timestamps — collector has already written in ISO format
-    u.when_created = jp_str(obj, "when_created");
-    u.when_changed = jp_str(obj, "when_changed");
-    u.last_logon   = jp_str(obj, "last_logon");
-    u.pwd_last_set = jp_str(obj, "pwd_last_set");
-    u.bad_pwd_time = jp_str(obj, "bad_pwd_time");
+    // Timestamps — collector may write generalized-time (20230415T123045.0Z) or
+    // ISO-8601 with +00:00 timezone.  Normalise both to "…Z" (Python convention).
+    auto norm_ts = [](const std::string& ts) -> std::string {
+        if (ts.empty()) return ts;
+        // "+00:00" → "Z"
+        if (ts.size() >= 6 && ts.substr(ts.size() - 6) == "+00:00")
+            return ts.substr(0, ts.size() - 6) + "Z";
+        return ts;
+    };
+    {
+        std::string wc = jp_str(obj, "when_created");
+        std::string iso = generalized_time_to_iso(wc);
+        u.when_created = iso.empty() ? norm_ts(wc) : iso;
+    }
+    {
+        std::string wc = jp_str(obj, "when_changed");
+        std::string iso = generalized_time_to_iso(wc);
+        u.when_changed = iso.empty() ? norm_ts(wc) : iso;
+    }
+    u.last_logon   = norm_ts(jp_str(obj, "last_logon"));
+    u.pwd_last_set = norm_ts(jp_str(obj, "pwd_last_set"));
+    u.bad_pwd_time = norm_ts(jp_str(obj, "bad_pwd_time"));
 
     // account_expires
     {
@@ -142,12 +159,25 @@ ProcessedUser OfflineProcessor::parse_raw_user(const std::string& obj) const {
     u.not_delegated                  = jp_bool(obj, "not_delegated",                  false);
     u.trusted_to_auth_for_delegation = jp_bool(obj, "trusted_to_auth_for_delegation", false);
 
-    // Encryption — collector only writes enc_implicit_rc4 bool
-    u.enc_implicit_rc4              = jp_bool(obj, "enc_implicit_rc4", false);
-    u.msds_supportedencryptiontypes = -1;  // raw value not in NDJSON
+    // Encryption — read raw integer from JSONL (collector now writes it)
+    // -1 sentinel = attribute was absent from LDAP (null in JSONL)
+    {
+        std::string enc_raw = jp_str(obj, "msds_supportedencryptiontypes");
+        if (enc_raw.empty() || enc_raw == "null")
+            u.msds_supportedencryptiontypes = -1;
+        else {
+            try { u.msds_supportedencryptiontypes = std::stoi(enc_raw); }
+            catch (...) { u.msds_supportedencryptiontypes = -1; }
+        }
+    }
+    // enc_implicit_rc4 from collector is a quick sanity check; analyze_encryption overwrites it
+    u.enc_implicit_rc4 = jp_bool(obj, "enc_implicit_rc4", false);
 
-    // Shadow credentials
-    u.has_key_credential_link = jp_bool(obj, "has_key_credential_link", false);
+    // Shadow credentials — check both raw list and bool flag
+    {
+        auto kcl = jp_arr(obj, "key_credential_link");
+        u.has_key_credential_link = !kcl.empty() || jp_bool(obj, "has_key_credential_link", false);
+    }
 
     // Domain name
     u.domain_name = base_dn_to_domain(base_dn_);
@@ -274,16 +304,28 @@ std::string OfflineProcessor::user_to_json(const ProcessedUser& u) const {
       << json_delegation_arr(u.msds_allowedtodelegateto_structurized) << ",";
 
     if (u.msds_supportedencryptiontypes == -1)
-        o << "\"msds_supportedencryptiontypes\":null,\n";
+        o << "\"msds_supportedencryptiontypes\":null,";
     else
         o << "\"msds_supportedencryptiontypes\":" << ji(u.msds_supportedencryptiontypes) << ",";
 
-    o << "\"msds_supportedencryptiontypesname\":"  << ja(u.msds_supportedencryptiontypesname) << ",";
+    // msds_supportedencryptiontypesname entries are pre-built JSON objects
+    // (e.g. {"name":"RC4-HMAC","risk":700,"is_weak":true}) — emit raw, not re-escaped.
+    {
+        auto emit_enc_arr = [&]() {
+            o << '[';
+            for (size_t i = 0; i < u.msds_supportedencryptiontypesname.size(); ++i) {
+                if (i) o << ',';
+                o << u.msds_supportedencryptiontypesname[i]; // already valid JSON
+            }
+            o << ']';
+        };
+        o << "\"msds_supportedencryptiontypesname\":";  emit_enc_arr(); o << ',';
+        o << "\"msds_supportedencryptiontypes_name\":"; emit_enc_arr(); o << ',';
+    }
     o << "\"enc_risk_score\":"    << ji(u.enc_risk_score)   << ",";
     o << "\"enc_implicit_rc4\":"  << jb(u.enc_implicit_rc4) << ",";
 
     o << "\"member_of\":"         << ja(u.member_of)        << ",";
-    o << "\"token_group_sids\":"  << ja(u.token_group_sids) << ",";
 
     o << "\"when_created\":"      << jnl(u.when_created)    << ",";
     o << "\"when_changed\":"      << jnl(u.when_changed)    << ",";
@@ -291,14 +333,13 @@ std::string OfflineProcessor::user_to_json(const ProcessedUser& u) const {
     o << "\"pwd_last_set\":"      << jnl(u.pwd_last_set)    << ",";
     o << "\"logon_count\":"       << ji(u.logon_count)      << ",";
     o << "\"domain_sid\":"        << je(u.domain_sid)       << ",";
-    o << "\"domain_name\":"       << je(u.domain_name)      << ",";
     o << "\"primary_group_id\":"  << ji(u.primary_group_id) << ",";
     o << "\"primary_group_sid\":" << je(u.primary_group_sid)<< ",";
     o << "\"bad_pwd_count\":"     << ji(u.bad_pwd_count)    << ",";
     o << "\"bad_pwd_time\":"      << jnl(u.bad_pwd_time)    << ",";
 
     if (u.account_never_expires)
-        o << "\"account_expires\":null,\n";
+        o << "\"account_expires\":null,";
     else
         o << "\"account_expires\":"  << jnl(u.account_expires) << ",";
 
@@ -312,8 +353,8 @@ std::string OfflineProcessor::user_to_json(const ProcessedUser& u) const {
 
     o << "\"script_path\":"    << je(u.script_path)    << ",";
     o << "\"home_directory\":" << je(u.home_directory)  << ",";
-    o << "\"home_drive\":"     << je(u.home_drive)      << "\n";
-    o << "    }";
+    o << "\"home_drive\":"     << je(u.home_drive);
+    o << "}";
     return o.str();
 }
 
@@ -323,7 +364,7 @@ std::string OfflineProcessor::user_to_json(const ProcessedUser& u) const {
 bool OfflineProcessor::load_and_process_users(const std::string& raw_path,
                                                const std::string& out_path)
 {
-    log_info("[OfflineProcessor] Reading raw_users.ndjson: " + raw_path);
+    log_info("[OfflineProcessor] Reading raw_users.jsonl: " + raw_path);
 
     // base_dn — no wrapper in NDJSON, extract from domain_sid
     // First pass reads all lines
@@ -356,7 +397,79 @@ bool OfflineProcessor::load_and_process_users(const std::string& raw_path,
         if (u.dcsync) ++dcsync_count;
         rows.push_back(user_to_json(u));
     }
-    write_objects(out, rows, out_path, "[OfflineProcessor]");
+
+    if (is_json_ext(out_path)) {        // JSON mode: full collector-compatible envelope with meta + error
+        std::time_t now = std::time(nullptr);
+        char ts_buf[32] = {};
+        std::strftime(ts_buf, sizeof(ts_buf), "%Y-%m-%dT%H:%M:%S", std::gmtime(&now));
+        std::string generated_at = std::string(ts_buf) + ".000000Z";
+
+        // Minimal re-indent for record items (4-space base)
+        auto reindent_item = [](const std::string& compact,
+                                const std::string& base) -> std::string {
+            std::string r; r.reserve(compact.size() * 2);
+            int depth = 0; bool in_str = false, escaped = false;
+            auto nl = [&]() { r+='\n'; r+=base; for(int i=0;i<depth*2;++i) r+=' '; };
+            for (size_t i = 0; i < compact.size(); ++i) {
+                const char ch = compact[i];
+                if (escaped)            { r+=ch; escaped=false; continue; }
+                if (in_str && ch=='\\') { r+=ch; escaped=true;  continue; }
+                if (ch=='"')            { in_str=!in_str; r+=ch; continue; }
+                if (in_str)             { r+=ch; continue; }
+                switch(ch) {
+                    case '{': case '[': r+=ch; ++depth; nl(); break;
+                    case '}': case ']': --depth; nl(); r+=ch;  break;
+                    case ',':           r+=ch; nl();            break;
+                    case ':':           r+=':'; r+=' ';         break;
+                    default:            r+=ch;                  break;
+                }
+            }
+            return r;
+        };
+
+        // meta block
+        std::ostringstream meta_ss;
+        meta_ss << "{\"dcsync\":{\"enabled\":true"
+                << ",\"resolved_sid_count\":" << sid_to_dn_.size()
+                << ",\"principal_count\":"    << rows.size()
+                << ",\"dcsync_users_count\":" << dcsync_count
+                << ",\"error\":null}}";
+
+        out << "{\n";
+        out << "  \"generated_at\": \"" << generated_at << "\",\n";
+        out << "  \"source\": \"domain\",\n";
+        out << "  \"success\": true,\n";
+        out << "  \"count\": " << rows.size() << ",\n";
+        out << "  \"users\": [\n";
+        for (size_t i = 0; i < rows.size(); ++i) {
+            out << "    " << reindent_item(rows[i], "    ");
+            if (i + 1 < rows.size()) out << ',';
+            out << '\n';
+        }
+        out << "  ],\n";
+        out << "  \"meta\": " << reindent_item(meta_ss.str(), "  ") << ",\n";
+        out << "  \"error\": null\n";
+        out << "}\n";
+        out.flush();
+    } else {
+        // NDJSON mode — write Python-compatible meta header line first,
+        // then one JSON object per line (matches Python domain_users.jsonl format).
+        std::time_t now_ndjson = std::time(nullptr);
+        char ts_ndjson[32] = {};
+        std::strftime(ts_ndjson, sizeof(ts_ndjson),
+                      "%Y-%m-%dT%H:%M:%S.000000Z", std::gmtime(&now_ndjson));
+        out << "{\"generated_at\":\"" << ts_ndjson << "\""
+            << ",\"source\":\"domain\""
+            << ",\"success\":true"
+            << ",\"count\":"            << rows.size()
+            << ",\"meta\":{\"dcsync\":{\"enabled\":true"
+            << ",\"resolved_sid_count\":" << sid_to_dn_.size()
+            << ",\"principal_count\":"    << (sid_to_dn_.size() + rows.size())
+            << ",\"dcsync_users_count\":" << dcsync_count
+            << ",\"error\":null}}"
+            << ",\"error\":null}\n";
+        write_objects(out, rows, out_path, "[OfflineProcessor]");
+    }
     out.close();
 
     log_ok("[OfflineProcessor] domain_users written -> " + out_path);
@@ -505,7 +618,7 @@ std::string OfflineProcessor::group_to_json(const ProcessedGroup& g) const {
 bool OfflineProcessor::load_and_process_groups(const std::string& raw_path,
                                                 const std::string& out_path)
 {
-    log_info("[OfflineProcessor] Reading raw_groups.ndjson: " + raw_path);
+    log_info("[OfflineProcessor] Reading raw_groups.jsonl: " + raw_path);
     auto raw_groups = read_ndjson_lines(raw_path);
     log_ok("[OfflineProcessor] " + std::to_string(raw_groups.size()) +
            " raw groups read. Starting analysis...");

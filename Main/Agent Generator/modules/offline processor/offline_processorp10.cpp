@@ -2,13 +2,13 @@
 //  SECTION CERT — AD CS Offline Processor
 //
 //  Reads:
-//    raw_cache/raw_cert_templates.ndjson  (from CertificateCollector)
-//    raw_cache/raw_pki_objects.ndjson     (from CertificateCollector)
-//    raw_cache/raw_ca_rpc.ndjson          (from future RPC stage, optional)
+//    raw_cache/raw_cert_templates.jsonl  (from CertificateCollector)
+//    raw_cache/raw_pki_objects.jsonl     (from CertificateCollector)
+//    raw_cache/raw_ca_rpc.jsonl          (from future RPC stage, optional)
 //
 //  Writes:
-//    Domain Objects/domain_cert_templates.ndjson  — one template per line
-//    Domain Objects/domain_pki_objects.ndjson     — one PKI object per line
+//    Domain Objects/domain_cert_templates.jsonl  — one template per line
+//    Domain Objects/domain_pki_objects.jsonl     — one PKI object per line
 //
 //  ESC flags computed here (no ESC modules needed — all flags in one pass):
 //    ESC1  : enrollee_supplies_subject AND dangerous_eku AND no_approval AND ra_sig==0
@@ -25,12 +25,13 @@
 //    ESC8  : HTTP enrollment endpoint reachable without HTTPS (HTTP probe)
 //    ESC11 : IF_ENFORCEENCRYPTICERTREQUEST absent (RPC only)
 //
-//  ESC6/7/8/11 results are forwarded as-is from raw_ca_rpc.ndjson when present.
+//  ESC6/7/8/11 results are forwarded as-is from raw_ca_rpc.jsonl when present.
 // ─────────────────────────────────────────────────────────────────────────────
 #include "offline_processor.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <cstring>
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EKU OIDs — mirrors EKU_MAP from template_enumeration.py
@@ -169,10 +170,11 @@ static std::vector<CertAce>  parse_cert_aces(const std::string& sd_hex);
 // ─────────────────────────────────────────────────────────────────────────────
 bool OfflineProcessor::process_certificates(const OfflineProcessorOptions& opts) {
     fs::create_directories(opts.output_dir);
-    const std::string raw_templates  = opts.raw_dir + "/raw_cert_templates.ndjson";
-    const std::string raw_pki        = opts.raw_dir + "/raw_pki_objects.ndjson";
-    const std::string out_templates  = opts.output_dir + "/domain_cert_templates." + opts.output_ext;
-    const std::string out_pki        = opts.output_dir + "/domain_pki_objects."    + opts.output_ext;
+    const std::string raw_templates  = opts.raw_dir + "/raw_cert_templates.jsonl";
+    const std::string raw_pki        = opts.raw_dir + "/raw_pki_objects.jsonl";
+    const std::string& ext_cert      = opts.output_ext.empty() ? "jsonl" : opts.output_ext;
+    const std::string out_templates  = opts.output_dir + "/domain_cert_templates." + ext_cert;
+    const std::string out_pki        = opts.output_dir + "/domain_pki_objects."    + ext_cert;
 
     return load_and_process_cert_templates(raw_templates, out_templates)
         && load_and_process_pki_objects(raw_pki, out_pki);

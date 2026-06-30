@@ -17,8 +17,8 @@
 .o-col { padding: 4px 8px; }
 .o-col-name    { flex: 0 0 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .o-col-path    { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.o-col-desc    { flex: 0 0 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.o-col-objcount{ flex: 0 0 90px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o-col-desc    { display: none; }
+.o-col-objcount{ flex: 0 0 90px; text-align: left; padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .o-col-inherit { flex: 0 0 95px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .o-col-managed { flex: 0 0 105px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -30,8 +30,8 @@
 .o-cell         { padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .o-cell-name    { flex: 0 0 140px; color: var(--text-hi); font-weight: 500; }
 .o-cell-path    { flex: 1; color: var(--text-sec); }
-.o-cell-desc    { flex: 0 0 120px; color: var(--text-dim); }
-.o-cell-objcount{ flex: 0 0 90px; color: var(--accent); text-align: center; }
+.o-cell-desc    { display: none; }
+.o-cell-objcount{ flex: 0 0 90px; color: var(--accent); text-align: left; padding-left: 4px; }
 .o-cell-inherit { flex: 0 0 95px; text-align: center; font-weight: 600; }
 .o-cell-inherit.enabled { color: var(--green); }
 .o-cell-inherit.blocked { color: var(--amber); }
@@ -41,3 +41,178 @@
 .ou-detail { flex: 1; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-alt); display: flex; flex-direction: column; overflow: hidden; }
 .ous-loading { position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; gap: 12px; border-radius: 6px; }
 .ous-loading span { color: var(--text-sec); font-size: 11px; }
+
+/* ══════════════════════════════════════════
+   OU OBJECTS TOGGLE  (Object Count → ▾ düyməsi)
+═══════════════════════════════════════════ */
+
+/* Object count cell-i flex container edir ki, düymə ortalansın */
+.o-cell-objcount {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 4px;
+}
+
+/* Toggle düyməsi — Groups-dakı .gr-members-toggle ilə eyni görünüş */
+.o-cell-objcount .gr-members-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: background 0.12s, color 0.12s;
+  line-height: 1;
+}
+
+.o-cell-objcount .gr-members-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-hi);
+}
+
+/* Ok işarəsi — bağlı vəziyyətdə */
+.o-cell-objcount .gr-arrow {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+  transition: transform 0.18s ease;
+  color: var(--text-dim);
+}
+
+/* Ok işarəsi — açıq vəziyyətdə (.open sinifi JS tərəfindən əlavə olunur) */
+.o-cell-objcount .gr-members-toggle.open .gr-arrow {
+  transform: rotate(-180deg);
+  color: var(--accent);
+}
+
+/* ── Genişlənən sətir (toggle açıldıqda görünür) ── */
+.ou-objects-row {
+  padding: 0 12px 10px 36px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  animation: ou-obj-slide 0.15s ease;
+}
+
+@keyframes ou-obj-slide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Başlıq sətri (Member / SID) ── */
+.ou-obj-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+/* ── Bölmə başlığı (👤 Privileged Users / 🖥 Privileged Computers) ── */
+.ou-obj-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  padding: 8px 0 4px;
+}
+
+/* ── Hər bir obyekt sətri ── */
+.ou-obj-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  opacity: 0.9;
+  transition: opacity 0.1s;
+}
+
+.ou-obj-item:last-child { border-bottom: none; }
+.ou-obj-item:hover      { opacity: 1; }
+
+.ou-obj-name {
+  font-size: 12px;
+  color: var(--text-sec);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ou-obj-sid {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Boş / loading mesajı ── */
+.ou-obj-empty {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 8px 0;
+  font-style: italic;
+}
+
+/* ── Obyekt ikonu (user.png / computer.png / group.png) ── */
+.ou-obj-icon {
+  width: 13px;
+  height: 13px;
+  vertical-align: middle;
+  margin-right: 5px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+/* Section title-da ikon bir az böyük olsun */
+.ou-obj-section-title .ou-obj-icon {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  opacity: 0.85;
+}
+
+/* ── Badge (Admin / Disabled / Privileged) ── */
+.ou-obj-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 4px;
+  vertical-align: middle;
+  line-height: 1.5;
+}
+.ou-obj-badge.red   { background: rgba(var(--red-rgb, 220,53,69), 0.15); color: var(--red, #dc3545); }
+.ou-obj-badge.amber { background: rgba(var(--amber-rgb, 255,152,0), 0.15); color: var(--amber, #ff9800); }
+.ou-obj-badge.dim   { background: var(--bg-hover); color: var(--text-dim); }
+
+/* ── OS label ── */
+.ou-obj-os {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-left: 5px;
+  font-style: italic;
+}
+
+/* ── Disabled / admin text state ── */
+.ou-obj-disabled { opacity: 0.55; }
+.ou-obj-admin    { color: var(--red, #dc3545) !important; }

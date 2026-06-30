@@ -5,8 +5,8 @@
 // SECTION 34  process_ous  (public entry point)
 //             process()  — updated to include OUs
 //
-//  Input : raw_cache/raw_ous.ndjson   (OUCollector output)
-//  Output: Domain Objects/domain_ous.ndjson
+//  Input : raw_cache/raw_ous.jsonl   (OUCollector output)
+//  Output: Domain Objects/domain_ous.jsonl
 //
 //  Each output line is one OU object with all enriched fields:
 //    - gpo_count / inherited_gpo_count from gPLink parsing
@@ -16,7 +16,7 @@
 //
 //  Reading (Python):
 //    import json
-//    with open("domain_ous.ndjson") as f:
+//    with open("domain_ous.jsonl") as f:
 //        for line in f:
 //            ou = json.loads(line)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25,6 +25,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <system_error>
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Small JSON helpers for OU pass-through fields
@@ -149,7 +150,7 @@ int OfflineProcessor::count_json_array_items(const std::string& json_array)
 // ═════════════════════════════════════════════════════════════════════════════
 //  SECTION 31 — parse_raw_ou
 //
-//  Reads one NDJSON line (from raw_ous.ndjson) and fills a ProcessedOU.
+//  Reads one JSONL line (from raw_ous.jsonl) and fills a ProcessedOU.
 //  Field names match OUCollector's schema exactly.
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -285,7 +286,7 @@ void OfflineProcessor::analyze_ou_risk(ProcessedOU& ou) const
 // ═════════════════════════════════════════════════════════════════════════════
 //  SECTION 32 — ou_to_json
 //
-//  Serializes a ProcessedOU to a single NDJSON line (no trailing \n).
+//  Serializes a ProcessedOU to a single JSONL line (no trailing \n).
 // ═════════════════════════════════════════════════════════════════════════════
 std::string OfflineProcessor::ou_to_json(const ProcessedOU& ou) const
 {
@@ -355,7 +356,7 @@ std::string OfflineProcessor::ou_to_json(const ProcessedOU& ou) const
 bool OfflineProcessor::load_and_process_ous(const std::string& raw_path,
                                              const std::string& out_path)
 {
-    log_info("[OfflineProcessor] Reading raw_ous.ndjson: " + raw_path);
+    log_info("[OfflineProcessor] Reading raw_ous.jsonl: " + raw_path);
 
     auto raw_lines = read_ndjson_lines(raw_path);
     if (raw_lines.empty()) {
@@ -417,14 +418,28 @@ bool OfflineProcessor::process_ous(const OfflineProcessorOptions& opts)
     fs::create_directories(opts.output_dir);
 
     // dn_to_sam_ is needed to resolve managed_by DN → name
-    load_raw_users_lookup (opts.raw_dir + "/raw_users.ndjson");
-    load_raw_groups_lookup(opts.raw_dir + "/raw_groups.ndjson");
+    load_raw_users_lookup (opts.raw_dir + "/raw_users.jsonl");
+    load_raw_groups_lookup(opts.raw_dir + "/raw_groups.jsonl");
 
     if (!opts.domain_name.empty()) domain_name_ = opts.domain_name;
     if (domain_name_.empty()) domain_name_ = base_dn_to_domain(base_dn_);
 
-    const std::string& ext7 = opts.output_ext.empty() ? "ndjson" : opts.output_ext;
-    return load_and_process_ous(
-        opts.raw_dir    + "/raw_ous.ndjson",
+    const std::string& ext7 = opts.output_ext.empty() ? "jsonl" : opts.output_ext;
+    const std::string raw_path = opts.raw_dir + "/raw_ous.jsonl";
+    bool ok = load_and_process_ous(
+        raw_path,
         opts.output_dir + "/domain_ous." + ext7);
+
+    if (ok) {
+        std::error_code ec;
+        fs::remove(raw_path, ec);
+        if (ec) {
+            log_warn("[OfflineProcessor] Could not delete raw file: " + raw_path +
+                     " — " + ec.message());
+        } else {
+            log_ok("[OfflineProcessor] Deleted raw file: " + raw_path);
+        }
+    }
+
+    return ok;
 }

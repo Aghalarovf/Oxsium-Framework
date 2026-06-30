@@ -58,6 +58,12 @@ set "OUT_DBG=!RESOLVED_OUTPUT!!AGENT_NAME!_debug.exe"
 set "DEBUG_BUILD=0"
 if /i "%1"=="debug" set "DEBUG_BUILD=1"
 
+echo.
+echo   ┌─────────────────────────────────────────┐
+echo   │  OxGen Build  ^|  v.14                   │
+echo   └─────────────────────────────────────────┘
+echo.
+
 :: ── Compiler check ────────────────────────────────────────────────────────
 where g++ >nul 2>&1
 if errorlevel 1 (
@@ -117,46 +123,43 @@ if "%DEBUG_BUILD%"=="1" (
 
 set "BUILD_LOG=%PROJECT_ROOT%build.log"
 
-:: ── zlib (ZIP sıxışdırması üçün) ───────────────────────────────────────────
-:: MinGW ilə birlikdə gəlir — heç bir əlavə yükləmə lazım deyil.
-set "LDFLAGS=%LDFLAGS% -lz -lkernel32 -luser32 -ladvapi32"
+:: ── Linker flags ──────────────────────────────────────────────────────────
+:: Windows sistem kitabxanaları + zlib (crc32, deflate, compressBound üçün)
+set "LDFLAGS=%LDFLAGS% -lkernel32 -luser32 -ladvapi32"
 set "LDFLAGS=%LDFLAGS% -lwldap32 -liphlpapi -licmp -lws2_32"
+set "LDFLAGS=%LDFLAGS% -lz"
 
 :: ── Build ─────────────────────────────────────────────────────────────────
 echo   [*] Compiling...
 echo.
 
-g++ %CXXFLAGS% %SOURCES% %LDFLAGS% -o "%OUT_EXE%" > "%BUILD_LOG%" 2>&1
+g++ %CXXFLAGS% %SOURCES% %LDFLAGS% -o "!OUT_EXE!" > "!BUILD_LOG!" 2>&1
 
 if errorlevel 1 (
     echo.
     echo   [-] Build FAILED. See build.log for details:
     echo.
-    type "%BUILD_LOG%"
+    type "!BUILD_LOG!"
     echo.
     exit /b 1
 )
 
 echo   [+] Build succeeded.
-echo   [+] Output: %OUT_EXE%
+echo   [+] Output: !OUT_EXE!
 echo.
 
 :: ── Record build in PROJECT_MAP.md ────────────────────────────────────────
 for /f "tokens=*" %%D in ('powershell -NoProfile -Command "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"') do set "TS=%%D"
 echo - %TS% : Built %~nx0 >> "%PROJECT_ROOT%PROJECT_MAP.md"
 
-echo   [+] Build history updated in PROJECT_MAP.md
-echo.
 
 :: ── Quick size report ─────────────────────────────────────────────────────
-for %%F in ("%OUT_EXE%") do (
+for %%F in ("!OUT_EXE!") do (
     set /a "SIZE_KB=%%~zF/1024"
     echo   [*] Size: !SIZE_KB! KB
 )
 
 echo.
-echo   ══════════════════════════════════════════
 echo     Run:  %~nx0  [no arguments]
 echo     Help: oxgen.exe  (then type 'help')
-echo   ══════════════════════════════════════════
 echo.

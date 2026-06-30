@@ -88,6 +88,8 @@ function showLoginScreen() {
 
   if (!state.connected) {
     state._pass = null; state._hash = null;
+    state._zipOffline = false;
+    if (typeof ZIP_IMPORT !== 'undefined') { ZIP_IMPORT.active = false; ZIP_IMPORT.files = []; }
     usersData = []; computersData = []; ousData = []; gposData = [];
     groupsData = []; trustsData = []; aclData = []; usersMeta = {};
     enumCacheLoaded = { users: false, computers: false, ous: false, gpos: false, groups: false, trusts: false, acl: false };
@@ -193,12 +195,14 @@ function switchMainTab(tab, btn) {
 
   if (tab === 'users') {
     document.getElementById('tab-users').style.display = '';
-    loadUsers();
+    if (!state.connected && !state._zipOffline) { document.getElementById('u-empty').innerHTML = '<p>Connect to a domain first or import a ZIP</p>'; }
+    else loadUsers();
     return;
   }
   if (tab === 'computers') {
     document.getElementById('tab-computers').style.display = '';
-    loadComputers();
+    if (!state.connected && !state._zipOffline) { document.getElementById('c-empty').innerHTML = '<p>Connect to a domain first or import a ZIP</p>'; }
+    else loadComputers();
     return;
   }
   if (tab === 'enumeration') {
@@ -259,25 +263,26 @@ function switchTab(tab) {
   document.getElementById('sidebar-attacks').style.display = attackTabs.has(tab) ? 'flex' : 'none';
   renderAssessmentToolkit(tab);
 
+  /* Helper: true if user can browse AD object tabs (live session OR ZIP offline mode) */
+  const _canBrowse = () => state.connected || !!state._zipOffline;
+
   const tabMap = {
-    users:     { el: 'tab-users',     nav: 'nav-users',     load: () => { if (!state.connected) { document.getElementById('u-empty').innerHTML = '<p>Connect to a domain first</p>'; } else if (!enumCacheLoaded.users) loadUsers(); else renderUsers(); }},
-    computers: { el: 'tab-computers', nav: 'nav-computers', load: () => { if (!state.connected) { document.getElementById('c-empty').innerHTML = '<p>Connect to a domain first</p>'; } else if (!enumCacheLoaded.computers) loadComputers(); else renderComputers(); }},
-    ous:       { el: 'tab-ous',       nav: 'nav-ous',       load: () => { if (!state.connected) { document.getElementById('o-empty').innerHTML = '<p>Connect to a domain first</p>'; } else if (!enumCacheLoaded.ous) loadOUs(); else renderOUs(); }},
-    gpo:       { el: 'tab-gpo',       nav: 'nav-gpo',       load: () => { if (!state.connected) { document.getElementById('g-empty').innerHTML = '<p>Connect to a domain first</p>'; } else if (!enumCacheLoaded.gpos) loadGPOs(); else renderGPOs(); }},
+    users:     { el: 'tab-users',     nav: 'nav-users',     load: () => { if (!_canBrowse()) { document.getElementById('u-empty').innerHTML = '<p>Connect to a domain first or import a ZIP</p>'; } else loadUsers(); }},
+    computers: { el: 'tab-computers', nav: 'nav-computers', load: () => { if (!_canBrowse()) { document.getElementById('c-empty').innerHTML = '<p>Connect to a domain first or import a ZIP</p>'; } else loadComputers(); }},
+    ous:       { el: 'tab-ous',       nav: 'nav-ous',       load: () => { if (!_canBrowse()) { document.getElementById('o-empty').innerHTML = '<p>Connect to a domain first or import a ZIP</p>'; } else loadOUs(); }},
+    gpo:       { el: 'tab-gpo',       nav: 'nav-gpo',       load: () => { if (!_canBrowse()) { document.getElementById('g-empty').innerHTML = '<p>Connect to a domain first or import a ZIP</p>'; } else loadGPOs(); }},
     groups:    { el: 'tab-groups',    nav: 'nav-groups',    load: () => {
       if (typeof groupsFilter !== 'undefined') groupsFilter = 'all';
       const allChip = document.querySelector('#groups-filter-chips .chip[onclick*="setGroupFilter(\'all\'"]');
       document.querySelectorAll('#groups-filter-chips .chip').forEach(ch => ch.classList.remove('active'));
       if (allChip) allChip.classList.add('active');
-      if (!state.connected) {
-        document.getElementById('gr-empty').innerHTML = '<p>Connect to a domain first</p>';
-      } else if (!enumCacheLoaded.groups) {
-        loadGroups();
+      if (!_canBrowse()) {
+        document.getElementById('gr-empty').innerHTML = '<p>Connect to a domain first or import a ZIP</p>';
       } else {
-        renderGroups();
+        loadGroups();
       }
     }},
-    trusts:    { el: 'tab-trusts',    nav: 'nav-trusts',    load: () => { if (!state.connected) { document.getElementById('tr-empty').innerHTML = '<p>Connect to a domain first</p>'; } else if (!enumCacheLoaded.trusts) loadTrusts(); else renderTrusts(); }},
+    trusts:    { el: 'tab-trusts',    nav: 'nav-trusts',    load: () => { if (!_canBrowse()) { document.getElementById('tr-empty').innerHTML = '<p>Connect to a domain first or import a ZIP</p>'; } else loadTrusts(); }},
     acl:       { el: 'tab-acl',       nav: 'nav-acl',       load: () => {
       // Reset ACL search fields
       ['acl-search','acl-target-search','acl-principal-search'].forEach(id => {
@@ -292,14 +297,15 @@ function switchTab(tab) {
         if (allChip) allChip.classList.add('active');
       }
       renderACLObjectFilters();
-      if (!state.connected) {
+      const _aclHasData = _canBrowse() ||
+                          (typeof ZIP_IMPORT !== 'undefined' && ZIP_IMPORT.active) ||
+                          (typeof aclData !== 'undefined' && aclData.length > 0) ||
+                          enumCacheLoaded.acl;
+      if (!_aclHasData) {
         document.getElementById('acl-meta').textContent = '—';
-        document.getElementById('acl-table-body').innerHTML = '<div class="acl-empty"><p>Connect to a domain first</p></div>';
-      } else if (!enumCacheLoaded.acl) {
-        loadACLs();
+        document.getElementById('acl-table-body').innerHTML = '<div class="acl-empty"><p>Connect to a domain first or import a ZIP</p></div>';
       } else {
-        renderACLObjectFilters();
-        renderACLs();
+        loadACLs();
       }
     }},
   };

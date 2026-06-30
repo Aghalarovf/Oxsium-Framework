@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Oxsium Framework VILTRUM Edition</title>
+<title>Oxsium Framework</title>
 <link rel="icon" type="image/png" href="assets/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -40,7 +40,7 @@
     <span class="logo-name" style="display:flex;flex-direction:column;line-height:1;font-family:var(--head);font-size:15px;font-weight:700;color:var(--text-hi);letter-spacing:2px;text-transform:uppercase;">
       <span>Oxsium</span><span class="logo-sub" style="font-size:12px;letter-spacing:2.2px;color:var(--accent);margin-top:2px;">Framework</span>
     </span>
-    <span class="logo-version" style="font-size:9px;color:var(--accent);letter-spacing:1px;align-self:center;margin-top:2px;">VILTRUM</span>
+    <span class="logo-version" style="font-size:9px;color:var(--accent);letter-spacing:1px;align-self:center;margin-top:2px;">v1.0.0</span>
   </div>
 
   <nav class="main-nav">
@@ -90,10 +90,10 @@
         <span class="nav-count" id="nav-computers-count">—</span>
       </div>
 
-      <div class="nav-item" id="nav-ous" onclick="switchTab('ous')">
-        <img class="nav-icon" src="assets/Icons/ou.png" alt="OUs" onerror="this.onerror=null;this.src='assets/favicon.png'">
-        OUs
-        <span class="nav-count" id="nav-ous-count">—</span>
+      <div class="nav-item" id="nav-groups" onclick="switchTab('groups')">
+        <img class="nav-icon" src="assets/Icons/group.png" alt="Groups" onerror="this.onerror=null;this.src='assets/favicon.png'">
+        Groups
+        <span class="nav-count" id="nav-groups-count">—</span>
       </div>
 
       <div class="nav-item" id="nav-gpo" onclick="switchTab('gpo')">
@@ -101,11 +101,11 @@
         GPOs
         <span class="nav-count" id="nav-gpo-count">—</span>
       </div>
-
-      <div class="nav-item" id="nav-groups" onclick="switchTab('groups')">
-        <img class="nav-icon" src="assets/Icons/group.png" alt="Groups" onerror="this.onerror=null;this.src='assets/favicon.png'">
-        Groups
-        <span class="nav-count" id="nav-groups-count">—</span>
+      
+      <div class="nav-item" id="nav-ous" onclick="switchTab('ous')">
+        <img class="nav-icon" src="assets/Icons/ou.png" alt="OUs" onerror="this.onerror=null;this.src='assets/favicon.png'">
+        OUs
+        <span class="nav-count" id="nav-ous-count">—</span>
       </div>
 
       <div class="nav-item" id="nav-trusts" onclick="switchTab('trusts')">
@@ -114,7 +114,7 @@
         <span class="nav-count" id="nav-trusts-count">—</span>
       </div>
 
-      <div class="nav-item" id="nav-acl" onclick="switchTab('acl')">
+      <div class="nav-item" id="nav-acl" onclick="switchTab('acl'); if(typeof prefetchACECount==='function') prefetchACECount();">
         <img class="nav-icon" src="assets/Icons/acl.png" alt="ACL" onerror="this.onerror=null;this.src='assets/favicon.png'">
         ACEs
         <span class="nav-count" id="nav-acl-count">—</span>
@@ -242,42 +242,6 @@
           </div>
         </div>
 
-
-
-        <!-- ZIP Uploader -->
-        <div class="connect-card" id="zip-uploader-card">
-          <div class="card-title">ZIP Uploader</div>
-
-          <div
-            id="zip-drop-zone"
-            style="border:1.5px dashed var(--border-hi);border-radius:var(--radius);padding:24px 16px;text-align:center;transition:border-color 0.18s,background 0.18s;background:var(--bg-input);position:relative;"
-            ondragover="zipDragOver(event)"
-            ondragleave="zipDragLeave(event)"
-            ondrop="zipDrop(event)"
-          >
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" style="margin-bottom:8px;opacity:0.45">
-              <rect x="2" y="2" width="24" height="24" rx="4" stroke="var(--text-sec)" stroke-width="1.5"/>
-              <path d="M11 2v5h6V2" stroke="var(--text-sec)" stroke-width="1.5" stroke-linecap="round"/>
-              <path d="M14 10v10M10 16l4 4 4-4" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <div style="font-family:var(--head);font-size:12px;color:var(--text-sec);letter-spacing:0.5px;">Drag &amp; drop a ZIP file here</div>
-          </div>
-
-          <button
-            type="button"
-            onclick="document.getElementById('zip-file-input').click()"
-            style="margin-top:8px;width:100%;padding:7px 0;background:var(--bg-card);border:1px solid var(--border-hi);border-radius:var(--radius-sm);color:var(--text-sec);font-family:var(--head);font-size:11px;font-weight:600;letter-spacing:1px;cursor:pointer;transition:border-color 0.15s,color 0.15s;"
-            onmouseenter="this.style.borderColor='var(--accent-dim)';this.style.color='var(--text-pri)'"
-            onmouseleave="this.style.borderColor='var(--border-hi)';this.style.color='var(--text-sec)'"
-          >BROWSE</button>
-          <input type="file" id="zip-file-input" accept=".zip" style="display:none" onchange="zipFileSelected(this)"/>
-
-          <div id="zip-status" style="display:none;margin-top:10px;">
-            <div id="zip-status-bar" style="height:3px;background:var(--accent);border-radius:2px;width:0%;transition:width 0.4s ease;margin-bottom:8px;"></div>
-            <div id="zip-status-msg" style="font-family:var(--mono);font-size:10px;color:var(--text-sec);line-height:1.6;word-break:break-all;"></div>
-          </div>
-        </div>
-
         <!-- Actions -->
         <div class="action-row">
           <button class="btn-secondary" id="btn-connect-fast" onclick="handleConnectClick(event, 'fast')" type="button">
@@ -361,8 +325,8 @@
       </div>
       <div class="fmt-grid">
         <button class="fmt-btn agent selected" data-fmt="exe" onclick="selectFmt('agent','exe',this)" type="button">.EXE</button>
-        <button class="fmt-btn agent" data-fmt="dll" type="button" disabled style="opacity:0.35;cursor:not-allowed;pointer-events:none;">.DLL</button>
-        <button class="fmt-btn agent" data-fmt="ps1" type="button" disabled style="opacity:0.35;cursor:not-allowed;pointer-events:none;">.PS1</button>
+        <button class="fmt-btn agent" data-fmt="dll" onclick="selectFmt('agent','dll',this)" type="button">.DLL</button>
+        <button class="fmt-btn agent" data-fmt="ps1" onclick="selectFmt('agent','ps1',this)" type="button">.PS1</button>
       </div>
     </div>
 
@@ -382,6 +346,7 @@
           <label class="form-label">Target Platform</label>
           <select class="form-input" id="ag-platform">
               <option value="windows">Windows x64</option>
+              <option value="windows32">Windows x86</option>
             </select>
         </div>
       </div>
@@ -407,7 +372,7 @@
     
 
     <!-- PERSISTENCE -->
-    <div class="connect-card" style="opacity:0.4;pointer-events:none;">
+    <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar agent"></span>
         Persistence
@@ -415,28 +380,28 @@
       <div class="toggle-grid">
         <label class="toggle-item">
           <span class="toggle-switch">
-            <input type="checkbox" id="ag-persist-svc" disabled>
+            <input type="checkbox" id="ag-persist-svc" checked>
             <span class="toggle-track agent-track"></span>
           </span>
           <span class="toggle-label">Install as Service</span>
         </label>
         <label class="toggle-item">
           <span class="toggle-switch">
-            <input type="checkbox" id="ag-persist-reg" disabled>
+            <input type="checkbox" id="ag-persist-reg">
             <span class="toggle-track agent-track"></span>
           </span>
           <span class="toggle-label">Startup Registry</span>
         </label>
         <label class="toggle-item">
           <span class="toggle-switch">
-            <input type="checkbox" id="ag-persist-task" disabled>
+            <input type="checkbox" id="ag-persist-task">
             <span class="toggle-track agent-track"></span>
           </span>
           <span class="toggle-label">Scheduled Task</span>
         </label>
         <label class="toggle-item">
           <span class="toggle-switch">
-            <input type="checkbox" id="ag-persist-hook" disabled>
+            <input type="checkbox" id="ag-persist-hook">
             <span class="toggle-track agent-track"></span>
           </span>
           <span class="toggle-label">Login Hook (Linux)</span>
@@ -445,7 +410,7 @@
     </div>
 
     <!-- SECURITY -->
-    <div class="connect-card" style="opacity:0.4;pointer-events:none;">
+    <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar agent"></span>
         Security &amp; Evasion
@@ -454,8 +419,8 @@
         <div class="form-group">
           <label class="form-label">Encryption Key (AES-256)</label>
           <div class="key-wrap">
-            <input class="form-input" id="ag-aes-key" type="text" placeholder="Click refresh to generate..." autocomplete="off" spellcheck="false" readonly disabled>
-            <button class="key-gen-btn" title="Generate new key" type="button" disabled>
+            <input class="form-input" id="ag-aes-key" type="text" placeholder="Click refresh to generate..." autocomplete="off" spellcheck="false" readonly>
+            <button class="key-gen-btn" onclick="genKey('ag-aes-key')" title="Generate new key" type="button">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                 <path d="M12 7A5 5 0 1 1 7 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                 <path d="M7 2l2-2v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -468,9 +433,14 @@
         <div class="form-group">
           <label class="form-label">Padding Size</label>
           <div style="display:flex;gap:8px;align-items:center">
-            <input class="form-input" id="ag-padding-size" type="text" placeholder="1024" autocomplete="off" spellcheck="false" disabled>
+            <input class="form-input" id="ag-padding-size" type="text" placeholder="1024" autocomplete="off" spellcheck="false">
             <div style="position:relative">
-              <button class="btn-secondary" id="ag-padding-unit-btn" type="button" disabled>KB</button>
+              <button class="btn-secondary" id="ag-padding-unit-btn" type="button" onclick="togglePaddingUnits()">KB</button>
+              <div class="small-panel" id="ag-padding-units" style="display:none;position:absolute;right:0;top:36px;background:var(--panel-bg);border:1px solid var(--border);padding:6px;border-radius:6px;box-shadow:var(--shadow)">
+                <button class="btn-secondary" type="button" onclick="setPaddingUnit('KB')">KB</button>
+                <button class="btn-secondary" type="button" onclick="setPaddingUnit('MB')">MB</button>
+                <button class="btn-secondary" type="button" onclick="setPaddingUnit('GB')">GB</button>
+              </div>
             </div>
           </div>
         </div>
@@ -478,28 +448,28 @@
       <div class="toggle-grid">
         <label class="toggle-item">
           <span class="toggle-switch">
-            <input type="checkbox" id="ag-sec-obf" disabled>
+            <input type="checkbox" id="ag-sec-obf" checked>
             <span class="toggle-track agent-track"></span>
           </span>
           <span class="toggle-label">Obfuscate Payload</span>
         </label>
         <label class="toggle-item">
           <span class="toggle-switch">
-            <input type="checkbox" id="ag-sec-vm" disabled>
+            <input type="checkbox" id="ag-sec-vm">
             <span class="toggle-track agent-track"></span>
           </span>
           <span class="toggle-label">Anti-VM Check</span>
         </label>
         <label class="toggle-item">
           <span class="toggle-switch">
-            <input type="checkbox" id="ag-sec-sandbox" disabled>
+            <input type="checkbox" id="ag-sec-sandbox">
             <span class="toggle-track agent-track"></span>
           </span>
           <span class="toggle-label">Anti-Sandbox</span>
         </label>
         <label class="toggle-item">
           <span class="toggle-switch">
-            <input type="checkbox" id="ag-sec-del" disabled>
+            <input type="checkbox" id="ag-sec-del">
             <span class="toggle-track agent-track"></span>
           </span>
           <span class="toggle-label">Self-Delete on Fail</span>
@@ -518,7 +488,7 @@
           <label class="form-label">Destination</label>
           <div class="output-path-wrap">
             <input class="form-input" id="ag-output-path" type="text" placeholder="C:\oxsium\output\" autocomplete="off" spellcheck="false">
-            <button class="browse-btn" type="button" onclick="browseOutputPath()">Browse</button>
+            <button class="browse-btn" type="button">Browse</button>
           </div>
         </div>
       </div>
@@ -562,262 +532,7 @@
 
   </div><!-- /payload-agent -->
 
-  <!-- ══════════ SERVER PANEL ══════════ -->
-  <div id="payload-server" class="payload-pane" style="display:none;">
-
-    <!-- SERVER CONFIGURATION -->
-    <div class="server-section-header">
-    </div>
-
-    <!-- Server Config Card -->
-    <div class="connect-card server-card">
-      <div class="card-title">
-        <span class="card-accent-bar" style="background:var(--accent)"></span>
-        Server Config
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Authentication Method</label>
-          <select class="form-input" id="srv-auth-method">
-            <option value="token">Token-Based (JWT)</option>
-            <option value="mtls">Mutual TLS (mTLS)</option>
-            <option value="psk">Pre-Shared Key</option>
-            <option value="cert">Certificate Auth</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Max Concurrent Connections</label>
-          <input class="form-input" id="srv-max-conn" type="number" placeholder="50" min="1" max="1000" value="50" autocomplete="off">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Unique Agent ID Generation</label>
-          <select class="form-input" id="srv-agent-id-gen">
-            <option value="uuid4">UUID v4 (Random)</option>
-            <option value="uuid5">UUID v5 (Namespace)</option>
-            <option value="custom">Custom Prefix + Hash</option>
-            <option value="sequential">Sequential</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Listener Interface</label>
-          <input class="form-input" id="srv-iface" type="text" placeholder="0.0.0.0" autocomplete="off" spellcheck="false">
-        </div>
-      </div>
-      <div class="form-row single">
-        <div class="form-group">
-          <label class="form-label">Listener Port</label>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input class="form-input" id="srv-port" type="number" placeholder="4444" min="1" max="65535" value="4444" autocomplete="off" style="width:120px;flex:none">
-            <span style="font-size:10px;color:var(--text-dim);letter-spacing:.5px">1 – 65535</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Registry & State -->
-    <div class="server-section-header" style="margin-top:14px">
-    </div>
-
-    <div class="connect-card server-card">
-      <div class="card-title">
-        <span class="card-accent-bar" style="background:var(--accent)"></span>
-        Registry &amp; State
-      </div>
-      <div class="server-interface-list">
-        <div class="srv-iface-item">
-          <div class="srv-iface-icon">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.1"/><path d="M6 3.5v2.5l1.5 1" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
-          </div>
-          <div class="srv-iface-info">
-            <span class="srv-iface-name">Heartbeat Monitor</span>
-            <span class="srv-iface-desc">Track agent liveness, ping intervals &amp; timeouts</span>
-          </div>
-          <div class="srv-iface-badge active">Active</div>
-        </div>
-        <div class="srv-iface-item">
-          <div class="srv-iface-icon">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1.5" y="2" width="9" height="8" rx="1" stroke="currentColor" stroke-width="1.1"/><path d="M4 5h4M4 7h2.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
-          </div>
-          <div class="srv-iface-info">
-            <span class="srv-iface-name">Agent Metadata</span>
-            <span class="srv-iface-desc">OS info, hostname, IP, user context, capabilities</span>
-          </div>
-          <div class="srv-iface-badge active">Active</div>
-        </div>
-        <div class="srv-iface-item">
-          <div class="srv-iface-icon">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 9V5l4-3 4 3v4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/><rect x="4" y="7" width="4" height="4" rx=".5" stroke="currentColor" stroke-width="1"/></svg>
-          </div>
-          <div class="srv-iface-info">
-            <span class="srv-iface-name">State Management</span>
-            <span class="srv-iface-desc">Persistent agent state, session tokens, reconnect logic</span>
-          </div>
-          <div class="srv-iface-badge active">Active</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Agent Security -->
-    <div class="server-section-header" style="margin-top:14px">
-    </div>
-
-    <div class="connect-card server-card">
-      <div class="card-title">
-        <span class="card-accent-bar" style="background:var(--accent)"></span>
-        Agent Security
-      </div>
-      <div class="form-row single" style="margin-bottom:10px">
-        <div class="form-group">
-          <label class="form-label">Auth / Security</label>
-          <select class="form-input" id="srv-sec-auth">
-            <option value="hmac">HMAC-SHA256 Message Signing</option>
-            <option value="tls13">TLS 1.3 + Client Cert</option>
-            <option value="psk">Pre-Shared Key (PSK)</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row single" style="margin-bottom:10px">
-        <div class="form-group">
-          <label class="form-label">Serialization</label>
-          <select class="form-input" id="srv-serialization">
-            <option value="msgpack">MessagePack (compact binary)</option>
-            <option value="protobuf">Protocol Buffers</option>
-            <option value="json">JSON (debug/dev)</option>
-            <option value="cbor">CBOR</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group" style="margin-bottom:0">
-        <label class="form-label">Transport Layer</label>
-        <div class="transport-toggle-group">
-          <button class="transport-btn selected" id="transport-ws" onclick="selectTransport('ws',this)" type="button">
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style="flex-shrink:0"><path d="M2 6.5c0-1.2.5-2.3 1.3-3.1M10.7 3.4A4.5 4.5 0 0 1 6.5 11M6.5 2a4.5 4.5 0 0 1 0 9" stroke="currentColor" stroke-width="1.15" stroke-linecap="round"/></svg>
-            WebSocket
-            <span class="transport-sub">Real-time bidirectional</span>
-          </button>
-          <button class="transport-btn" id="transport-rest" onclick="selectTransport('rest',this)" type="button">
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style="flex-shrink:0"><path d="M2 6.5h9M7.5 3.5l3 3-3 3" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            REST API
-            <span class="transport-sub">Request-response</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Command and Control -->
-    <div class="server-section-header" style="margin-top:14px">
-    </div>
-
-    <div class="connect-card server-card">
-      <div class="card-title">
-        <span class="card-accent-bar" style="background:var(--accent)"></span>
-        C2 Interfaces
-      </div>
-      <div class="server-interface-list">
-        <div class="srv-iface-item">
-          <div class="srv-iface-icon">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1.5" y="1.5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.1"/><path d="M4 6h4M4 4h2M4 8h3" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
-          </div>
-          <div class="srv-iface-info">
-            <span class="srv-iface-name">Task Queue</span>
-            <span class="srv-iface-desc">Priority-based queuing for pending agent tasks</span>
-          </div>
-          <div class="srv-iface-badge active">Active</div>
-        </div>
-        <div class="srv-iface-item">
-          <div class="srv-iface-icon">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 9.5V5l4-3 4 3v4.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 9.5V7h3v2.5" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </div>
-          <div class="srv-iface-info">
-            <span class="srv-iface-name">Command Execution</span>
-            <span class="srv-iface-desc">Dispatch &amp; track shell, script, and module commands</span>
-          </div>
-          <div class="srv-iface-badge active">Active</div>
-        </div>
-        <div class="srv-iface-item">
-          <div class="srv-iface-icon">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.1"/><path d="M6 3v3l2 1" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
-          </div>
-          <div class="srv-iface-info">
-            <span class="srv-iface-name">Job Scheduler</span>
-            <span class="srv-iface-desc">Cron-style recurring jobs and time-triggered payloads</span>
-          </div>
-          <div class="srv-iface-badge active">Active</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Telemetry and Logs -->
-    <div class="server-section-header" style="margin-top:14px">
-    </div>
-
-    <div class="connect-card server-card" style="margin-bottom:4px">
-      <div class="card-title">
-        <span class="card-accent-bar" style="background:var(--accent)"></span>
-        Telemetry Interfaces
-      </div>
-      <div class="server-interface-list">
-        <div class="srv-iface-item">
-          <div class="srv-iface-icon">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1.5" y="2" width="9" height="8" rx="1" stroke="currentColor" stroke-width="1.1"/><path d="M3 5h6M3 7h4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
-          </div>
-          <div class="srv-iface-info">
-            <span class="srv-iface-name">Log Streaming</span>
-            <span class="srv-iface-desc">Real-time structured log pipeline to SIEM / console</span>
-          </div>
-          <div class="srv-iface-badge active">Active</div>
-        </div>
-        <div class="srv-iface-item">
-          <div class="srv-iface-icon">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><polyline points="1.5,8 3.5,5 5.5,6.5 7.5,3 10.5,8" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </div>
-          <div class="srv-iface-info">
-            <span class="srv-iface-name">Metrics</span>
-            <span class="srv-iface-desc">CPU, memory, latency, agent throughput dashboards</span>
-          </div>
-          <div class="srv-iface-badge active">Active</div>
-        </div>
-        <div class="srv-iface-item" style="border-bottom:none">
-          <div class="srv-iface-icon">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1.5v1M6 9.5v1M1.5 6h1M9.5 6h1" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><circle cx="6" cy="6" r="2.5" stroke="currentColor" stroke-width="1.1"/><path d="M2.9 2.9l.7.7M8.4 8.4l.7.7M2.9 9.1l.7-.7M8.4 3.6l.7-.7" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
-          </div>
-          <div class="srv-iface-info">
-            <span class="srv-iface-name">Alerting Rules</span>
-            <span class="srv-iface-desc">Threshold-based and anomaly-driven event notifications</span>
-          </div>
-          <div class="srv-iface-badge active">Active</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Run Server -->
-    <div style="margin-top:16px;">
-      <button class="btn-generate" style="width:100%;background:rgba(204,26,26,0.1);border:1px solid rgba(204,26,26,0.4);color:var(--accent);height:44px;border-radius:4px;font-family:var(--head);font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;transition:background .2s,box-shadow .2s;" onmouseover="this.style.background='rgba(204,26,26,0.18)';this.style.boxShadow='0 0 20px rgba(204,26,26,0.2)'" onmouseout="this.style.background='rgba(204,26,26,0.1)';this.style.boxShadow='none'" onclick="runServerToggle(this)" type="button">
-        <svg id="srv-run-icon" width="14" height="14" viewBox="0 0 14 14" fill="none"><polygon points="3,2 12,7 3,12" fill="currentColor"/></svg>
-        <span id="srv-run-label">Run Server</span>
-      </button>
-    </div>
-
-    <!-- Server Terminal Log -->
-    <div style="margin-top:14px;">
-      <div class="log-terminal" id="srv-log-terminal" style="max-height:200px;">
-        <div class="log-header">
-          <div class="log-dot r"></div>
-          <div class="log-dot y"></div>
-          <div class="log-dot g"></div>
-          <div class="log-title-bar">server.log</div>
-          <button onclick="document.getElementById('srv-log-terminal').querySelectorAll('.log-line:not(:first-child)').forEach(e=>e.remove())" type="button" style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-family:var(--mono);font-size:9px;letter-spacing:.8px;padding:0;transition:color .15s;" onmouseover="this.style.color='var(--text-sec)'" onmouseout="this.style.color='var(--text-dim)'">CLR</button>
-        </div>
-        <div class="log-line log-info">
-          <span class="log-time">[--:--:--]</span>
-          <span class="log-msg">Server not started. Press Run Server to begin.</span>
-        </div>
-      </div>
-    </div>
-
-
+  <!-- ══════════ BEACON PANEL ══════════ -->
   <div id="payload-beacon" class="payload-pane" style="display:none;">
 
     <!-- BEACON TYPE -->
@@ -1064,6 +779,420 @@
     </div>
 
   </div><!-- /payload-beacon -->
+
+  <!-- ══════════ SERVER PANEL ══════════ -->
+  <div id="payload-server" class="payload-pane" style="display:none;">
+
+    <!-- ── SERVER STATUS OVERVIEW ── -->
+    <div class="srv-status-overview">
+      <div class="srv-status-badge" id="srv-global-status">
+        <span class="srv-status-dot" id="srv-status-dot"></span>
+        <span class="srv-status-text" id="srv-status-text">OFFLINE</span>
+      </div>
+      <div class="srv-stat-chips">
+        <div class="srv-chip">
+          <span class="srv-chip-label">Collectors</span>
+          <span class="srv-chip-val" id="srv-chip-collectors">0</span>
+        </div>
+        <div class="srv-chip">
+          <span class="srv-chip-label">Events/s</span>
+          <span class="srv-chip-val" id="srv-chip-eps">—</span>
+        </div>
+        <div class="srv-chip">
+          <span class="srv-chip-label">Queue</span>
+          <span class="srv-chip-val" id="srv-chip-queue">—</span>
+        </div>
+        <div class="srv-chip">
+          <span class="srv-chip-label">Uptime</span>
+          <span class="srv-chip-val" id="srv-chip-uptime">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SECTION: SERVER CONFIG ── -->
+    <div class="server-section-header"></div>
+    <div class="connect-card server-card">
+      <div class="card-title">
+        <span class="card-accent-bar server"></span>
+        Server Config
+      </div>
+      <div class="form-row">
+        <label class="form-label">Bind Address</label>
+        <input class="form-input" id="srv-host" type="text" placeholder="0.0.0.0" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="form-row">
+        <label class="form-label">API Port</label>
+        <input class="form-input" id="srv-port" type="text" placeholder="8443" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="form-row">
+        <label class="form-label">Server Name / FQDN</label>
+        <input class="form-input" id="srv-fqdn" type="text" placeholder="oxsium-central.corp.local" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="form-row">
+        <label class="form-label">Transport Protocol</label>
+        <div class="transport-toggle-group">
+          <button class="transport-btn selected" id="srv-proto-https" onclick="selectServerProto('https',this)" type="button">
+            HTTPS
+          </button>
+          <button class="transport-btn" id="srv-proto-http" onclick="selectServerProto('http',this)" type="button">
+            HTTP
+          </button>
+          <button class="transport-btn" id="srv-proto-tcp" onclick="selectServerProto('tcp',this)" type="button">
+            TCP
+          </button>
+          <button class="transport-btn" id="srv-proto-smb" onclick="selectServerProto('smb',this)" type="button">
+            SMB
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SECTION: MODULES ── -->
+    <div class="server-section-header" style="margin-top:14px"></div>
+    <div class="connect-card server-card">
+      <div class="card-title">
+        <span class="card-accent-bar server"></span>
+        Active Modules
+      </div>
+      <div class="srv-module-grid">
+
+        <div class="srv-module-item" id="mod-ingest" style="opacity:0.45;pointer-events:none;">
+          <div class="srv-module-icon">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 1v8M4 6l3 4 3-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12h10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          </div>
+          <div class="srv-module-info">
+            <span class="srv-module-name">Data Ingestion</span>
+            <span class="srv-module-desc">Collector push endpoint</span>
+          </div>
+          <label class="srv-toggle">
+            <input type="checkbox" id="mod-ingest-chk" disabled>
+            <span class="srv-toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="srv-module-item" id="mod-auth" style="opacity:0.45;pointer-events:none;">
+          <div class="srv-module-icon">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><rect x="3" y="6" width="8" height="7" rx="1" stroke="currentColor" stroke-width="1.3"/><path d="M5 6V4a2 2 0 0 1 4 0v2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="7" cy="9.5" r="1" fill="currentColor"/></svg>
+          </div>
+          <div class="srv-module-info">
+            <span class="srv-module-name">Auth &amp; RBAC</span>
+            <span class="srv-module-desc">Kerberos / API key auth</span>
+          </div>
+          <label class="srv-toggle">
+            <input type="checkbox" id="mod-auth-chk" disabled>
+            <span class="srv-toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="srv-module-item" id="mod-pipeline" style="opacity:0.45;pointer-events:none;">
+          <div class="srv-module-icon">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="3" cy="7" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="7" cy="7" r="1.5" stroke="currentColor" stroke-width="1.3"/><circle cx="11" cy="7" r="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 7h1M8.5 7h1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          </div>
+          <div class="srv-module-info">
+            <span class="srv-module-name">Processing Pipeline</span>
+            <span class="srv-module-desc">Parse · Deduplicate · Enrich</span>
+          </div>
+          <label class="srv-toggle">
+            <input type="checkbox" id="mod-pipeline-chk" disabled>
+            <span class="srv-toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="srv-module-item" id="mod-storage" style="opacity:0.45;pointer-events:none;">
+          <div class="srv-module-icon">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><ellipse cx="7" cy="4" rx="5" ry="2" stroke="currentColor" stroke-width="1.3"/><path d="M2 4v6c0 1.1 2.24 2 5 2s5-.9 5-2V4" stroke="currentColor" stroke-width="1.3"/><path d="M2 7c0 1.1 2.24 2 5 2s5-.9 5-2" stroke="currentColor" stroke-width="1.3"/></svg>
+          </div>
+          <div class="srv-module-info">
+            <span class="srv-module-name">Storage Engine</span>
+            <span class="srv-module-desc">Time-series · Relational · Archive</span>
+          </div>
+          <label class="srv-toggle">
+            <input type="checkbox" id="mod-storage-chk" disabled>
+            <span class="srv-toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="srv-module-item" id="mod-correlation" style="opacity:0.45;pointer-events:none;">
+          <div class="srv-module-icon">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2 10 L5 6 L8 8 L12 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="3" r="1.2" fill="currentColor"/></svg>
+          </div>
+          <div class="srv-module-info">
+            <span class="srv-module-name">Correlation Engine</span>
+            <span class="srv-module-desc">Anomaly · Baseline · Trends</span>
+          </div>
+          <label class="srv-toggle">
+            <input type="checkbox" id="mod-correlation-chk" disabled>
+            <span class="srv-toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="srv-module-item" id="mod-alerting" style="opacity:0.45;pointer-events:none;">
+          <div class="srv-module-icon">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 1a4 4 0 0 1 4 4c0 3 1 4 1 4H2s1-1 1-4a4 4 0 0 1 4-4z" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 9s0 2 1.5 2 1.5-2 1.5-2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          </div>
+          <div class="srv-module-info">
+            <span class="srv-module-name">Alerting</span>
+            <span class="srv-module-desc">Email · Teams · Webhook</span>
+          </div>
+          <label class="srv-toggle">
+            <input type="checkbox" id="mod-alerting-chk" disabled>
+            <span class="srv-toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="srv-module-item" id="mod-scheduler" style="opacity:0.45;pointer-events:none;">
+          <div class="srv-module-icon">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.3"/><path d="M7 4v3l2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="srv-module-info">
+            <span class="srv-module-name">Scheduler</span>
+            <span class="srv-module-desc">Collector tasks · Retry logic</span>
+          </div>
+          <label class="srv-toggle">
+            <input type="checkbox" id="mod-scheduler-chk" disabled>
+            <span class="srv-toggle-track"></span>
+          </label>
+        </div>
+
+        <div class="srv-module-item" id="mod-reporting" style="opacity:0.45;pointer-events:none;">
+          <div class="srv-module-icon">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><rect x="2" y="1" width="10" height="12" rx="1" stroke="currentColor" stroke-width="1.3"/><path d="M5 5h4M5 7h4M5 9h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          </div>
+          <div class="srv-module-info">
+            <span class="srv-module-name">Reporting</span>
+            <span class="srv-module-desc">PDF · Excel · Compliance</span>
+          </div>
+          <label class="srv-toggle">
+            <input type="checkbox" id="mod-reporting-chk" disabled>
+            <span class="srv-toggle-track"></span>
+          </label>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── SECTION: DATA INGESTION CONFIG ── -->
+    <div class="server-section-header" style="margin-top:14px"></div>
+    <div class="connect-card server-card">
+      <div class="card-title">
+        <span class="card-accent-bar server"></span>
+        Ingestion &amp; Collector Settings
+      </div>
+      <div class="form-row">
+        <label class="form-label">Collector Auth Method</label>
+        <div class="transport-toggle-group" style="grid-template-columns:1fr 1fr 1fr">
+          <button class="transport-btn selected" id="col-auth-apikey" onclick="selectCollectorAuth('apikey',this)" type="button">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3" stroke="currentColor" stroke-width="1.2"/><path d="M7.5 7.5L11 11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            API Key
+            <span class="transport-sub">Token</span>
+          </button>
+          <button class="transport-btn" id="col-auth-mtls" onclick="selectCollectorAuth('mtls',this)" type="button">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><rect x="2" y="5" width="8" height="6" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5V4a2 2 0 0 1 4 0v1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            mTLS
+            <span class="transport-sub">Cert</span>
+          </button>
+          <button class="transport-btn" id="col-auth-shared" onclick="selectCollectorAuth('shared',this)" type="button">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M6 1a4 4 0 0 1 4 4 4 4 0 0 1-4 4 4 4 0 0 1-4-4 4 4 0 0 1 4-4z" stroke="currentColor" stroke-width="1.2"/><path d="M4 6h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            PSK
+            <span class="transport-sub">Shared</span>
+          </button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">API Key / Shared Secret</label>
+        <div class="key-wrap">
+          <input class="form-input" id="srv-api-key" type="text" placeholder="Click refresh to generate..." autocomplete="off" spellcheck="false" readonly>
+          <button class="key-gen-btn" onclick="genKey('srv-api-key')" title="Generate new key" type="button">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7A5 5 0 1 1 7 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M7 2l2-2v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Input Format</label>
+        <div class="fmt-grid" style="grid-template-columns:repeat(4,1fr)">
+          <button class="fmt-btn server selected" data-fmt="json" onclick="selectFmt('server','json',this)" type="button">JSON</button>
+          <button class="fmt-btn server" data-fmt="xml"  onclick="selectFmt('server','xml',this)"  type="button">XML</button>
+          <button class="fmt-btn server" data-fmt="csv"  onclick="selectFmt('server','csv',this)"  type="button">CSV</button>
+          <button class="fmt-btn server" data-fmt="syslog" onclick="selectFmt('server','syslog',this)" type="button">Syslog</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Max Queue Size</label>
+        <div class="range-wrap">
+          <input type="range" class="beacon-range" id="srv-queue-range" min="100" max="50000" value="10000"
+            oninput="document.getElementById('srv-queue-val').textContent=this.value">
+          <span class="range-val" id="srv-queue-val">10000</span>
+        </div>
+      </div>
+
+      <!-- ZIP Import -->
+      <div class="server-section-header" style="margin:14px 0 12px"></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label class="form-label" style="display:flex;align-items:center;gap:7px;">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><rect x="2" y="1" width="10" height="12" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M6 1v4h2V1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 7h4M5 9h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          Import ZIP Archive
+        </label>
+        <div id="srv-zip-dropzone"
+          style="border:1.5px dashed var(--border);border-radius:6px;padding:18px 14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;background:var(--bg-input);transition:border-color .2s,background .2s;"
+          onclick="document.getElementById('srv-zip-file').click()"
+          ondragover="event.preventDefault();this.style.borderColor='var(--srv)';this.style.background='var(--srv-muted)'"
+          ondragleave="this.style.borderColor='var(--border)';this.style.background='var(--bg-input)'"
+          ondrop="event.preventDefault();this.style.borderColor='var(--border)';this.style.background='var(--bg-input)';handleZipDrop(event)">
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none" style="color:var(--srv);opacity:0.8"><path d="M11 2v12M7 10l4 5 4-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 17h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span style="font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text-sec);">DROP .ZIP HERE</span>
+          <span style="font-size:10px;color:var(--text-dim);">or click to browse — ZIP files only</span>
+        </div>
+        <input type="file" id="srv-zip-file" accept=".zip" style="display:none" onchange="handleZipSelect(this)">
+        <div id="srv-zip-info" style="display:none;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style="color:var(--srv);flex-shrink:0"><rect x="2" y="1" width="10" height="12" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M6 1v4h2V1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span id="srv-zip-name" style="font-family:var(--mono);font-size:11px;color:var(--text-hi);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+          <span id="srv-zip-size" style="font-family:var(--mono);font-size:10px;color:var(--text-dim);flex-shrink:0;"></span>
+          <button type="button" onclick="clearZip()" style="background:none;border:none;cursor:pointer;color:var(--text-dim);padding:0;line-height:1;" title="Remove">
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 2l7 7M9 2l-7 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <button class="btn-generate" type="button" id="srv-zip-import-btn" onclick="importZip()" style="height:36px;font-size:11px;letter-spacing:1.5px;background:var(--srv-muted);border:1px solid rgba(224,123,32,0.35);color:var(--srv);" disabled>
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style="margin-right:7px;vertical-align:middle"><path d="M7 1v8M4 6l3 4 3-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12h10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          Import
+        </button>
+      </div>
+
+    </div>
+
+    <!-- ── SECTION: TLS / SSL ── -->
+    <div class="server-section-header" style="margin-top:14px"></div>
+    <div class="connect-card server-card" style="opacity:0.4;pointer-events:none;user-select:none;">
+      <div class="card-title">
+        <span class="card-accent-bar server"></span>
+        TLS / SSL
+      </div>
+      <div class="form-row">
+        <label class="form-label">Certificate File</label>
+        <div style="display:flex;gap:6px;flex:1">
+          <input class="form-input" id="srv-cert" type="text" placeholder="server.crt" autocomplete="off" spellcheck="false" style="flex:1">
+          <button class="btn-secondary" type="button" onclick="document.getElementById('srv-cert-file').click()" style="height:34px;padding:0 10px;font-size:10px;white-space:nowrap">Browse</button>
+          <input type="file" id="srv-cert-file" style="display:none" onchange="document.getElementById('srv-cert').value=this.files[0]?.name||''">
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Private Key</label>
+        <div style="display:flex;gap:6px;flex:1">
+          <input class="form-input" id="srv-key" type="text" placeholder="server.key" autocomplete="off" spellcheck="false" style="flex:1">
+          <button class="btn-secondary" type="button" onclick="document.getElementById('srv-key-file').click()" style="height:34px;padding:0 10px;font-size:10px;white-space:nowrap">Browse</button>
+          <input type="file" id="srv-key-file" style="display:none" onchange="document.getElementById('srv-key').value=this.files[0]?.name||''">
+        </div>
+      </div>
+      <div class="srv-toggle-row">
+        <label class="toggle-item">
+          <span class="toggle-switch"><input type="checkbox" id="srv-tls-mtls"><span class="toggle-track agent-track"></span></span>
+          <span class="toggle-label">Require mTLS</span>
+        </label>
+        <label class="toggle-item">
+          <span class="toggle-switch"><input type="checkbox" id="srv-tls-verify" checked><span class="toggle-track agent-track"></span></span>
+          <span class="toggle-label">Verify Client Certs</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- ── SECTION: ALERTING ── -->
+    <div class="server-section-header" style="margin-top:14px"></div>
+    <div class="connect-card server-card" style="opacity:0.4;pointer-events:none;user-select:none;">
+      <div class="card-title">
+        <span class="card-accent-bar server"></span>
+        Alerting &amp; Notification
+      </div>
+      <div class="form-row">
+        <label class="form-label">Channels</label>
+        <div class="fmt-grid" style="grid-template-columns:repeat(4,1fr)">
+          <button class="fmt-btn server" data-fmt="email" onclick="this.classList.toggle('selected')" type="button">Email</button>
+          <button class="fmt-btn server" data-fmt="teams" onclick="this.classList.toggle('selected')" type="button">Teams</button>
+          <button class="fmt-btn server" data-fmt="slack" onclick="this.classList.toggle('selected')" type="button">Slack</button>
+          <button class="fmt-btn server" data-fmt="webhook" onclick="this.classList.toggle('selected')" type="button">Webhook</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Alert Threshold (events/min)</label>
+        <div class="range-wrap">
+          <input type="range" class="beacon-range" id="srv-alert-range" min="1" max="500" value="50"
+            oninput="document.getElementById('srv-alert-val').textContent=this.value">
+          <span class="range-val" id="srv-alert-val">50</span>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Webhook URL</label>
+        <input class="form-input" id="srv-webhook" type="text" placeholder="https://hooks.teams.microsoft.com/..." autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+
+    <!-- ── SECTION: NETWORK INTERFACES ── -->
+    <div class="server-section-header" style="margin-top:14px"></div>
+    <div class="connect-card server-card">
+      <div class="card-title">
+        <span class="card-accent-bar server"></span>
+        Network Interfaces
+      </div>
+      <div class="server-interface-list">
+        <div class="srv-iface-item">
+          <div class="srv-iface-icon"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="10" height="8" rx="1" stroke="currentColor" stroke-width="1.2"/></svg></div>
+          <div class="srv-iface-info">
+            <span class="srv-iface-name">Loopback</span>
+            <span class="srv-iface-desc">127.0.0.1 — Local only</span>
+          </div>
+          <span class="srv-iface-badge active">UP</span>
+        </div>
+        <div class="srv-iface-item">
+          <div class="srv-iface-icon"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4" stroke="currentColor" stroke-width="1.2"/></svg></div>
+          <div class="srv-iface-info">
+            <span class="srv-iface-name">Ethernet</span>
+            <span class="srv-iface-desc" id="srv-iface-eth">Detecting...</span>
+          </div>
+          <span class="srv-iface-badge active">UP</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SECTION: ACTIVE LISTENERS ── -->
+    <div class="server-section-header" style="margin-top:14px"></div>
+    <div class="connect-card server-card">
+      <div class="card-title">
+        <span class="card-accent-bar server"></span>
+        Active Listeners
+      </div>
+      <div class="server-interface-list" id="srv-listeners-list">
+        <div class="srv-iface-item">
+          <div class="srv-iface-icon"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4" stroke="currentColor" stroke-width="1.2"/></svg></div>
+          <div class="srv-iface-info">
+            <span class="srv-iface-name">No listeners</span>
+            <span class="srv-iface-desc">Start the server to activate listeners</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── RUN SERVER ── -->
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn-generate" id="srv-run-btn" style="flex:1;background:rgba(224,123,32,0.08);border:1px solid rgba(224,123,32,0.35);color:var(--srv);height:44px;border-radius:4px;font-family:var(--head);font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;transition:background .2s,box-shadow .2s,border-color .2s;"
+        onmouseover="this.style.background='rgba(224,123,32,0.18)';this.style.boxShadow='0 0 22px rgba(224,123,32,0.22)';this.style.borderColor='rgba(224,123,32,0.65)'"
+        onmouseout="if(!this.dataset.running){this.style.background='rgba(224,123,32,0.08)';this.style.boxShadow='none';this.style.borderColor='rgba(224,123,32,0.35)'}"
+        onclick="runServerToggle(this)" type="button">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><polygon points="3,2 12,7 3,12" fill="currentColor"/></svg>
+        <span id="srv-run-label" style="color:#ffb46a;letter-spacing:2px;">Run Server</span>
+      </button>
+      <button class="btn-secondary" type="button" onclick="saveServerConfig()" style="height:44px;padding:0 16px;font-size:10px;letter-spacing:1px">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style="margin-right:5px;vertical-align:middle"><rect x="2" y="2" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M5 2v3h4V2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        Save Config
+      </button>
+    </div>
+
+    <!-- ── SERVER LOG ── -->
+    <div style="margin-top:14px">
+      <div class="log-title-bar">server.log</div>
+      <div class="log-terminal" id="srv-log-terminal">
+        <div class="log-line log-info"><span class="log-msg">Oxsium Central Server — not started. Configure modules and press Run Server.</span></div>
+      </div>
+    </div>
+
+  </div><!-- /payload-server -->
 
       </div>
 
@@ -1414,8 +1543,8 @@
           <button class="chip"        data-filter="asrep"   onclick="setFilter('asrep',this)">
             <span class="chip-dot" style="background:var(--red)"></span>AS-REP
           </button>
-          <button class="chip"        data-filter="disabled" onclick="setFilter('disabled',this)">
-            <span class="chip-dot" style="background:var(--text-dim)"></span>Disabled
+          <button class="chip"        data-filter="deleted" onclick="setFilter('deleted',this)">
+            <span class="chip-dot" style="background:var(--red)"></span>Deleted
           </button>
           <button class="chip"        data-filter="nopwd" onclick="setFilter('nopwd',this)">
             <span class="chip-dot" style="background:#ff4455"></span>NoPwd
@@ -1464,7 +1593,7 @@
               <circle cx="18" cy="12" r="7" stroke="currentColor" stroke-width="1.5"/>
               <path d="M4 32c0-7.7 6.3-14 14-14s14 6.3 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
-            <p>Connect to a domain first</p>
+            <p>Connect to a domain first or Import ZIP Module</p>
           </div>
         </div>
       </div>
@@ -1648,11 +1777,8 @@
         </div>
         <div class="filter-chips" id="comp-filter-chips">
           <button class="chip active" data-filter="all" onclick="setComputerFilter('all',this)">All</button>
-          <button class="chip" data-filter="unconstrained" onclick="setComputerFilter('unconstrained',this)">
-            <span class="chip-dot" style="background:var(--red)"></span>Unconstrained
-          </button>
-          <button class="chip" data-filter="constrained" onclick="setComputerFilter('constrained',this)">
-            <span class="chip-dot" style="background:var(--amber)"></span>Constrained
+          <button class="chip" data-filter="delegation" onclick="setComputerFilter('delegation',this)">
+            <span class="chip-dot" style="background:var(--amber)"></span>Delegation
           </button>
           <button class="chip" data-filter="rbcd" onclick="setComputerFilter('rbcd',this)">
             <span class="chip-dot" style="background:var(--amber)"></span>RBCD
@@ -1687,6 +1813,7 @@
           <div class="c-col c-col-os">OS</div>
           <div class="c-col c-col-flag u-center" title="Server">SRV</div>
           <div class="c-col c-col-flag u-center" title="Has SPN">SPN</div>
+          <div class="c-col c-col-flag u-center" title="Delegation type">DG</div>
           <div class="c-col c-col-flag u-center" title="Status">STAT</div>
           <div class="c-col c-col-flag u-center" title="Resource-based constrained delegation">RBCD</div>
         </div>
@@ -1697,7 +1824,7 @@
               <rect x="6" y="8" width="24" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/>
               <path d="M10 28h16M14 24h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
-            <p>Connect to a domain first</p>
+            <p>Connect to a domain first or Import ZIP Module</p>
           </div>
         </div>
       </div>
@@ -1773,8 +1900,7 @@
         <div class="o-table-head">
           <div class="o-col o-col-name">OU Name</div>
           <div class="o-col o-col-path">Path</div>
-          <div class="o-col o-col-desc">Description</div>
-          <div class="o-col o-col-objcount">Object Count</div>
+          <div class="o-col o-col-objcount">Objects</div>
           <div class="o-col o-col-inherit">Inheritance</div>
           <div class="o-col o-col-managed">Managed By</div>
         </div>
@@ -1784,7 +1910,7 @@
             <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
               <path d="M7 10c0-1 1-2 2-2h18c1 0 2 1 2 2v6h-3V9H9v16h8v3H9c-1 0-2-1-2-2V10Z" stroke="currentColor" stroke-width="1.5"/>
             </svg>
-            <p>Connect to a domain first</p>
+            <p>Connect to a domain first or Import ZIP Module</p>
           </div>
         </div>
       </div>
@@ -1874,6 +2000,9 @@
           <button class="chip" data-filter="settings" onclick="setGPOFilter('settings',this)">
             <span class="chip-dot" style="background:var(--amber)"></span>Settings
           </button>
+          <button class="chip" data-filter="cpassword" onclick="setGPOFilter('cpassword',this)">
+            <span class="chip-dot" style="background:var(--red)"></span>Cpassword
+          </button>
         </div>
         <button class="btn-secondary" onclick="loadGPOs()" style="margin-left:auto;height:34px;padding:0 14px;font-size:11px;">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -1902,7 +2031,7 @@
             <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
               <path d="M7 10c0-1 1-2 2-2h18c1 0 2 1 2 2v6h-3V9H9v16h8v3H9c-1 0-2-1-2-2V10Z" stroke="currentColor" stroke-width="1.5"/>
             </svg>
-            <p>Connect to a domain first</p>
+            <p>Connect to a domain first or Import ZIP Module</p>
           </div>
         </div>
       </div>
@@ -1971,12 +2100,12 @@
       <div class="groups-table-wrap" id="groups-table-wrap">
         <div class="gr-table-head">
           <div class="gr-col gr-col-name">Group</div>
-          <div class="gr-col gr-col-type">Type</div>
+          <div class="gr-col gr-col-sid">SID</div>
           <div class="gr-col gr-col-members">Members</div>
-          <div class="gr-col gr-col-protected">Protected</div>
+          <div class="gr-col gr-col-empty">Privilege</div>
         </div>
         <div class="gr-table-body" id="gr-table-body">
-          <div class="gr-empty" id="gr-empty"><p>Connect to a domain first</p></div>
+          <div class="gr-empty" id="gr-empty"><p>Connect to a domain first or Import ZIP Module</p></div>
         </div>
       </div>
 
@@ -2043,7 +2172,7 @@
           <div class="tr-col tr-col-type">Type</div>
         </div>
         <div class="tr-table-body" id="tr-table-body">
-          <div class="tr-empty" id="tr-empty"><p>Connect to a domain first</p></div>
+          <div class="tr-empty" id="tr-empty"><p>Connect to a domain first or Import ZIP Module</p></div>
         </div>
       </div>
 
@@ -2120,6 +2249,33 @@
       </div>
     </div>
 
+    <!-- ── ACE DB stat satırı ── -->
+    <div id="acl-db-stat" style="
+        display:none;
+        align-items:center;
+        gap:10px;
+        padding:6px 14px;
+        margin-bottom:6px;
+        background:rgba(0,212,255,.06);
+        border:1px solid rgba(0,212,255,.18);
+        border-radius:6px;
+        font-size:11px;
+        font-family:var(--font-mono);
+        color:var(--text-mid);
+    ">
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style="flex-shrink:0;opacity:.7">
+        <ellipse cx="6.5" cy="3.5" rx="4.5" ry="2" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M2 3.5v3c0 1.1 2 2 4.5 2s4.5-.9 4.5-2v-3" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M2 6.5v3c0 1.1 2 2 4.5 2s4.5-.9 4.5-2v-3" stroke="currentColor" stroke-width="1.2"/>
+      </svg>
+      <span>DB-də cəmi ACE:</span>
+      <span id="acl-db-total" style="color:var(--accent);font-weight:600;">—</span>
+      <span style="opacity:.5">·</span>
+      <span>Yüklənib:</span>
+      <span id="acl-db-loaded" style="color:var(--text-hi);">0</span>
+      <span style="opacity:.4;margin-left:auto;font-size:10px;" id="acl-db-pct"></span>
+    </div>
+
     <div class="acl-split" id="acl-split">
       <div class="acl-table-wrap" id="acl-table-wrap">
         <div class="acl-table-head">
@@ -2139,7 +2295,7 @@
           <div class="acl-col acl-col-type">Type</div>
         </div>
         <div class="acl-table-body" id="acl-table-body">
-          <div class="acl-empty" id="acl-empty"><p>Connect to a domain first</p></div>
+          <div class="acl-empty" id="acl-empty"><p>Connect to a domain first or Import ZIP Module</p></div>
         </div>
       </div>
 
@@ -2154,6 +2310,39 @@
         </div>
         <div class="detail-body" id="acl-detail-body"></div>
       </div>
+    </div>
+
+    <!-- ── Load More düyməsi — acl-split-dən KƏNARDA, həmişə görünür ── -->
+    <div id="acl-load-more-wrap" style="display:none; padding:10px 0 2px; text-align:center; flex-shrink:0;">
+      <button
+        id="acl-load-more-btn"
+        type="button"
+        onclick="loadMoreACLs()"
+        style="
+          display:inline-flex;
+          align-items:center;
+          gap:7px;
+          height:34px;
+          padding:0 18px;
+          background:rgba(0,212,255,.08);
+          border:1px solid rgba(0,212,255,.3);
+          border-radius:6px;
+          color:var(--accent);
+          font-family:var(--font-mono);
+          font-size:11px;
+          cursor:pointer;
+          transition:background .15s,border-color .15s;
+          width:auto;
+        "
+        onmouseover="this.style.background='rgba(0,212,255,.16)';this.style.borderColor='rgba(0,212,255,.6)'"
+        onmouseout="this.style.background='rgba(0,212,255,.08)';this.style.borderColor='rgba(0,212,255,.3)'"
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M6 3.5v5M3.5 6.5l2.5 2.5 2.5-2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Load More
+      </button>
     </div>
 
     <div class="acl-loading" id="acl-loading" style="display:none;">
@@ -2316,99 +2505,10 @@
 <script src="decision_engine/decision_engine_view.js"></script>
 <script src="JavaScript/06-pentest.js"></script>
 <script src="JavaScript/12-payload.js"></script>
+<script src="JavaScript/13-server.js"></script>
+<script src="JavaScript/14-zip-import.js"></script>
 
 <script>
-// ── Transport Layer toggle ────────────────────────────────────────────────────
-function selectTransport(type, btn) {
-  document.querySelectorAll('.transport-btn').forEach(b => b.classList.remove('selected'));
-  btn.classList.add('selected');
-}
-
-// ── Server Run / Stop toggle ─────────────────────────────────────────────────
-(function() {
-  let _srvRunning = false;
-  let _srvInterval = null;
-
-  function srvLog(cls, msg) {
-    const terminal = document.getElementById('srv-log-terminal');
-    if (!terminal) return;
-    const now = new Date();
-    const ts = [now.getHours(), now.getMinutes(), now.getSeconds()]
-      .map(n => String(n).padStart(2,'0')).join(':');
-    const line = document.createElement('div');
-    line.className = 'log-line ' + cls;
-    line.innerHTML = '<span class="log-time">[' + ts + ']</span><span class="log-msg">' + msg + '</span>';
-    terminal.appendChild(line);
-    terminal.scrollTop = terminal.scrollHeight;
-  }
-
-  window.runServerToggle = function(btn) {
-    const icon  = document.getElementById('srv-run-icon');
-    const label = document.getElementById('srv-run-label');
-
-    if (!_srvRunning) {
-      // — Start —
-      _srvRunning = true;
-      btn.style.background    = 'rgba(204,26,26,0.18)';
-      btn.style.borderColor   = 'rgba(204,26,26,0.7)';
-      btn.style.boxShadow     = '0 0 18px rgba(204,26,26,0.18)';
-      icon.innerHTML          = '<rect x="3" y="2" width="3" height="10" fill="currentColor"/><rect x="8" y="2" width="3" height="10" fill="currentColor"/>';
-      label.textContent       = 'Stop Server';
-
-      const iface = document.getElementById('srv-iface')?.value || '0.0.0.0';
-      const port  = document.getElementById('srv-port')?.value  || '4444';
-      const auth  = document.getElementById('srv-auth-method')?.value || 'token';
-      const trans = document.getElementById('transport-ws')?.classList.contains('selected') ? 'WebSocket' : 'REST';
-
-      srvLog('log-ok',   'Server process initialized.');
-      setTimeout(() => srvLog('log-info', 'Binding listener on ' + iface + ':' + port + ' ...'), 300);
-      setTimeout(() => srvLog('log-ok',   'Listener bound successfully.'), 700);
-      setTimeout(() => srvLog('log-info', 'Transport layer: ' + trans), 1000);
-      setTimeout(() => srvLog('log-info', 'Auth method: ' + auth), 1300);
-      setTimeout(() => srvLog('log-ok',   'Server ready. Awaiting agent connections...'), 1700);
-
-      let beat = 0;
-      _srvInterval = setInterval(function() {
-        beat++;
-        if (beat % 8 === 0) srvLog('log-info', 'Heartbeat check — 0 agents connected.');
-      }, 5000);
-
-    } else {
-      // — Stop —
-      _srvRunning = false;
-      clearInterval(_srvInterval);
-      btn.style.background    = 'rgba(204,26,26,0.1)';
-      btn.style.borderColor   = 'rgba(204,26,26,0.4)';
-      btn.style.boxShadow     = 'none';
-      icon.innerHTML          = '<polygon points="3,2 12,7 3,12" fill="currentColor"/>';
-      label.textContent       = 'Run Server';
-
-      srvLog('log-warn', 'Shutdown signal received.');
-      setTimeout(() => srvLog('log-info', 'Closing listener socket...'), 300);
-      setTimeout(() => srvLog('log-err',  'Server stopped.'), 700);
-    }
-  };
-})();
-
-// ── Extend switchPayloadTab to handle 'server' tab ───────────────────────────
-window.addEventListener('load', function() {
-  const _orig = window.switchPayloadTab;
-  window.switchPayloadTab = function(tab) {
-    const serverPane = document.getElementById('payload-server');
-    const serverBtn  = document.getElementById('ptab-server');
-    if (tab === 'server') {
-      document.querySelectorAll('.payload-pane').forEach(p => p.style.display = 'none');
-      if (serverPane) serverPane.style.display = '';
-      document.querySelectorAll('.payload-tab-btn').forEach(b => b.classList.remove('active'));
-      if (serverBtn) serverBtn.classList.add('active');
-      return;
-    }
-    if (serverPane) serverPane.style.display = 'none';
-    if (serverBtn)  serverBtn.classList.remove('active');
-    if (_orig) _orig(tab);
-  };
-});
-
 // ── ACL dangerous row highlighter ───────────────────────────────────────────
 
 
@@ -2458,93 +2558,6 @@ function _aclStartObserver() {
 }
 
 document.addEventListener('DOMContentLoaded', _aclStartObserver);
-
-// ── ZIP Uploader ─────────────────────────────────────────────────────────────
-
-function zipDragOver(e) {
-  e.preventDefault();
-  const zone = document.getElementById('zip-drop-zone');
-  if (zone) {
-    zone.style.borderColor = 'var(--accent)';
-    zone.style.background  = 'var(--bg-selected)';
-  }
-}
-
-function zipDragLeave(e) {
-  const zone = document.getElementById('zip-drop-zone');
-  if (zone) {
-    zone.style.borderColor = 'var(--border-hi)';
-    zone.style.background  = 'var(--bg-input)';
-  }
-}
-
-function zipDrop(e) {
-  e.preventDefault();
-  zipDragLeave(e);
-  const files = e.dataTransfer && e.dataTransfer.files;
-  if (files && files.length > 0) _processZipFile(files[0]);
-}
-
-function zipFileSelected(input) {
-  if (input.files && input.files.length > 0) _processZipFile(input.files[0]);
-  input.value = '';
-}
-
-function _zipSetStatus(msg, pct, isError) {
-  const wrap = document.getElementById('zip-status');
-  const bar  = document.getElementById('zip-status-bar');
-  const txt  = document.getElementById('zip-status-msg');
-  if (!wrap) return;
-  wrap.style.display = 'block';
-  if (bar) {
-    bar.style.width      = (pct != null ? pct : 0) + '%';
-    bar.style.background = isError ? 'var(--red)' : 'var(--accent)';
-  }
-  if (txt) {
-    txt.style.color = isError ? 'var(--red)' : 'var(--text-sec)';
-    txt.textContent = msg;
-  }
-}
-
-async function _processZipFile(file) {
-  if (!file || !file.name.toLowerCase().endsWith('.zip')) {
-    _zipSetStatus('Only .zip files are accepted.', 100, true);
-    return;
-  }
-
-  _zipSetStatus('Uploading: ' + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)', 30);
-
-  const fd = new FormData();
-  fd.append('file', file);
-
-  try {
-    const resp = await fetch((typeof API_BASE !== 'undefined' ? API_BASE : 'http://localhost:5000') + '/api/upload-zip', {
-      method: 'POST',
-      body: fd
-    });
-
-    _zipSetStatus('Processing...', 70);
-
-    const data = await resp.json();
-
-    if (data.success) {
-      const fileList = data.extracted.slice(0, 5).join(', ') + (data.extracted.length > 5 ? ' ...' : '');
-      _zipSetStatus(
-        data.count + ' file(s) extracted to Domain Object folder.' +
-        (fileList ? ' (' + fileList + ')' : ''),
-        100,
-        false
-      );
-      if (typeof showToast === 'function') showToast(data.count + ' file(s) uploaded successfully.', 'success');
-    } else {
-      _zipSetStatus('Error: ' + (data.error || 'Unknown error'), 100, true);
-      if (typeof showToast === 'function') showToast(data.error || 'ZIP upload failed', 'error');
-    }
-  } catch (err) {
-    _zipSetStatus('Connection error: ' + err.message, 100, true);
-    if (typeof showToast === 'function') showToast('ZIP upload error: ' + err.message, 'error');
-  }
-}
 // ─────────────────────────────────────────────────────────────────────────────
 </script>
 </body>

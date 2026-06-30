@@ -1,6 +1,6 @@
 // ─── offline_processorp6.cpp ─────────────────────────────────────────────────
 // SECTION 24  Delegation target parser
-// SECTION 25  parse_raw_computer  — raw_computers.ndjson → ProcessedComputer
+// SECTION 25  parse_raw_computer  — raw_computers.jsonl → ProcessedComputer
 // SECTION 26  analyze_computer_delegation — Kerberos delegation analysis
 // SECTION 27  analyze_computer_risk  — attack path / risk scoring
 // SECTION 28  computer_to_json  — serialization
@@ -8,14 +8,14 @@
 // SECTION 30  process_computers  (public entry point)
 //             process()  — updated to include computers
 //
-//  Input : raw_cache/raw_computers.ndjson   (ComputerCollector output)
-//  Output: Domain Objects/domain_computers.ndjson
+//  Input : raw_cache/raw_computers.jsonl   (ComputerCollector output)
+//  Output: Domain Objects/domain_computers.jsonl
 //
 //  Each output line is one computer object with all enriched fields.
 //
 //  Reading (Python):
 //    import json
-//    with open("domain_computers.ndjson") as f:
+//    with open("domain_computers.jsonl") as f:
 //        for line in f:
 //            computer = json.loads(line)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -24,6 +24,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <system_error>
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  SECTION 24 — Delegation target parser  (mirrors analyze_delegation for users)
@@ -74,7 +75,7 @@ static PDelegationTarget parse_delegation_target(const std::string& raw) {
 // ═════════════════════════════════════════════════════════════════════════════
 //  SECTION 25 — parse_raw_computer
 //
-//  Reads one NDJSON line (from raw_computers.ndjson) and fills a
+//  Reads one JSONL line (from raw_computers.jsonl) and fills a
 //  ProcessedComputer. Field names match ComputerCollector's schema exactly
 //  (see computer_collector.h).
 // ═════════════════════════════════════════════════════════════════════════════
@@ -157,7 +158,7 @@ ProcessedComputer OfflineProcessor::parse_raw_computer(const std::string& obj) c
             "msLAPS-PasswordExpirationTime",
             nullptr
         };
-        // Locate the laps_attributes object within the NDJSON line
+        // Locate the laps_attributes object within the JSONL line
         const std::string la_key = "\"laps_attributes\"";
         size_t la_pos = obj.find(la_key);
         if (la_pos != std::string::npos) {
@@ -228,7 +229,7 @@ ProcessedComputer OfflineProcessor::parse_raw_computer(const std::string& obj) c
     // ── Timestamps ────────────────────────────────────────────────────────────
     // when_created / when_changed come from ComputerCollector as ISO-8601 already
     // (collector now calls generalized_time_to_iso). Apply it defensively here
-    // too so that any legacy raw_computers.ndjson with the old "YYYYMMDDHHmmss.0Z"
+    // too so that any legacy raw_computers.jsonl with the old "YYYYMMDDHHmmss.0Z"
     // format is also handled correctly, mirroring how groups are parsed.
     {
         std::string wc = jp_str(obj, "when_created");
@@ -427,7 +428,7 @@ void OfflineProcessor::analyze_computer_risk(ProcessedComputer& c) const
 // ═════════════════════════════════════════════════════════════════════════════
 //  SECTION 28 — computer_to_json
 //
-//  Serializes a ProcessedComputer to a single NDJSON line (no trailing \n).
+//  Serializes a ProcessedComputer to a single JSONL line (no trailing \n).
 //  Field order: identity → state → OS → type → stale → spn → delegation →
 //               rbcd → laps → acl → sid_history → group → attack →
 //               risk → network → timestamps → domain.
@@ -563,7 +564,7 @@ std::string OfflineProcessor::computer_to_json(const ProcessedComputer& c) const
 bool OfflineProcessor::load_and_process_computers(const std::string& raw_path,
                                                    const std::string& out_path)
 {
-    log_info("[OfflineProcessor] Reading raw_computers.ndjson: " + raw_path);
+    log_info("[OfflineProcessor] Reading raw_computers.jsonl: " + raw_path);
 
     auto raw_lines = read_ndjson_lines(raw_path);
     if (raw_lines.empty()) {
@@ -628,14 +629,28 @@ bool OfflineProcessor::process_computers(const OfflineProcessorOptions& opts)
 
     // Group lookup is needed to build token_group_sids for each computer.
     // User lookup provides additional SID → name resolution for RBCD principals.
-    load_raw_users_lookup (opts.raw_dir + "/raw_users.ndjson");
-    load_raw_groups_lookup(opts.raw_dir + "/raw_groups.ndjson");
+    load_raw_users_lookup (opts.raw_dir + "/raw_users.jsonl");
+    load_raw_groups_lookup(opts.raw_dir + "/raw_groups.jsonl");
 
     if (!opts.domain_name.empty()) domain_name_ = opts.domain_name;
     if (domain_name_.empty()) domain_name_ = base_dn_to_domain(base_dn_);
 
-    const std::string& ext6 = opts.output_ext.empty() ? "ndjson" : opts.output_ext;
-    return load_and_process_computers(
-        opts.raw_dir    + "/raw_computers.ndjson",
+    const std::string& ext6 = opts.output_ext.empty() ? "jsonl" : opts.output_ext;
+    const std::string raw_path = opts.raw_dir + "/raw_computers.jsonl";
+    bool ok = load_and_process_computers(
+        raw_path,
         opts.output_dir + "/domain_computers." + ext6);
+
+    if (ok) {
+        std::error_code ec;
+        fs::remove(raw_path, ec);
+        if (ec) {
+            log_warn("[OfflineProcessor] Could not delete raw file: " + raw_path +
+                     " — " + ec.message());
+        } else {
+            log_ok("[OfflineProcessor] Deleted raw file: " + raw_path);
+        }
+    }
+
+    return ok;
 }

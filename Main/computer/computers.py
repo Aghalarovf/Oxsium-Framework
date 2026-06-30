@@ -489,6 +489,7 @@ def get_domain_computers(ip, domain, username, password, config):
                 "dn": dn_value,
                 "display_name": str(get_attr("displayName") or ""),
                 "sid": own_sid,
+                "primary_group_id": primary_group_id,
                 "description": str(get_attr("description") or ""),
                 "disabled": user_account_control["disabled"],
                 "os": os_name,

@@ -1,10 +1,10 @@
 _DEF_COUNTS = {
-    "users": 0,
-    "computers": 0,
     "groups": 0,
-    "ous": 0,
     "gpos": 0,
+    "ous": 0,
     "trusts": 0,
+    "computers": 0,
+    "users": 0,
 }
 
 

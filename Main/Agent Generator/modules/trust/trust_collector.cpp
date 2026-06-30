@@ -6,7 +6,7 @@
 //    direction, transitivity, SID filtering, quarantine, selective auth,
 //    TGT delegation, RC4/AES session keys, forest vs external classification.
 //
-//  Output: raw_cache/raw_trusts.ndjson  (one JSON object per line)
+//  Output: raw_cache/raw_trusts.jsonl  (one JSON object per line)
 //  Offline analysis: TrustOfflineProcessor (offline_processorp12.cpp)
 // ─────────────────────────────────────────────────────────────────────────────
 #include "trust_collector.h"
@@ -109,7 +109,7 @@ int TrustCollector::collect(const TrustCollectorOptions& opts) {
     }
 
     // ── Write output ──────────────────────────────────────────────────────────
-    output_path_ = fs::path(opts.output_dir) / "raw_trusts.ndjson";
+    output_path_ = fs::path(opts.output_dir) / "raw_trusts.jsonl";
     std::ofstream f(output_path_, std::ios::binary);
     if (!f) {
         log_err("[Trust] Failed to open: " + output_path_.string());
@@ -124,7 +124,7 @@ int TrustCollector::collect(const TrustCollectorOptions& opts) {
         return -1;
     }
 
-    log_ok("[Trust] raw_trusts.ndjson -> " + output_path_.string());
+    log_ok("[Trust] raw_trusts.jsonl -> " + output_path_.string());
     log_ok("[Trust] " + std::to_string(entries.size()) + " trust relationship(s) collected.");
 
     return static_cast<int>(entries.size());

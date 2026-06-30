@@ -427,34 +427,103 @@ def _rule_03_generic_all_domain_root(ctx):
 
 
 def _rule_04_dcsync_get_changes_all(ctx):
+    """DCSync yoxlaması — domain root VƏ Configuration NC üzərindən.
+
+    DÜZƏLİŞ 1 (AND məntiqi): Əsl DCSync hücumu eyni identity-yə HƏM
+    DS-Replication-Get-Changes (1131f6aa), HƏM DƏ DS-Replication-Get-
+    Changes-All (1131f6ad) hüquqlarının birgə verilməsini tələb edir.
+    Tək biri (məsələn yalnız Get-Changes) sirr çıxarmaq üçün kifayət
+    deyil. Əvvəlki versiya OR məntiqi ilə false positive verirdi.
+
+    DÜZƏLİŞ 2 (Configuration NC kor nöqtəsi): Replication hüquqları
+    domain root-da deyil, Configuration NC kökündə (CN=Configuration,
+    <forest-root-dn>) verilə bilər. Bu, real, lakin az rast gəlinən
+    bir kor nöqtə idi — yalnız domain_root_aces yoxlananda buradan
+    keçən imtiyazlar görünmürdü. İndi hər iki NC ACL siyahısı yoxlanır.
+
+    DS-Replication-Get-Changes-In-Filtered-Set (89e95b76) tək başına
+    kifayət deyil (yalnız RODC filtered-attribute replikasiyası);
+    AND şərtinə daxil edilmir.
+
+    Üç yolla aşkarlanır (hər iki NC üzərindən):
+      1. GenericAll (0x000F01FF) — implicit olaraq hər iki hüququ əhatə edir
+      2. AllExtendedRights (0x100) + boş GUID — blanket, implicit hər ikisi
+      3. Eyni identity üçün HƏM Get-Changes, HƏM Get-Changes-All GUID-ləri
+    """
+    # ── Precomputed flag (online enumeration tərəfindən doldurulur) ───────────
     try:
         if bool(ctx.get("has_dcsync_right")):
             return True
+    except Exception:
+        pass
 
-        identities = _get_identities(ctx)
-        if not identities:
-            return False
+    # ── Identities: user SID + bütün transitiv qrup SID-ləri ─────────────────
+    try:
+        identities = {_safe_str(i).upper() for i in _get_identities(ctx) if i}
+    except Exception:
+        identities = set()
 
-        for ace in _get_aces(ctx, "domain_root_aces"):
+    if not identities:
+        return False
+
+    _DCSYNC_GUIDS = frozenset({
+        _GUID_DS_REPLICATION_GET_CHANGES,
+        _GUID_DS_REPLICATION_GET_CHANGES_ALL,
+        _GUID_DS_REPLICATION_GET_CHANGES_IN_FILTERED_SET,
+    })
+
+    def _check_aces_for_dcsync(aces) -> bool:
+        """Verilmiş ACE siyahısında bu identity üçün DCSync aşkarlayır."""
+        matched_guids: set[str] = set()
+        for ace in aces:
             try:
-                if ace.get("trustee_sid") not in identities:
+                trustee = _safe_str(
+                    ace.get("trustee_sid") or ace.get("sid")
+                ).upper()
+                if trustee not in identities:
                     continue
-                if "ALLOW" not in _safe_str(ace.get("ace_type")).upper():
+
+                ace_type = ace.get("ace_type")
+                if ace_type is not None and "ALLOW" not in _safe_str(ace_type).upper():
                     continue
 
                 mask     = _safe_int(ace.get("access_mask") or ace.get("mask"))
                 obj_type = _safe_str(
-                    ace.get("object_type") or ace.get("object_guid")
+                    ace.get("object_type") or ace.get("object_guid") or ""
                 ).lower().strip()
 
-                if (mask & _RIGHT_ALL_EXTENDED) and not obj_type:
+                # Yoxlama 1: GenericAll tam mask
+                if (mask & _GENERIC_ALL_MASK) == _GENERIC_ALL_MASK:
                     return True
 
-                if obj_type == _GUID_DS_REPLICATION_GET_CHANGES_ALL and (mask & _RIGHT_ALL_EXTENDED):
+                # Yoxlama 2 + 3: AllExtendedRights biti lazımdır
+                if not (mask & _RIGHT_ALL_EXTENDED):
+                    continue
+
+                # Yoxlama 2: Blanket AllExtendedRights (GUID yoxdur)
+                if not obj_type:
                     return True
+
+                # Yoxlama 3: GUID-i yığ — hər ikisi lazımdır
+                if obj_type in _DCSYNC_GUIDS:
+                    matched_guids.add(obj_type)
 
             except Exception:
                 continue
+
+        return (
+            _GUID_DS_REPLICATION_GET_CHANGES in matched_guids
+            and _GUID_DS_REPLICATION_GET_CHANGES_ALL in matched_guids
+        )
+
+    try:
+        # ── Domain root NC ────────────────────────────────────────────────────
+        if _check_aces_for_dcsync(_get_aces(ctx, "domain_root_aces")):
+            return True
+
+        # ── Configuration NC root — əvvəllər yoxlanmayan kor nöqtə ──────────
+        if _check_aces_for_dcsync(_get_aces(ctx, "configuration_root_aces")):
+            return True
 
         return False
     except Exception:
@@ -502,6 +571,13 @@ def _rule_06_adminsdholder_generic_all(ctx):
         return False
 
 def _rule_07_all_extended_rights_domain(ctx):
+    """AllExtendedRights yoxlaması — domain root VƏ Configuration NC üzərindən.
+
+    Replication extended rights domain root-da deyil, Configuration NC-nin
+    kökündə (CN=Configuration,...) verilə bilər. Əvvəlki versiya yalnız
+    domain_root_aces-i yoxlayırdı; bu, real bir kor nöqtə idi. İndi
+    configuration_root_aces də eyni məntiqlə yoxlanır.
+    """
     try:
         if bool(ctx.get("has_all_extended_rights_on_domain")):
             return True
@@ -516,22 +592,13 @@ def _rule_07_all_extended_rights_domain(ctx):
         _GUID_FORCE_CHANGE_PASSWORD,
     })
 
-    try:
-        aces       = _get_aces(ctx, "domain_root_aces")
-        identities = _get_identities(ctx)
-
+    def _check_extended_rights_aces(aces, identities_upper: set[str]) -> bool:
         for ace in aces:
             try:
-                # ── Trustee match ─────────────────────────────────────────────
                 trustee_sid = _safe_str(ace.get("trustee_sid") or ace.get("sid")).upper()
-                if not trustee_sid:
+                if not trustee_sid or trustee_sid not in identities_upper:
                     continue
 
-                identities_upper = {_safe_str(i).upper() for i in identities}
-                if trustee_sid not in identities_upper:
-                    continue
-
-                # ── ACE type — skip explicit Deny ACEs ────────────────────────
                 ace_type = ace.get("ace_type")
                 if ace_type is not None and "ALLOW" not in _safe_str(ace_type).upper():
                     continue
@@ -541,24 +608,33 @@ def _rule_07_all_extended_rights_domain(ctx):
                     ace.get("object_type") or ace.get("object_guid") or ""
                 ).lower().strip()
 
-                # ── Check 1: GenericAll (0x000F01FF) implies everything ────────
                 if (mask & _GENERIC_ALL_MASK) == _GENERIC_ALL_MASK:
                     return True
 
-                # ── Check 2: AllExtendedRights bit must be set for checks 3-7 ─
                 if not (mask & _RIGHT_ALL_EXTENDED):
                     continue
 
-                # ── Check 3: Blanket AllExtendedRights (no GUID restriction) ──
                 if not obj_type:
                     return True
 
-                # ── Check 4-7: Scoped to one of the dangerous GUIDs ───────────
                 if obj_type in _DR_EXTENDED_GUIDS:
                     return True
 
             except Exception:
                 continue
+        return False
+
+    try:
+        identities = _get_identities(ctx)
+        identities_upper = {_safe_str(i).upper() for i in identities}
+
+        # ── Domain root NC ────────────────────────────────────────────────────
+        if _check_extended_rights_aces(_get_aces(ctx, "domain_root_aces"), identities_upper):
+            return True
+
+        # ── Configuration NC root — əvvəllər yoxlanmayan kor nöqtə ──────────
+        if _check_extended_rights_aces(_get_aces(ctx, "configuration_root_aces"), identities_upper):
+            return True
 
         return False
     except Exception:
@@ -710,7 +786,6 @@ _RULES = [
     (2,  "tier1", "Operator Groups (Account/Server/Backup/GPO/Print/Cryptographic/Hyper-V/Storage Replica Administrators)",        _rule_02_operator_groups),
     (3,  "tier1",    "GenericAll+WriteOwner @ Domain root",                                _rule_03_generic_all_domain_root),
     (4,  "tier1",    "DS-Replication-Get-Changes-All — DCSync",                            _rule_04_dcsync_get_changes_all),
-
     (6,  "tier1",    "AdminSDHolder — GA/WriteOwner/WriteDACL/GenericWrite/WriteProperty", _rule_06_adminsdholder_generic_all),
     (7,  "tier1",    "AllExtendedRights @ Domain — includes DCSync",                       _rule_07_all_extended_rights_domain),
     (8,  "absolute",    "Nested group -> Domain Admins (Rule 1 groups)",                      _rule_08_nested_to_domain_admins),
@@ -767,14 +842,10 @@ def colorize(level: int, text: str) -> str:
 def check_admin(ctx: dict) -> dict:
     if not ctx or not isinstance(ctx, dict):
         return {
-            "is_admin":      False,
-            "matched_rules": [],
-            "by_severity": {
-                "absolute": [],
-                "tier1":    [],
-                "tier2":    [],
-                "tier3":    [],
-            },
+            "is_direct_admin": False,
+            "potential_admin": "",
+            "matched_rules":   [],
+            "by_severity":     {"absolute": [], "tier1": [], "tier2": [], "tier3": []},
         }
 
     matched: list[dict] = []
@@ -801,22 +872,22 @@ def check_admin(ctx: dict) -> dict:
         except Exception as exc:
             logger.debug("Rule %d (%s) error: %s", level, label, exc)
 
-    by_severity: dict[str, list[dict]] = {
-        "absolute": [],
-        "tier1":    [],
-        "tier2":    [],
-        "tier3":    [],
-    }
-
+    by_severity: dict[str, list[dict]] = {"absolute": [], "tier1": [], "tier2": [], "tier3": []}
     for rule in matched:
         sev = rule.get("severity", "")
         if sev in by_severity:
             by_severity[sev].append(rule)
 
+    # is_direct_admin → ən azı bir "absolute" qayda match etdikdə True
+    # potential_admin  → "absolute" yoxdur, amma ən azı bir tier1/2/3 varsa "PAD"
+    has_absolute = bool(by_severity["absolute"])
+    has_tier     = bool(by_severity["tier1"] or by_severity["tier2"] or by_severity["tier3"])
+
     return {
-        "is_admin":      bool(matched),
-        "matched_rules": matched,
-        "by_severity":   by_severity,
+        "is_direct_admin": has_absolute,
+        "potential_admin": ("PAD" if has_tier and not has_absolute else ""),
+        "matched_rules":   matched,
+        "by_severity":     by_severity,
     }
 
 
@@ -866,9 +937,10 @@ def check_admin_from_file(proto_path: str) -> list[dict]:
                 user.get("username"), exc,
             )
             check_result = {
-                "is_admin":      False,
-                "matched_rules": [],
-                "by_severity":   {"absolute": [], "tier1": [], "tier2": [], "tier3": []},
+                "is_direct_admin": False,
+                "potential_admin": "",
+                "matched_rules":   [],
+                "by_severity":     {"absolute": [], "tier1": [], "tier2": [], "tier3": []},
             }
 
         results.append({

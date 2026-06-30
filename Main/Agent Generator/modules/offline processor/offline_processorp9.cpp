@@ -1,10 +1,10 @@
 // ─── offline_processor_network.cpp ───────────────────────────────────────────
 // SECTION 30  NetworkProcessor — OfflineProcessor extension
 //
-//  Reads raw_network.ndjson (produced by NetworkCollector) and writes
-//  domain_network.ndjson with:
+//  Reads raw_network.jsonl (produced by NetworkCollector) and writes
+//  domain_network.jsonl with:
 //    - Notable service flags  (has_smb, has_rdp, has_ssh, etc.)
-//    - AD correlation         (matches IP/hostname → raw_computers.ndjson)
+//    - AD correlation         (matches IP/hostname → raw_computers.jsonl)
 //    - Risk scoring           (0-100 composite based on open ports + OS + AD)
 //    - Risk factor labels     (human-readable contributing factors)
 //
@@ -13,7 +13,7 @@
 //
 //  Reading output (Python):
 //    import json
-//    with open("domain_network.ndjson") as f:
+//    with open("domain_network.jsonl") as f:
 //        for line in f:
 //            host = json.loads(line)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -612,33 +612,33 @@ static std::string network_host_to_json(const ProcessedNetworkHost& h,
 //  OfflineProcessor::process_network
 //  Called from OfflineProcessor::process() — same pattern as process_computers()
 //
-//  1. Reads raw_network.ndjson line by line
+//  1. Reads raw_network.jsonl line by line
 //  2. Parses each host
 //  3. Correlates with AD computers (hostname / DNS name match)
 //  4. Computes risk scores + service flags
-//  5. Writes domain_network.ndjson
+//  5. Writes domain_network.jsonl
 // ─────────────────────────────────────────────────────────────────────────────
 bool OfflineProcessor::process_network(const OfflineProcessorOptions& opts) {
-    const std::string raw_path = (fs::path(opts.raw_dir) / "raw_network.ndjson").string();
-    const std::string& ext = opts.output_ext.empty() ? "ndjson" : opts.output_ext;
+    const std::string raw_path = (fs::path(opts.raw_dir) / "raw_network.jsonl").string();
+    const std::string& ext = opts.output_ext.empty() ? "jsonl" : opts.output_ext;
     const std::string out_path = (fs::path(opts.output_dir) / ("domain_network." + ext)).string();
 
     fs::create_directories(opts.output_dir);
 
     auto lines = read_ndjson_lines(raw_path);
     if (lines.empty()) {
-        log_warn("[NetworkProcessor] raw_network.ndjson is empty or missing: " + raw_path);
+        log_warn("[NetworkProcessor] raw_network.jsonl is empty or missing: " + raw_path);
         return false;
     }
     log_info("[NetworkProcessor] Processing " + std::to_string(lines.size())
              + " network hosts from " + raw_path);
 
     // ── Build AD lookup: hostname (lower) → computer info ────────────────────
-    // We read raw_computers.ndjson if it exists for correlation
+    // We read raw_computers.jsonl if it exists for correlation
     std::unordered_map<std::string, std::tuple<std::string,std::string,std::string,std::string>>
         hostname_to_ad;  // hostname → (computer_name, dn, sid, os)
 
-    const std::string raw_computers = (fs::path(opts.raw_dir) / "raw_computers.ndjson").string();
+    const std::string raw_computers = (fs::path(opts.raw_dir) / "raw_computers.jsonl").string();
     auto comp_lines = read_ndjson_lines(raw_computers);
     for (const auto& cl : comp_lines) {
         std::string dns_name = jp_str(cl, "dns_name");

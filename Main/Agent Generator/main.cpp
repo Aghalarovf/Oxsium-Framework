@@ -1,27 +1,239 @@
 #include "include/core.h"
 #include "include/ldap_engine.h"
-#include "modules/user/user_collector.h"
-#include "modules/group/group_collector.h"
+#include "modules/dominfo/dominfo_collector.h"
 #include "modules/ace/ace_collector.h"
-#include "modules/computer/computer_collector.h"
-#include "modules/ou/ou_collector.h"
-#include "modules/offline processor/offline_processor.h"
+#include "modules/trust/trust_collector.h"
 #include "modules/gpo/gpo_collector.h"
+#include "modules/ou/ou_collector.h"
+#include "modules/group/group_collector.h"
+#include "modules/computer/computer_collector.h"
+#include "modules/user/user_collector.h"
+#include "modules/offline processor/offline_processor.h"
 #include "modules/certificate/cert_collector.h"
 #include "modules/network/network_collector.h"
-#include "modules/dominfo/dominfo_collector.h"
-#include "modules/trust/trust_collector.h"
 
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
-#include <filesystem>
-#include <fstream>
+#include <cstring>
 #include <algorithm>
-#include <sstream>
-#include <vector>
+#include <chrono>
+#include <fstream>
+#include <functional>
 #include <memory>
+#include <random>
+#include <set>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <filesystem>
 #include <windows.h>
+#include <zlib.h>
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  ZIP packaging helpers
+//  Minimal ZIP writer — no external library needed beyond zlib (deflate).
+//  Produces oxgen_<RANDOM_ID>.zip containing all Domain Objects jsonl/json files.
+//
+//  Format: ZIP local file headers + deflated data + central directory + EOCD.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Generate a random 8-char hex ID, e.g. "a3f8c21b"
+static std::string generate_random_id() {
+    auto seed = static_cast<uint64_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count()
+    );
+    std::mt19937_64 rng(seed);
+    uint32_t hi = static_cast<uint32_t>(rng() & 0xFFFFFFFF);
+    uint32_t lo = static_cast<uint32_t>(rng() & 0xFFFFFFFF);
+    char buf[17];
+    std::snprintf(buf, sizeof(buf), "%08x%08x", hi, lo);
+    return std::string(buf, 8);
+}
+
+// Write little-endian uint16_t / uint32_t helpers
+static void write_u16(std::ostream& os, uint16_t v) {
+    uint8_t b[2] = { static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8) };
+    os.write(reinterpret_cast<const char*>(b), 2);
+}
+static void write_u32(std::ostream& os, uint32_t v) {
+    uint8_t b[4] = {
+        static_cast<uint8_t>(v),
+        static_cast<uint8_t>(v >> 8),
+        static_cast<uint8_t>(v >> 16),
+        static_cast<uint8_t>(v >> 24)
+    };
+    os.write(reinterpret_cast<const char*>(b), 4);
+}
+
+// Simple CRC-32 using zlib
+static uint32_t crc32_of(const std::vector<uint8_t>& data) {
+    uLong crc = crc32(0L, Z_NULL, 0);
+    crc = crc32(crc, data.data(), static_cast<uInt>(data.size()));
+    return static_cast<uint32_t>(crc);
+}
+
+// Deflate compress (raw deflate, stored if compression fails/grows)
+static std::vector<uint8_t> deflate_compress(const std::vector<uint8_t>& in,
+                                              uint16_t& method_out) {
+    // Empty input — store as-is
+    if (in.empty()) {
+        method_out = 0;
+        return in;
+    }
+
+    uLongf bound = compressBound(static_cast<uLong>(in.size()));
+    std::vector<uint8_t> out(bound);
+
+    z_stream zs{};
+    // deflateInit2 return dəyərini yoxla
+    if (deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                     -15, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+        // Init uğursuz — raw saxla
+        method_out = 0;
+        return in;
+    }
+
+    zs.next_in   = const_cast<Bytef*>(in.data());
+    zs.avail_in  = static_cast<uInt>(in.size());
+    zs.next_out  = out.data();
+    zs.avail_out = static_cast<uInt>(out.size());
+
+    // deflate() return dəyərini yoxla — Z_STREAM_END olmalıdır
+    int ret = deflate(&zs, Z_FINISH);
+    uLong compressed_size = zs.total_out;
+    deflateEnd(&zs);
+
+    if (ret != Z_STREAM_END || compressed_size >= in.size()) {
+        // Sıxışdırma uğursuz oldu və ya faydası olmadı — raw saxla
+        method_out = 0;
+        return in;
+    }
+
+    method_out = 8;       // ZIP method: deflated
+    out.resize(compressed_size);
+    return out;
+}
+
+struct ZipEntry {
+    std::string           name;         // filename inside ZIP
+    std::vector<uint8_t>  compressed;
+    uint16_t              method;       // 0=stored, 8=deflated
+    uint32_t              crc;
+    uint32_t              uncompressed_size;
+    uint32_t              local_offset; // byte offset of local file header
+};
+
+// Package all files in output_dir into oxgen_<id>.zip placed next to output_dir
+static std::string package_domain_objects(const fs::path& output_dir,
+                                          const fs::path& zip_dir) {
+    std::string rand_id = generate_random_id();
+    std::string zip_name = "oxgen_" + rand_id + ".zip";
+    fs::path zip_path = zip_dir / zip_name;
+
+    // Collect all files in output_dir (non-recursive, flat)
+    std::vector<fs::path> files;
+    for (auto& entry : fs::directory_iterator(output_dir)) {
+        if (entry.is_regular_file()) {
+            files.push_back(entry.path());
+        }
+    }
+    std::sort(files.begin(), files.end());
+
+    std::ofstream zf(zip_path, std::ios::binary);
+    if (!zf) return "";
+
+    std::vector<ZipEntry> entries;
+    entries.reserve(files.size());
+
+    // ── Write local file headers + data ──────────────────────────────────────
+    for (const auto& fpath : files) {
+        // Read file
+        std::ifstream fin(fpath, std::ios::binary);
+        if (!fin) continue;
+        std::vector<uint8_t> raw_data(
+            (std::istreambuf_iterator<char>(fin)),
+             std::istreambuf_iterator<char>()
+        );
+        fin.close();
+
+        ZipEntry e;
+        e.name              = fpath.filename().string();
+        e.uncompressed_size = static_cast<uint32_t>(raw_data.size());
+        e.crc               = crc32_of(raw_data);
+        e.compressed        = deflate_compress(raw_data, e.method);
+
+        // tellp() xətasını yoxla (-1 = stream pozulub)
+        std::streampos lpos = zf.tellp();
+        if (!zf || lpos < 0) { zf.close(); fs::remove(zip_path); return ""; }
+        e.local_offset = static_cast<uint32_t>(lpos);
+
+        // Local file header  (signature 0x04034b50)
+        write_u32(zf, 0x04034b50);
+        write_u16(zf, 20);                              // version needed
+        write_u16(zf, 0);                               // general purpose flags
+        write_u16(zf, e.method);
+        write_u16(zf, 0); write_u16(zf, 0);            // mod time/date (zero)
+        write_u32(zf, e.crc);
+        write_u32(zf, static_cast<uint32_t>(e.compressed.size()));
+        write_u32(zf, e.uncompressed_size);
+        write_u16(zf, static_cast<uint16_t>(e.name.size()));
+        write_u16(zf, 0);                               // extra field length
+        zf.write(e.name.data(), static_cast<std::streamsize>(e.name.size()));
+        zf.write(reinterpret_cast<const char*>(e.compressed.data()),
+                 static_cast<std::streamsize>(e.compressed.size()));
+
+        // Yazma xətasını yoxla
+        if (!zf) { zf.close(); fs::remove(zip_path); return ""; }
+
+        entries.push_back(std::move(e));
+    }
+
+    // ── Central directory ─────────────────────────────────────────────────────
+    std::streampos cd_pos = zf.tellp();
+    if (!zf || cd_pos < 0) { zf.close(); fs::remove(zip_path); return ""; }
+    uint32_t cd_offset = static_cast<uint32_t>(cd_pos);
+    for (const auto& e : entries) {
+        write_u32(zf, 0x02014b50);                      // central dir signature
+        write_u16(zf, 20);                              // version made by
+        write_u16(zf, 20);                              // version needed
+        write_u16(zf, 0);                               // general purpose flags
+        write_u16(zf, e.method);
+        write_u16(zf, 0); write_u16(zf, 0);            // mod time/date
+        write_u32(zf, e.crc);
+        write_u32(zf, static_cast<uint32_t>(e.compressed.size()));
+        write_u32(zf, e.uncompressed_size);
+        write_u16(zf, static_cast<uint16_t>(e.name.size()));
+        write_u16(zf, 0);                               // extra
+        write_u16(zf, 0);                               // comment
+        write_u16(zf, 0);                               // disk start
+        write_u16(zf, 0);                               // int attrib
+        write_u32(zf, 0);                               // ext attrib
+        write_u32(zf, e.local_offset);
+        zf.write(e.name.data(), static_cast<std::streamsize>(e.name.size()));
+    }
+    std::streampos cd_end_pos = zf.tellp();
+    if (!zf || cd_end_pos < 0) { zf.close(); fs::remove(zip_path); return ""; }
+    uint32_t cd_size = static_cast<uint32_t>(cd_end_pos) - cd_offset;
+
+    // ── End of central directory ──────────────────────────────────────────────
+    write_u32(zf, 0x06054b50);                          // EOCD signature
+    write_u16(zf, 0);                                   // disk number
+    write_u16(zf, 0);                                   // disk with CD
+    write_u16(zf, static_cast<uint16_t>(entries.size()));
+    write_u16(zf, static_cast<uint16_t>(entries.size()));
+    write_u32(zf, cd_size);
+    write_u32(zf, cd_offset);
+    write_u16(zf, 0);                                   // comment length
+
+    zf.close();
+    // Bağlama əməliyyatından sonra stream vəziyyətini yoxla
+    if (!zf) {
+        fs::remove(zip_path);
+        return "";
+    }
+    return zip_path.string();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Extra UI color codes
@@ -108,7 +320,7 @@ struct ReplOptions {
     std::string dom_pass;
     std::string srv_ip;
     std::string srv_port;   // empty until user sets
-    std::string file_type;  // "json" or "ndjson" — empty = default (ndjson)
+    std::string file_type;  // "json" or "jsonl" — empty = default (jsonl)
     bool        dc_port_set = false;
 };
 
@@ -150,16 +362,16 @@ static fs::path domain_objects_root() {
 
 static std::string module_default_filename(Module module) {
     switch (module) {
-        case Module::USERS:     return "domain_users.ndjson";
-        case Module::GROUPS:    return "domain_groups.ndjson";
-        case Module::COMPUTERS: return "domain_computers.ndjson";
-        case Module::NETWORK:   return "domain_network.ndjson";
-        case Module::DOMINFO:   return "domain_info.json";
-        case Module::OUS:       return "domain_ous.ndjson";
-        case Module::GPOS:      return "domain_gpos.json";
-        case Module::CERTS:     return "domain_certificates.json";
-        case Module::ACES:      return "domain_aces.ndjson";
-        default:                return "domain_objects.json";
+        case Module::USERS:     return "domain_users.jsonl";
+        case Module::GROUPS:    return "domain_groups.jsonl";
+        case Module::COMPUTERS: return "domain_computers.jsonl";
+        case Module::NETWORK:   return "domain_network.jsonl";
+        case Module::DOMINFO:   return "domain_info.jsonl";
+        case Module::OUS:       return "domain_ous.jsonl";
+        case Module::GPOS:      return "domain_gpos.jsonl";
+        case Module::CERTS:     return "domain_certificates.jsonl";
+        case Module::ACES:      return "domain_aces.jsonl";
+        default:                return "domain_objects.jsonl";
     }
 }
 
@@ -171,13 +383,13 @@ static fs::path output_file_for(Module module, const std::string& output_name) {
 }
 
 // Returns the correct file extension based on FILETYPE option.
-// ndjson is the default; json wraps all records in a JSON array.
+// jsonl is the default; json wraps all records in a JSON array.
 static std::string effective_ext(const std::string& file_type) {
     if (file_type == "json") return "json";
-    return "ndjson"; // default
+    return "jsonl"; // default
 }
 
-// Replaces the extension of a domain_*.ndjson path with the chosen one.
+// Replaces the extension of a domain_*.jsonl path with the chosen one.
 static int run_raw_user_passthrough(LDAPEngine& engine) {
     UserCollector uc(engine);
     if (uc.collect() < 0) {
@@ -185,10 +397,10 @@ static int run_raw_user_passthrough(LDAPEngine& engine) {
         return -1;
     }
 
-    fs::path src = fs::current_path() / "raw_cache" / "raw_users.ndjson";
-    fs::path dst = domain_objects_root() / "domain_users.ndjson";
+    fs::path src = fs::current_path() / "raw_cache" / "raw_users.jsonl";
+    fs::path dst = domain_objects_root() / "domain_users.jsonl";
     if (!fs::exists(src)) {
-        log_err("raw_users.ndjson not found: " + src.string());
+        log_err("raw_users.jsonl not found: " + src.string());
         return -1;
     }
 
@@ -196,7 +408,7 @@ static int run_raw_user_passthrough(LDAPEngine& engine) {
     std::error_code ec;
     fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
     if (ec) {
-        log_err("Failed to copy raw_users.ndjson to domain_users.ndjson: " + ec.message());
+        log_err("Failed to copy raw_users.jsonl to domain_users.jsonl: " + ec.message());
         return -1;
     }
 
@@ -207,7 +419,7 @@ static int run_raw_user_passthrough(LDAPEngine& engine) {
 static int run_single_module(Module module, LDAPEngine& engine,
                               const fs::path& output_path,
                               const std::string& file_type = "") {
-    const std::string ext = (file_type == "json") ? "json" : "ndjson";
+    const std::string ext = (file_type == "json") ? "json" : "jsonl";
     const std::string out_dir = output_path.parent_path().string();
     switch (module) {
         case Module::USERS: {
@@ -392,6 +604,32 @@ int main(int argc, char** argv) {
             std::unique_ptr<LDAPEngine> engine;
             bool connected = false;
 
+            // ── Module completion tracker ─────────────────────────────────────
+            // ZIP işə düşməsi üçün bütün 9 əsas modul tamamlanmalıdır.
+            // (domain_info + trusts offline_processor içindən avtomatik yazılır,
+            //  onlar ayrıca Module enum-unda izlənilmir)
+            std::set<Module> completed_modules;
+            const std::set<Module> ALL_TRACKABLE = {
+                Module::USERS, Module::GROUPS, Module::COMPUTERS,
+                Module::NETWORK, Module::DOMINFO, Module::OUS,
+                Module::GPOS, Module::CERTS, Module::ACES,
+            };
+
+            // Bütün modullar tamamlandıqda ZIP qablaşdır
+            auto try_autozip = [&]() {
+                if (completed_modules != ALL_TRACKABLE) return;
+                log_ok("All modules complete — packaging results...");
+                fs::path zip_dir = domain_objects_root().parent_path();
+                std::string zip_path = package_domain_objects(domain_objects_root(), zip_dir);
+                if (!zip_path.empty()) {
+                    log_ok("Packaged → " + zip_path);
+                } else {
+                    log_warn("ZIP packaging failed — raw files are still in Domain Objects/");
+                }
+                // Növbəti sessiya üçün sıfırla
+                completed_modules.clear();
+            };
+
             auto sync_ldap_from_options = [&]() {
                 // bind_dn: sadə ad varsa UPN-ə çevir
                 if (!options.dom_user.empty()) {
@@ -493,7 +731,7 @@ int main(int argc, char** argv) {
                     {"SSL",      a.ldap.use_tls ? "TRUE" : "FALSE",                       false, ""},
                     {"DOMUSER",  options.dom_user,                                        true,  ""},
                     {"DOMPASS",  options.dom_pass.empty() ? "" : std::string(options.dom_pass.size(), '*'), true, ""},
-                    {"FILETYPE", options.file_type.empty() ? "ndjson (default)" : options.file_type, false, ""},
+                    {"FILETYPE", options.file_type.empty() ? "jsonl (default)" : options.file_type, false, ""},
                 };
 
                 std::vector<OptionRow> c2_rows = {
@@ -542,7 +780,7 @@ int main(int argc, char** argv) {
                 row("connect",              "Bind to the Domain Controller");
                 row("disconnect",           "Unbind / close LDAP session");
                 row("run <module|all>",     "Execute enumeration module");
-                row("raw user",             "raw_users.ndjson -> domain_users.ndjson");
+                row("raw user",             "raw_users.jsonl -> domain_users.jsonl");
                 row("modules",              "List available modules");
                 row("show config",          "Dump raw LDAP config state");
                 row("help  |  menu",        "Show this reference");
@@ -731,11 +969,11 @@ int main(int argc, char** argv) {
                         else if (upper_key == "FILETYPE") {
                             std::string ft = val;
                             for (char& c : ft) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                            if (ft == "json" || ft == "ndjson") {
+                            if (ft == "json" || ft == "jsonl") {
                                 options.file_type = ft;
                                 log_ok("FILETYPE set to " + options.file_type);
                             } else {
-                                log_warn("FILETYPE must be 'json' or 'ndjson' — keeping current value");
+                                log_warn("FILETYPE must be 'json' or 'jsonl' — keeping current value");
                             }
                         }
                         else if (upper_key == "SRVIP") { options.srv_ip = val; log_ok("SRVIP set to " + options.srv_ip); }
@@ -826,25 +1064,31 @@ int main(int argc, char** argv) {
                     if (!engine || !connected) { log_err("Not connected — use 'connect' first"); continue; }
 
                     if (target == "all") {
-                        UserCollector uc(*engine);
-                        GroupCollector gc(*engine);
-                        AceCollector ac(*engine);
-                        ComputerCollector cc(*engine);
-                        OUCollector oc(*engine);
-                        GPOCollector gpc(*engine);
-                        CertificateCollector certc(*engine);
                         DomainInfoCollector dic(*engine);
-
-                        if (uc.collect() < 0) { log_err("User collection failed"); continue; }
-                        if (gc.collect() < 0) { log_err("Group collection failed"); continue; }
-                        if (ac.collect() < 0) { log_err("ACE collection failed"); continue; }
-                        if (cc.collect() < 0) { log_err("Computer collection failed"); continue; }
-                        if (oc.collect() < 0) { log_err("OU collection failed"); continue; }
-                        if (gpc.collect() < 0) { log_err("GPO collection failed"); continue; }
+                        AceCollector ac(*engine);
+                        TrustCollector tc(*engine);
+                        GPOCollector gpc(*engine);
+                        OUCollector oc(*engine);
+                        GroupCollector gc(*engine);
+                        ComputerCollector cc(*engine);
+                        UserCollector uc(*engine);
+                        CertificateCollector certc(*engine);
 
                         DomainInfoCollectorOptions dic_opts;
                         dic_opts.output_dir = "raw_cache";
                         if (dic.collect(dic_opts) < 0) { log_err("Domain info collection failed"); continue; }
+
+                        if (ac.collect() < 0) { log_err("ACE collection failed"); continue; }
+
+                        TrustCollectorOptions tc_opts;
+                        tc_opts.output_dir = "raw_cache";
+                        if (tc.collect(tc_opts) < 0) { log_warn("Trust collection failed or no trusts found"); }
+
+                        if (gpc.collect() < 0) { log_err("GPO collection failed"); continue; }
+                        if (oc.collect() < 0) { log_err("OU collection failed"); continue; }
+                        if (gc.collect() < 0) { log_err("Group collection failed"); continue; }
+                        if (cc.collect() < 0) { log_err("Computer collection failed"); continue; }
+                        if (uc.collect() < 0) { log_err("User collection failed"); continue; }
 
                         CertificateCollectorOptions cert_opts;
                         cert_opts.output_dir = "raw_cache";
@@ -855,19 +1099,19 @@ int main(int argc, char** argv) {
                         net_opts.output_dir = "raw_cache";
                         if (netc.collect(net_opts) < 0) { log_err("Network collection failed"); continue; }
 
-                        TrustCollector tc(*engine);
-                        TrustCollectorOptions tc_opts;
-                        tc_opts.output_dir = "raw_cache";
-                        if (tc.collect(tc_opts) < 0) { log_warn("Trust collection failed or no trusts found"); }
-
                         OfflineProcessor op;
                         OfflineProcessorOptions opts;
                         opts.raw_dir    = "raw_cache";
                         opts.output_dir = domain_objects_root().string();
                         opts.output_ext = effective_ext(options.file_type);
-                        if (!op.process(opts)) {
-                            log_err("Offline processing failed");
-                            continue;
+
+                        // Offline processing nəticəsi (tam uğurlu/qismən uğursuz) ZIP-ləməyə
+                        // mane olmasın. Tək bir modulun uğursuzluğu (məs. boş cert/pki faylları)
+                        // digər modulların artıq yazılmış nəticələrinin ZIP-lənməsini bloklamamalıdır —
+                        // Domain Objects/ qovluğunda nə qədər fayl varsa, hamısı qablaşdırılır.
+                        bool process_ok = op.process(opts);
+                        if (!process_ok) {
+                            log_warn("Offline processing reported some failures — packaging available files anyway");
                         }
 
                         const std::string& ext = opts.output_ext;
@@ -880,8 +1124,27 @@ int main(int argc, char** argv) {
                         log_ok("Saved " + (domain_objects_root() / ("domain_network."        + ext)).string());
                         log_ok("Saved " + (domain_objects_root() / ("domain_cert_templates." + ext)).string());
                         log_ok("Saved " + (domain_objects_root() / ("domain_pki_objects."    + ext)).string());
-                        log_ok("Saved " + (domain_objects_root() / "domain_info.json").string());
+                        log_ok("Saved " + (domain_objects_root() / ("domain_info." + ext)).string());
                         log_ok("Saved " + (domain_objects_root() / ("domain_trusts." + ext)).string());
+
+                        // ── Package whatever exists in Domain Objects/ into oxgen_<RANDOM_ID>.zip ────────
+                        {
+                            fs::path zip_dir = domain_objects_root().parent_path();
+                            std::string zip_path = package_domain_objects(domain_objects_root(), zip_dir);
+                            if (!zip_path.empty()) {
+                                log_ok("Packaged → " + zip_path);
+                            } else {
+                                log_warn("ZIP packaging failed — raw files are still in Domain Objects/");
+                            }
+                            // run all tamamlandıqdan sonra tək-tək tracker-i
+                            // ALL_TRACKABLE ilə sinxronlaşdır, sonra sıfırla
+                            // ki, növbəti tək-tək run sessiyası sıfırdan başlasın.
+                            completed_modules = ALL_TRACKABLE;
+                            completed_modules.clear();
+                        }
+
+                        bool run_all_ok = process_ok;
+                        if (!run_all_ok) continue;
                     } else {
                         Module m = Module::NONE;
                         if (target == "raw") {
@@ -909,7 +1172,20 @@ int main(int argc, char** argv) {
 
                         fs::path out = output_file_for(m, a.output_name);
                         int rc = run_single_module(m, *engine, out, options.file_type);
-                        if (rc < 0) log_err("Module run failed"); else log_ok("Saved " + out.string());
+                        if (rc < 0) {
+                            log_err("Module run failed");
+                        } else {
+                            log_ok("Saved " + out.string());
+                            // Tamamlanan modulu izlə
+                            if (ALL_TRACKABLE.count(m)) {
+                                completed_modules.insert(m);
+                                int done  = static_cast<int>(completed_modules.size());
+                                int total = static_cast<int>(ALL_TRACKABLE.size());
+                                log_ok("Progress: " + std::to_string(done) + "/" +
+                                       std::to_string(total) + " modules complete");
+                                try_autozip();
+                            }
+                        }
                     }
                     continue;
                 }

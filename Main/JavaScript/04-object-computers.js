@@ -8,25 +8,30 @@ let computersFilter = 'all';
 let computersSearch = '';
 
 async function loadComputers() {
-  if (!state.connected) { addLog('Computers: domain connection required', 'warn'); return; }
   document.getElementById('computers-loading').style.display = 'flex';
   document.getElementById('c-table-body').innerHTML = '';
   closeComputerDetail();
 
   try {
-    const resp = await fetch(`${API_BASE}/api/computers`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildEnumerationPayload()),
-    });
-    const data = await resp.json();
-    if (!resp.ok || !data.success) throw new Error(data.error || 'Failed to load computers');
+    let url = `${DB_BASE}/api/list/computers?limit=500`;
+    if (computersSearch && computersSearch.trim()) {
+      url += `&q=${encodeURIComponent(computersSearch.trim())}`;
+    }
 
-    computersData = data.computers;
+    const resp = await fetch(url, { method: 'GET' });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok || !data) {
+      throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine xətası (HTTP ${resp.status})`);
+    }
+
+    computersData = Array.isArray(data.records) ? data.records : (Array.isArray(data.rows) ? data.rows : []);
     enumCacheLoaded.computers = true;
-    setObjectCountStat('cnt-comp', computersData.length);
-    document.getElementById('nav-computers-count').textContent = computersData.length;
+
+    const total = (typeof data.total === 'number') ? data.total : computersData.length;
+    setObjectCountStat('cnt-comp', total);
+    document.getElementById('nav-computers-count').textContent = total;
     document.getElementById('computers-meta').textContent =
-      `${computersData.length} computers · domain: ${(state.domain || '').toUpperCase()}`;
+      `${total} computers · mənbə: Oxsium SQLite Engine (.db)`;
 
     const dcComputer = computersData.find(c => c.is_domain_controller);
     const dcDns = dcComputer?.dns_name || dcComputer?.computer_name || '';
@@ -35,10 +40,10 @@ async function loadComputers() {
     }
 
     renderComputers();
-    addLog(`Computers loaded: ${computersData.length} systems enumerated`, 'ok');
+    addLog(`Computers sqlite_reader.py-dən yükləndi: ${total} sistem (Oxsium SQLite Engine)`, 'ok');
   } catch (err) {
     addLog(`Computers: ${err.message}`, 'err');
-    document.getElementById('c-table-body').innerHTML = `<div class="c-empty"><p>${err.message}</p></div>`;
+    document.getElementById('c-table-body').innerHTML = `<div class="c-empty"><p>${escapeHtml(err.message)}</p></div>`;
   } finally {
     document.getElementById('computers-loading').style.display = 'none';
   }
@@ -67,8 +72,7 @@ function renderComputers() {
       (c.dns_name      || '').toLowerCase().includes(computersSearch)
     );
   }
-  if (computersFilter === 'unconstrained') list = list.filter(c => c.unconstrained_delegation);
-  if (computersFilter === 'constrained')   list = list.filter(c => c.constrained_delegation);
+  if (computersFilter === 'delegation')    list = list.filter(c => c.unconstrained_delegation || c.constrained_delegation);
   if (computersFilter === 'rbcd')          list = list.filter(c => c.rbcd_enabled);
   if (computersFilter === 'dc')            list = list.filter(c => c.is_domain_controller);
   if (computersFilter === 'legacy_os') {
@@ -95,6 +99,7 @@ function renderComputers() {
       <div class="c-os">${c.os || '—'}</div>
       <div class="c-flag-cell">${c.is_server      ? '<span class="flag yes-ok">SRV</span>' : c.is_workstation ? '<span class="flag yes-ok">WS</span>' : '<span class="flag no">—</span>'}</div>
       <div class="c-flag-cell">${c.has_spn        ? '<span class="flag yes-spn">SPN</span>' : '<span class="flag no">—</span>'}</div>
+      <div class="c-flag-cell">${c.unconstrained_delegation ? '<span class="flag yes-un">UN</span>' : c.constrained_delegation ? '<span class="flag yes-cn">CN</span>' : '<span class="flag no">—</span>'}</div>
       <div class="c-flag-cell">${c.disabled       ? '<span class="flag yes-dis">DIS</span>' : '<span class="flag yes-ok">EN</span>'}</div>
       <div class="c-flag-cell">${c.rbcd_enabled   ? '<span class="flag yes-rbcd">RD</span>' : '<span class="flag no">—</span>'}</div>
     `;
@@ -152,7 +157,8 @@ function showComputerDetail(c, row) {
     ['Domain Controller',    c.is_domain_controller   ? '✓' : '✕', c.is_domain_controller ? 'accent' : 'dim'],
     ['Stale',                c.is_stale               ? '✓' : '✕', c.is_stale ? 'amber' : 'green'],
     ['Disabled',             c.disabled               ? '✓' : '✕', c.disabled ? 'red'   : 'green'],
-    ['SPN Count',            c.spn?.length > 0 ? c.spn.length : '0', c.spn?.length > 0 ? 'accent' : 'dim'],
+    ['SPN Count',            (Array.isArray(c.spn) ? c.spn.length : 0) > 0 ? (Array.isArray(c.spn) ? c.spn.length : 0) : '0',
+                             (Array.isArray(c.spn) ? c.spn.length : 0) > 0 ? 'accent' : 'dim'],
   ]);
 
   const lapsRaw = (c.laps_attributes && typeof c.laps_attributes === 'object') ? c.laps_attributes : {};
@@ -194,17 +200,19 @@ function showComputerDetail(c, row) {
     ]);
   }
 
-  if (c.spn && c.spn.length > 0) {
+  const spnList = Array.isArray(c.spn) ? c.spn : [];
+  if (spnList.length > 0) {
     body.innerHTML += `<div class="detail-section">
       <div class="detail-section-title">Service Principals</div>
-      <div class="spn-list">${c.spn.map(s => `<div class="spn-item">${escapeHtml(s)}</div>`).join('')}</div>
+      <div class="spn-list">${spnList.map(s => `<div class="spn-item">${escapeHtml(s)}</div>`).join('')}</div>
     </div>`;
   }
 
-  if (c.risk_controls && c.risk_controls.length > 0) {
+  const riskControls = Array.isArray(c.risk_controls) ? c.risk_controls : [];
+  if (riskControls.length > 0) {
     body.innerHTML += `<div class="detail-section">
       <div class="detail-section-title">Risk Controls</div>
-      <div class="spn-list">${c.risk_controls.map(r => `<div class="spn-item">${escapeHtml(r)}</div>`).join('')}</div>
+      <div class="spn-list">${riskControls.map(r => `<div class="spn-item">${escapeHtml(r)}</div>`).join('')}</div>
     </div>`;
   }
 }

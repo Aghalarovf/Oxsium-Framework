@@ -49,7 +49,7 @@ std::vector<std::string> OUCollector::required_attrs() const {
 // ─────────────────────────────────────────────────────────────────────────────
 int OUCollector::collect(const OUCollectorOptions& opts) {
     fs::create_directories(opts.output_dir);
-    output_path_ = fs::path(opts.output_dir) / "raw_ous.ndjson";
+    output_path_ = fs::path(opts.output_dir) / "raw_ous.jsonl";
 
     std::ofstream f(output_path_, std::ios::binary);
     if (!f) {
@@ -81,7 +81,7 @@ int OUCollector::collect(const OUCollectorOptions& opts) {
     bool ok = engine_.search(filter, required_attrs(),
         [&](const LDAPEngine::AttrMap& entry) {
             if (opts.max_results > 0 && count >= opts.max_results) return;
-            f << ou_to_ndjson(entry, domain_sid, generated_at) << "\n";
+            f << ou_to_jsonl(entry, domain_sid, generated_at) << "\n";
             ++count;
         });
 
@@ -99,9 +99,9 @@ int OUCollector::collect(const OUCollectorOptions& opts) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  ou_to_ndjson
+//  ou_to_jsonl
 // ─────────────────────────────────────────────────────────────────────────────
-std::string OUCollector::ou_to_ndjson(const LDAPEngine::AttrMap& entry,
+std::string OUCollector::ou_to_jsonl(const LDAPEngine::AttrMap& entry,
                                        const std::string& domain_sid,
                                        const std::string& generated_at) const
 {

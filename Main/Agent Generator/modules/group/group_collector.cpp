@@ -29,7 +29,7 @@ std::vector<std::string> GroupCollector::required_attrs() const {
 // ─────────────────────────────────────────────────────────────────────────────
 int GroupCollector::collect(const GroupCollectorOptions& opts) {
     fs::create_directories(opts.output_dir);
-    output_path_ = fs::path(opts.output_dir) / "raw_groups.ndjson";
+    output_path_ = fs::path(opts.output_dir) / "raw_groups.jsonl";
 
     std::ofstream f(output_path_, std::ios::binary);
     if (!f) {
@@ -105,22 +105,22 @@ int GroupCollector::collect(const GroupCollectorOptions& opts) {
 
     log_ok("[GroupCollector] Membership data completed.");
 
-    // ── NDJSON yaz ───────────────────────────────────────────────────────────
+    // ── JSONL yaz ───────────────────────────────────────────────────────────
     for (const auto& g : groups) {
-        f << group_to_ndjson(g, generated_at) << "\n";
+        f << group_to_jsonl(g, generated_at) << "\n";
     }
 
     f.flush();
     f.close();
 
-    log_ok("[GroupCollector] raw_groups.ndjson written -> " + output_path_.string());
+    log_ok("[GroupCollector] raw_groups.jsonl written -> " + output_path_.string());
     return static_cast<int>(groups.size());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  group_to_ndjson  — schema domain_groups.ndjson ilə uyğun
+//  group_to_jsonl  — schema domain_groups.jsonl ilə uyğun
 // ─────────────────────────────────────────────────────────────────────────────
-std::string GroupCollector::group_to_ndjson(const GroupRecord& g,
+std::string GroupCollector::group_to_jsonl(const GroupRecord& g,
                                             const std::string& generated_at) const
 {
     auto get = [&](const std::string& k) -> std::string {
@@ -194,7 +194,7 @@ std::string GroupCollector::group_to_ndjson(const GroupRecord& g,
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  decode_group_type  — groupType int → "Security / Domain Local" kimi string
-//  domain_groups.ndjson-dakı group_type dəyərləri ilə eyni format
+//  domain_groups.jsonl-dakı group_type dəyərləri ilə eyni format
 // ─────────────────────────────────────────────────────────────────────────────
 std::string GroupCollector::decode_group_type(int raw) {
     std::string security = (raw & static_cast<int>(0x80000000))
@@ -208,7 +208,7 @@ std::string GroupCollector::decode_group_type(int raw) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  compute_risk_controls  — domain_groups.ndjson-dakı risk_controls ilə eyni
+//  compute_risk_controls  — domain_groups.jsonl-dakı risk_controls ilə eyni
 // ─────────────────────────────────────────────────────────────────────────────
 std::vector<std::string> GroupCollector::compute_risk_controls(
     const std::string& sid, int /*group_type_raw*/, bool is_protected)

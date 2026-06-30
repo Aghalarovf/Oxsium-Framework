@@ -34,9 +34,9 @@ struct GPOCollectorOptions {
 //       attrs : distinguishedName
 //       → additional inheritance-blocked containers with no gPLink
 //
-//  Output: raw_gpos.ndjson — one GPO object per line.
+//  Output: raw_gpos.jsonl — one GPO object per line.
 //
-//  Output schema (raw_gpos.ndjson):
+//  Output schema (raw_gpos.jsonl):
 //
 //  {
 //    "name"                      : "{31B2F340-016D-11D2-945F-00C04FB984F9}",
@@ -85,8 +85,8 @@ private:
     std::vector<std::string> required_attrs() const;
 
     // ── Per-GPO serialization ─────────────────────────────────────────────────
-    // Converts one LDAP entry (plus enriched link data) to a raw NDJSON line.
-    std::string gpo_to_ndjson(
+    // Converts one LDAP entry (plus enriched link data) to a raw JSONL line.
+    std::string gpo_to_jsonl(
         const LDAPEngine::AttrMap& entry,
         const std::string&         domain_sid,
         const std::string&         domain_name,

@@ -28,7 +28,7 @@ struct NetworkCollectorOptions {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  NetworkHost  — one discovered host (written to raw_network.ndjson)
+//  NetworkHost  — one discovered host (written to raw_network.jsonl)
 // ─────────────────────────────────────────────────────────────────────────────
 struct NetworkHost {
     // ── Discovery ────────────────────────────────────────────────────────────
@@ -83,9 +83,9 @@ struct NetworkHost {
 //    4. Version detection      : banner grabbing / protocol negotiation
 //    5. OS fingerprinting      : TTL + TCP-window + banner heuristics
 //
-//  Output: raw_network.ndjson  — one host object per line.
+//  Output: raw_network.jsonl  — one host object per line.
 //
-//  Output schema (raw_network.ndjson):
+//  Output schema (raw_network.jsonl):
 //
 //  {
 //    "ipv4"            : "192.168.1.10",
@@ -113,8 +113,8 @@ struct NetworkHost {
 //    "generated_at"    : "2026-06-01T10:00:00Z"
 //  }
 //
-//  OfflineProcessor (network processor module) reads raw_network.ndjson and
-//  produces domain_network.ndjson with enriched risk analysis.
+//  OfflineProcessor (network processor module) reads raw_network.jsonl and
+//  produces domain_network.jsonl with enriched risk analysis.
 // ─────────────────────────────────────────────────────────────────────────────
 class NetworkCollector {
 public:
@@ -189,8 +189,8 @@ private:
     static const PortDef DEFAULT_PORTS[];
     static const size_t  DEFAULT_PORTS_COUNT;
 
-    // ── NDJSON writer ─────────────────────────────────────────────────────────
-    static std::string host_to_ndjson(const NetworkHost& h);
+    // ── JSONL writer ─────────────────────────────────────────────────────────
+    static std::string host_to_jsonl(const NetworkHost& h);
 
     // ── JSON helpers (same pattern as ComputerCollector / OfflineProcessor) ──
     static std::string je (const std::string& s);
@@ -205,14 +205,14 @@ private:
 //  NetworkProcessorOptions  (for OfflineProcessor integration)
 // ─────────────────────────────────────────────────────────────────────────────
 struct NetworkProcessorOptions {
-    std::string raw_dir    = "raw_cache";       // reads raw_network.ndjson
-    std::string output_dir = "Domain Objects";  // writes domain_network.ndjson
+    std::string raw_dir    = "raw_cache";       // reads raw_network.jsonl
+    std::string output_dir = "Domain Objects";  // writes domain_network.jsonl
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ProcessedNetworkHost  — enriched host for OfflineProcessor
 //
-//  OfflineProcessor reads raw_network.ndjson and produces domain_network.ndjson.
+//  OfflineProcessor reads raw_network.jsonl and produces domain_network.jsonl.
 //  This struct carries the enriched/correlated fields.
 // ─────────────────────────────────────────────────────────────────────────────
 struct ProcessedNetworkHost {
@@ -232,7 +232,7 @@ struct ProcessedNetworkHost {
     // ── Open ports (forwarded) ────────────────────────────────────────────────
     std::vector<NetworkHost::PortInfo> open_ports;
 
-    // ── Correlated with AD (from raw_computers.ndjson) ────────────────────────
+    // ── Correlated with AD (from raw_computers.jsonl) ────────────────────────
     std::string ad_computer_name;       // matched computer_name from AD
     std::string ad_dn;                  // Distinguished Name in AD
     std::string ad_sid;                 // SID from AD

@@ -55,7 +55,7 @@ std::vector<std::string> UserCollector::required_attrs() const {
 // ─────────────────────────────────────────────────────────────────────────────
 int UserCollector::collect(const UserCollectorOptions& opts) {
     fs::create_directories(opts.output_dir);
-    output_path_ = fs::path(opts.output_dir) / "raw_users.ndjson";
+    output_path_ = fs::path(opts.output_dir) / "raw_users.jsonl";
 
     std::ofstream f(output_path_, std::ios::binary);
     if (!f) {
@@ -75,7 +75,7 @@ int UserCollector::collect(const UserCollectorOptions& opts) {
     bool ok = engine_.search(filter, required_attrs(),
         [&](const LDAPEngine::AttrMap& entry) {
             if (opts.max_results > 0 && count >= opts.max_results) return;
-            f << user_to_ndjson(entry, generated_at) << "\n";
+            f << user_to_jsonl(entry, generated_at) << "\n";
             ++count;
         });
 
@@ -93,9 +93,9 @@ int UserCollector::collect(const UserCollectorOptions& opts) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  user_to_ndjson  — schema domain_users.ndjson ilə uyğun
+//  user_to_jsonl  — schema domain_users.jsonl ilə uyğun
 // ─────────────────────────────────────────────────────────────────────────────
-std::string UserCollector::user_to_ndjson(const LDAPEngine::AttrMap& entry,
+std::string UserCollector::user_to_jsonl(const LDAPEngine::AttrMap& entry,
                                           const std::string& generated_at) const
 {
     auto get = [&](const std::string& k) -> std::string {
@@ -127,6 +127,11 @@ std::string UserCollector::user_to_ndjson(const LDAPEngine::AttrMap& entry,
     bool trusted_to_auth    = uac_flag(uac, UAC_TRUSTED_TO_AUTH_FOR_DELEGATION);
     bool preauth_required   = !dont_req_preauth;  // asreproasting
     bool asrep              = dont_req_preauth;
+    // pwd_cant_change: UAC bit 0x0040 is a legacy NT4 artifact — modern AD
+    // enforces this via a Deny ACE on Self/Everyone for User-Change-Password
+    // (GUID 00299570-...).  The UAC bit is never set by Windows itself; we keep
+    // it here for completeness but note it will almost always be false.
+    // OfflineProcessor can override this field if it reads the user's DACL.
 
     // SPN → kerberoastable
     auto spn_list = get_all("servicePrincipalName");
@@ -134,15 +139,23 @@ std::string UserCollector::user_to_ndjson(const LDAPEngine::AttrMap& entry,
 
     // Delegation
     auto delegate_to = get_all("msDS-AllowedToDelegateTo");
-    bool constrained_delegation = !delegate_to.empty();
-    bool unconstrained_delegation = trusted_for_deleg && !constrained_delegation;
+    bool constrained_delegation   = !delegate_to.empty();
+    // unconstrained_delegation: purely the UAC TRUSTED_FOR_DELEGATION bit.
+    // A user CAN have both bits set simultaneously (misconfiguration), so we
+    // must NOT use "trusted_for_deleg && !constrained_delegation" here — that
+    // would silently zero-out unconstrained when msDS-AllowedToDelegateTo is
+    // also present.  The bit alone is the authoritative signal.
+    bool unconstrained_delegation = trusted_for_deleg;
 
-    // Encryption types
+    // Encryption types — raw bitmask (null if attribute absent)
+    std::string enc_raw_str = get("msDS-SupportedEncryptionTypes");
+    bool enc_absent = enc_raw_str.empty();
     unsigned int enc_types = 0;
-    try { enc_types = static_cast<unsigned int>(std::stoul(
-              get("msDS-SupportedEncryptionTypes"))); }
-    catch (...) {}
-    bool enc_implicit_rc4 = is_rc4_implicit(enc_types);
+    if (!enc_absent) {
+        try { enc_types = static_cast<unsigned int>(std::stoul(enc_raw_str)); }
+        catch (...) { enc_absent = true; }
+    }
+    bool enc_implicit_rc4 = is_rc4_implicit(enc_types) || enc_absent;
 
     // SID
     std::string sid;
@@ -171,8 +184,16 @@ std::string UserCollector::user_to_ndjson(const LDAPEngine::AttrMap& entry,
     try { logon_count   = std::stoi(get("logonCount"));   } catch (...) {}
     try { bad_pwd_count = std::stoi(get("badPwdCount"));  } catch (...) {}
 
-    // Key credential link
-    bool has_kcl = !get("msDS-KeyCredentialLink").empty();
+    // must_change_pwd: pwdLastSet == "0" and account is not disabled
+    // must_change_pwd: pwdLastSet raw FILETIME == 0 means forced reset on next logon.
+    // Exclude disabled accounts (they cannot log on anyway) and smartcard-required
+    // accounts (password is not used for authentication; pwdLastSet==0 is normal).
+    std::string pwd_last_set_raw = get("pwdLastSet");
+    bool must_change_pwd = (pwd_last_set_raw == "0") && !disabled && !smartcard_required;
+
+    // Key credential link — raw values
+    auto kcl_list = get_all("msDS-KeyCredentialLink");
+    bool has_kcl  = !kcl_list.empty();
 
     // member_of — DN listini group adına çevirmək OfflineProcessor işidir.
     // Burada raw DN siyahısını saxlayırıq.
@@ -192,7 +213,7 @@ std::string UserCollector::user_to_ndjson(const LDAPEngine::AttrMap& entry,
       << "\"title\":"                 << je(get("title"))                << ","
       << "\"disabled\":"              << jb(disabled)                    << ","
       << "\"locked_out\":"            << jb(locked_out)                  << ","
-      << "\"must_change_pwd\":"       << "false"                         << ","
+      << "\"must_change_pwd\":"       << jb(must_change_pwd)             << ","
       << "\"smartcard_required\":"    << jb(smartcard_required)          << ","
       << "\"normal_account\":"        << jb(normal_account)              << ","
       << "\"pwd_never_expires\":"     << jb(pwd_never_expires)           << ","
@@ -210,6 +231,8 @@ std::string UserCollector::user_to_ndjson(const LDAPEngine::AttrMap& entry,
       << "\"not_delegated\":"         << jb(not_delegated)              << ","
       << "\"msds_allowedtodelegateto\":" << ja(delegate_to)             << ","
       << "\"enc_implicit_rc4\":"      << jb(enc_implicit_rc4)           << ","
+      << "\"msds_supportedencryptiontypes\":"
+      << (enc_absent ? "null" : ji(static_cast<int>(enc_types)))        << ","
       << "\"member_of\":"             << ja(member_of_dns)              << ","
       << "\"primary_group_id\":"      << ji(pgid)                       << ","
       << "\"primary_group_sid\":"     << je(primary_group_sid)          << ","
@@ -226,6 +249,7 @@ std::string UserCollector::user_to_ndjson(const LDAPEngine::AttrMap& entry,
       << "\"script_path\":"           << je(get("scriptPath"))          << ","
       << "\"home_directory\":"        << je(get("homeDirectory"))        << ","
       << "\"home_drive\":"            << je(get("homeDrive"))            << ","
+      << "\"key_credential_link\":"   << ja(kcl_list)                   << ","
       << "\"has_key_credential_link\":" << jb(has_kcl)                  << ","
       << "\"msds_resultant_pso\":"    << je(get("msDS-ResultantPSO"))   << ","
       << "\"generated_at\":"          << je(generated_at)
@@ -249,20 +273,25 @@ std::string UserCollector::filetime_to_iso(const std::string& ft_str) {
     long long ft = 0;
     try { ft = std::stoll(ft_str); } catch (...) { return ""; }
     if (ft <= 0) return "";
-    // FILETIME epoch: 1601-01-01. Unix epoch: 1970-01-01.
-    // Diff = 11644473600 seconds
-    long long unix_sec = (ft / 10000000LL) - 11644473600LL;
-    if (unix_sec < 0) return "";
-    std::time_t t = static_cast<std::time_t>(unix_sec);
+    // Convert FILETIME (100ns units since 1601-01-01) to microseconds since Unix epoch.
+    // Output format: "YYYY-MM-DDTHH:MM:SS.ffffffZ" — matches OfflineProcessor::filetime_to_iso
+    // so that parse_raw_user() can consume both collector and processor outputs uniformly.
+    long long us     = ft / 10LL - 11644473600LL * 1000000LL;
+    long long unix_s = us / 1000000LL;
+    long long frac   = us % 1000000LL;
+    if (unix_s <= 0) return "";
+    std::time_t t = static_cast<std::time_t>(unix_s);
     std::tm tm{};
 #ifdef _WIN32
     gmtime_s(&tm, &t);
 #else
     gmtime_r(&t, &tm);
 #endif
-    std::ostringstream o;
-    o << std::put_time(&tm, "%Y-%m-%dT%H:%M:%S+00:00");
-    return o.str();
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &tm);
+    char fb[16];
+    std::snprintf(fb, sizeof(fb), ".%06lldZ", static_cast<long long>(frac < 0 ? 0 : frac));
+    return std::string(buf) + fb;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -301,11 +330,14 @@ std::string UserCollector::domain_sid_from_user_sid(const std::string& sid) {
 //  is_rc4_implicit  — msDS-SupportedEncryptionTypes 0 veya yoxdur → RC4 implicit
 // ─────────────────────────────────────────────────────────────────────────────
 bool UserCollector::is_rc4_implicit(unsigned int enc_types) {
-    // 0 = heç bir şey təyin edilməyib → domain default = RC4 aktiv
-    // Bit 2 (0x4) = RC4-HMAC. Bit 4 (0x10) = AES128. Bit 8 (0x18) = AES256.
+    // 0 = no types configured → domain default = RC4 active
     if (enc_types == 0) return true;
-    // Yalnız DES varsa — RC4 implicit var
-    if ((enc_types & 0x1C) == 0) return true;  // heç bir AES/RC4 yoxdur
+    // DES-only case: only bits 0 (DES-CBC-CRC=0x1) and/or 1 (DES-CBC-MD5=0x2) are set,
+    // and neither RC4 (0x4) nor any AES variant (0x8, 0x10, 0x40, 0x80, 0x100) is
+    // present.  In this configuration the DC still accepts RC4 as a fallback because
+    // there is no explicit AES-only enforcement, so RC4 is effectively implicit.
+    // Mask 0x1FC covers RC4 + all AES bits; if none of these are set, RC4 is implicit.
+    if ((enc_types & 0x1FC) == 0) return true;
     return false;
 }
 

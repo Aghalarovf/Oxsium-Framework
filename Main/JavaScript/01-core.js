@@ -71,6 +71,11 @@ function setConnState(s) {
     lbl.textContent = 'CONNECTED';   lbl.className = 'conn-label connected';
     sv.textContent  = 'ACTIVE';      sv.className  = 'stat-value green';
     sb.textContent  = 'CONNECTED';   sb.className  = 's-val ok';
+  } else if (s === 'offline-zip') {
+    dot.className = 'conn-dot connecting';
+    lbl.textContent = 'OFFLINE (ZIP)'; lbl.className = 'conn-label';
+    sv.textContent  = 'OFFLINE (ZIP)'; sv.className  = 'stat-value amber';
+    sb.textContent  = 'OFFLINE';       sb.className  = 's-val warn';
   } else if (s === 'connecting') {
     dot.className = 'conn-dot connecting';
     lbl.textContent = 'CONNECTING...'; lbl.className = 'conn-label';
@@ -253,17 +258,42 @@ function _updateEnumTabProgress(pct, moduleName) {
   if (modEl && moduleName) modEl.textContent = moduleName;
 }
 
-/* ── Deep discovery (runs all modules in sequence) ── */
+/* ── Deep discovery (runs all modules in sequence) ──────────────────────
+   YALNIZ collectorlara əmr verir (connection.py, API_BASE). POST cavabının
+   body-si RENDER üçün İSTİFADƏ OLUNMUR. Bütün collector-lar tetiklendikdən
+   sonra domain_data.db-nin tikilməsi gözlənilir və render YALNIZ
+   sqlite_reader.py-dən (DB_READER_BASE, tryLoadSnapshotSection vasitəsilə)
+   alınır — connection.py heç bir render funksiyası görmür. ── */
+
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * sqlite_reader.py (DB_READER_BASE) hazır olana qədər gözləyir.
+ * pollForDbReady()-dən fərqli olaraq paylaşılan polling timer-ə
+ * toxunmur (connect axını ilə paralel təhlükəsiz işləyə bilsin deyə)
+ * və timeout zamanı sadəcə false qaytarır, asılı qalmır.
+ */
+async function _waitForDbReaderReady(timeoutMs = 60000, intervalMs = 1000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await isDbReaderAlive()) return true;
+    await _sleep(intervalMs);
+  }
+  return false;
+}
+
 async function runDeepDiscoveryCounts() {
   const payload = buildEnumerationPayload();
   const modules = [
-    { name: 'users.py',               key: 'users',   path: '/api/users',     cntId: 'cnt-users',   navId: 'nav-users-count',     cacheKey: 'users' },
-    { name: 'computers.py',           key: 'computers',path: '/api/computers', cntId: 'cnt-comp',    navId: 'nav-computers-count', cacheKey: 'computers' },
-    { name: 'ous.py',                 key: 'ous',     path: '/api/ous',       cntId: 'cnt-ous',     navId: 'nav-ous-count',       cacheKey: 'ous' },
-    { name: 'gpo.py',                 key: 'gpos',    path: '/api/gpo',       cntId: 'cnt-gpos',    navId: 'nav-gpo-count',       cacheKey: 'gpos' },
-    { name: 'groups.py',              key: 'groups',  path: '/api/groups',    cntId: 'cnt-groups',  navId: 'nav-groups-count',    cacheKey: 'groups' },
-    { name: 'trust.py',               key: 'trusts',  path: '/api/trusts',    cntId: 'cnt-trusts',  navId: 'nav-trusts-count',    cacheKey: 'trusts' },
-    { name: 'acl package',          key: 'acls',    path: '/api/acl',       cntId: null,          navId: 'nav-acl-count',       cacheKey: 'acl' },
+    { name: 'Access Control List', path: '/api/acl',       cntId: null,          navId: 'nav-acl-count',       section: 'acl' },
+    { name: 'Domain Groups',       path: '/api/groups',    cntId: 'cnt-groups',  navId: 'nav-groups-count',    section: 'groups' },
+    { name: 'Group Policies',      path: '/api/gpo',       cntId: 'cnt-gpos',    navId: 'nav-gpo-count',       section: 'gpos' },
+    { name: 'Org. Units',          path: '/api/ous',       cntId: 'cnt-ous',     navId: 'nav-ous-count',       section: 'ous' },
+    { name: 'Domain Trusts',       path: '/api/trusts',    cntId: 'cnt-trusts',  navId: 'nav-trusts-count',    section: 'trusts' },
+    { name: 'Computers',           path: '/api/computers', cntId: 'cnt-comp',    navId: 'nav-computers-count', section: 'computers' },
+    { name: 'Users',               path: '/api/users',     cntId: 'cnt-users',   navId: 'nav-users-count',     section: 'users' },
   ];
 
   const setMini = (id, val) => {
@@ -279,62 +309,113 @@ async function runDeepDiscoveryCounts() {
   _showEnumTabProgress();
   _updateEnumTabProgress(0, 'Initializing...');
 
+  /* ── Mərhələ 1: collector-ları ardıcıl tetiklə ──────────────────────
+     Hər POST connection.py-də müvafiq collector-u işə salır və
+     domain_*.jsonl snapshot-unu yazır (DB build debounce ilə planlaşdırılır).
+     Cavab body-si yalnız uğur/uğursuzluq üçün yoxlanılır, render datası
+     kimi İSTİFADƏ OLUNMUR. */
   for (let idx = 0; idx < modules.length; idx++) {
     const ep = modules[idx];
     try {
-      const resp  = await fetch(`${API_BASE}${ep.path}`, {
+      const resp = await fetch(`${API_BASE}${ep.path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(payload),
       });
-      const data  = await resp.json();
-      const items = Array.isArray(data[ep.key]) ? data[ep.key] : [];
-      const count = (resp.ok && data.success)
-        ? Number(data.count ?? items.length ?? 0)
-        : 0;
-
-      if (resp.ok && data.success) {
-        if (ep.cacheKey === 'users') {
-          usersData = data.users || [];
-          usersMeta = data.meta  || {};
-          updatePentestCounts();
-        } else if (ep.cacheKey === 'computers') {
-          computersData = data.computers || [];
-          const dcComputer = computersData.find(c => c?.is_domain_controller);
-          const dcDns = dcComputer?.dns_name || dcComputer?.computer_name || '';
-          setEnvironmentDomainController(dcDns, dcDns ? 'accent' : 'dim');
-          const compMeta = document.getElementById('computers-meta');
-          if (compMeta) compMeta.textContent = `${computersData.length} computers · domain: ${(state.domain || '').toUpperCase()}`;
-          if (typeof renderComputers === 'function') renderComputers();
-        } else if (ep.cacheKey === 'ous') {
-          ousData = data.ous || data.organizational_units || [];
-        } else if (ep.cacheKey === 'gpos') {
-          gposData = data.gpos || [];
-        } else if (ep.cacheKey === 'acl') {
-          aclData = data.acls || [];
-        } else if (ep.cacheKey === 'groups') {
-          groupsData = data.groups || [];
-        } else if (ep.cacheKey === 'trusts') {
-          trustsData = data.trusts || [];
-        }
-        enumCacheLoaded[ep.cacheKey] = true;
-      }
-
-      if (ep.cntId) setMini(ep.cntId, count);
-      const navEl = document.getElementById(ep.navId);
-      if (navEl) navEl.textContent = count;
-      addLog(`${ep.name} enumeration finished (${count} objects).`, 'ok');
+      const data = await resp.json().catch(() => ({}));
+      const ok   = resp.ok && data && data.success !== false;
+      addLog(`[Collector] ${ep.name}: ${ok ? 'enumeration complete' : 'enumeration failed'}.`, ok ? 'ok' : 'err');
     } catch (err) {
-      if (ep.cntId) setMini(ep.cntId, 0);
-      const navEl = document.getElementById(ep.navId);
-      if (navEl) navEl.textContent = 0;
-      enumCacheLoaded[ep.cacheKey] = false;
-      addLog(`${ep.name} enumeration failed: ${err.message || 'request failed'}`, 'err');
+      addLog(`[Collector] ${ep.name}: request failed (${err.message || 'unknown error'})`, 'err');
     }
 
-    const percent = Math.round(((idx + 1) / modules.length) * 100);
-    setDeepEnumProgress(percent, `Deep enumeration in progress... ${idx + 1}/${modules.length}`);
+    const percent = Math.round(((idx + 1) / modules.length) * 70);
+    setDeepEnumProgress(percent, `Collectors running... ${idx + 1}/${modules.length}`);
     _updateEnumTabProgress(percent, ep.name);
+  }
+
+  /* ── Mərhələ 2: domain_data.db-nin tikilməsini gözlə ── */
+  setDeepEnumProgress(75, 'Verilənlər bazası hazırlanır...');
+  _updateEnumTabProgress(75, 'Building database...');
+  await _sleep(3500); // debounced DB build (~3s) üçün gözləmə
+  const dbReady = await _waitForDbReaderReady(60000, 1000);
+  if (!dbReady) {
+    addLog('sqlite_reader.py (8800) gözlənilən müddətdə hazır olmadı — bəzi bölmələr köhnə/boş qala bilər', 'error');
+  }
+
+  /* ── Mərhələ 3: RENDER — YALNIZ sqlite_reader.py-dən (DB_READER_BASE) ──
+     connection.py-nin POST cavabları burada heç vaxt istifadə olunmur. */
+  setDeepEnumProgress(90, 'Cədvəllər yüklənir...');
+  _updateEnumTabProgress(90, 'Loading tables...');
+
+  for (let idx = 0; idx < modules.length; idx++) {
+    const ep    = modules[idx];
+    const snap  = await tryLoadSnapshotSection(ep.section);
+    const items = snap ? snap.records : [];
+    const count = items.length;
+
+    if (snap) {
+      if (ep.section === 'users') {
+        usersData = items;
+        usersMeta = snap.meta || {};
+        if (typeof updatePentestCounts === 'function') updatePentestCounts();
+        const usersMeta2 = document.getElementById('users-meta');
+        if (usersMeta2) usersMeta2.textContent = `${usersData.length} users · domain: ${(state.domain || '').toUpperCase()}`;
+        const activeTab = document.getElementById('tab-users');
+        if (activeTab && activeTab.style.display !== 'none' && typeof renderUsers === 'function') renderUsers();
+      } else if (ep.section === 'computers') {
+        computersData = items;
+        const dcComputer = computersData.find(c => c?.is_domain_controller);
+        const dcDns = dcComputer?.dns_name || dcComputer?.computer_name || '';
+        setEnvironmentDomainController(dcDns, dcDns ? 'accent' : 'dim');
+        const compMeta = document.getElementById('computers-meta');
+        if (compMeta) compMeta.textContent = `${computersData.length} computers · domain: ${(state.domain || '').toUpperCase()}`;
+        const activeTabComp = document.getElementById('tab-computers');
+        if (activeTabComp && activeTabComp.style.display !== 'none' && typeof renderComputers === 'function') renderComputers();
+      } else if (ep.section === 'ous') {
+        ousData = items;
+        const ousMeta = document.getElementById('ous-meta');
+        if (ousMeta) ousMeta.textContent = `${ousData.length} OUs · domain: ${(state.domain || '').toUpperCase()}`;
+        const activeTabOUs = document.getElementById('tab-ous');
+        if (activeTabOUs && activeTabOUs.style.display !== 'none' && typeof renderOUs === 'function') renderOUs();
+      } else if (ep.section === 'gpos') {
+        gposData = items;
+        const gposMeta = document.getElementById('gpos-meta');
+        if (gposMeta) gposMeta.textContent = `${gposData.length} GPOs · domain: ${(state.domain || '').toUpperCase()}`;
+        const activeTabGPO = document.getElementById('tab-gpo');
+        if (activeTabGPO && activeTabGPO.style.display !== 'none' && typeof renderGPOs === 'function') renderGPOs();
+      } else if (ep.section === 'groups') {
+        groupsData = items;
+        const groupsMeta = document.getElementById('groups-meta');
+        if (groupsMeta) groupsMeta.textContent = `${groupsData.length} groups · domain: ${(state.domain || '').toUpperCase()}`;
+        const activeTabGroups = document.getElementById('tab-groups');
+        if (activeTabGroups && activeTabGroups.style.display !== 'none' && typeof renderGroups === 'function') renderGroups();
+      } else if (ep.section === 'trusts') {
+        trustsData = items;
+        const trustsMeta = document.getElementById('trusts-meta');
+        if (trustsMeta) trustsMeta.textContent = `${trustsData.length} trusts · domain: ${(state.domain || '').toUpperCase()}`;
+        const activeTabTrusts = document.getElementById('tab-trusts');
+        if (activeTabTrusts && activeTabTrusts.style.display !== 'none' && typeof renderTrusts === 'function') renderTrusts();
+      } else if (ep.section === 'acl') {
+        aclData = items;
+        const aclMeta = document.getElementById('acl-meta');
+        if (aclMeta) aclMeta.textContent = `${aclData.length} ACEs · domain: ${(state.domain || '').toUpperCase()}`;
+        const activeTabACL = document.getElementById('tab-acl');
+        if (activeTabACL && activeTabACL.style.display !== 'none') {
+          if (typeof renderACLObjectFilters === 'function') renderACLObjectFilters();
+          if (typeof renderACLs === 'function') renderACLs();
+        }
+      }
+      enumCacheLoaded[ep.section] = true;
+      addLog(`[Render] ${ep.name}: ${count} objects loaded from domain_data.db.`, 'ok');
+    } else {
+      enumCacheLoaded[ep.section] = false;
+      addLog(`[Render] ${ep.name}: failed to read from domain_data.db (sqlite_reader unavailable).`, 'err');
+    }
+
+    if (ep.cntId) setMini(ep.cntId, count);
+    const navEl = document.getElementById(ep.navId);
+    if (navEl) navEl.textContent = count;
   }
 
   setDeepEnumProgress(100, 'Deep enumeration completed');

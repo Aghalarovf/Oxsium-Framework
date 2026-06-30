@@ -1,13 +1,12 @@
 /* ============================================================
-   modals.css — .status-modal, .attack-hint-modal, status-info-card
+   modals.css — Gold Edition
    ============================================================ */
 
-/* Status modal backdrop */
 .status-modal-backdrop {
     position: fixed;
     inset: 0;
     z-index: 10001;
-    background: rgba(8, 12, 20, 0.5);
+    background: rgba(4, 3, 0, 0.60);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     display: flex;
@@ -23,11 +22,22 @@
     max-height: 820px;
     border: 1px solid var(--border-hi);
     border-radius: 10px;
-    background: linear-gradient(180deg, #101b2a, #0d1521);
-    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45);
+    background: linear-gradient(180deg, #0f0c02, #080600);
+    box-shadow: 0 25px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(240,192,48,0.08) inset;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+/* Üst altın xətt */
+.status-modal::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent) 30%, var(--accent) 70%, transparent);
+    opacity: 0.5;
+    border-radius: 10px 10px 0 0;
 }
 
 .status-modal-head {
@@ -37,7 +47,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 16px;
-    background: rgba(0, 0, 0, 0.15);
+    background: rgba(0,0,0,0.20);
 }
 
 .status-modal-title {
@@ -59,9 +69,10 @@
     cursor: pointer;
     font-size: 16px;
     line-height: 1;
+    transition: all 0.15s;
 }
 
-.status-modal-close:hover { border-color: var(--red); color: var(--red); }
+.status-modal-close:hover { border-color: var(--accent-dim); color: var(--accent); }
 
 .status-modal-body {
     padding: 20px;
@@ -74,7 +85,7 @@
 .status-info-card {
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: rgba(9, 15, 24, 0.7);
+    background: rgba(8, 6, 0, 0.70);
     padding: 14px;
 }
 
@@ -90,7 +101,7 @@
     display: none;
     align-items: center;
     justify-content: center;
-    background: rgba(3, 7, 12, 0.38);
+    background: rgba(2, 2, 0, 0.40);
     backdrop-filter: blur(4px);
 }
 
@@ -99,10 +110,10 @@
 .attack-hint-modal-panel {
     width: 80vw;
     height: 80vh;
-    border: 1px solid rgba(0,212,255,0.28);
+    border: 1px solid rgba(240,192,48,0.25);
     border-radius: 10px;
-    background: linear-gradient(180deg, rgba(10,15,21,0.98), rgba(7,10,14,0.98));
-    box-shadow: 0 24px 48px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,212,255,0.08) inset;
+    background: linear-gradient(180deg, rgba(10,8,1,0.98), rgba(6,5,0,0.98));
+    box-shadow: 0 24px 48px rgba(0,0,0,0.65), 0 0 0 1px rgba(240,192,48,0.06) inset;
     overflow: hidden;
 }
 
@@ -112,20 +123,17 @@
     justify-content: space-between;
     padding: 10px 12px;
     border-bottom: 1px solid var(--border);
-    background: linear-gradient(90deg, rgba(0,212,255,0.08), transparent 60%);
+    background: linear-gradient(90deg, rgba(240,192,48,0.07), transparent 60%);
 }
 
 .attack-hint-modal-title { font-family: var(--head); font-size: 12px; letter-spacing: 0.8px; color: var(--text-hi); text-transform: uppercase; }
 
-.attack-hint-modal-close { border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-sec); width: 24px; height: 24px; border-radius: 6px; cursor: pointer; }
-.attack-hint-modal-close:hover { color: var(--text-hi); border-color: var(--accent-dim); box-shadow: 0 0 10px rgba(0,212,255,0.25); }
+.attack-hint-modal-close { border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-sec); width: 24px; height: 24px; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+.attack-hint-modal-close:hover { color: var(--accent); border-color: var(--accent-dim); box-shadow: 0 0 10px rgba(240,192,48,0.20); }
 
 .attack-hint-modal-body { height: calc(100% - 45px); }
 
-/* Responsive */
 @media (max-width: 900px) {
     .status-modal { width: 92vw; height: 86vh; }
     .status-modal-body { grid-template-columns: 1fr; }
-    .checker-overview-grid, .checker-grid { grid-template-columns: 1fr; }
-    .checker-span-2 { grid-column: auto; }
 }

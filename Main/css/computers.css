@@ -1,7 +1,5 @@
 /* ============================================================
-   computers.css — .computers-wrap, computers-table, c-row,
-                   c-name, dc-badge, computer-detail,
-                   shared overrides for OUs/GPOs/Groups/Trusts/ACL
+   computers.css — Gold Edition
    ============================================================ */
 
 .computers-wrap { display: flex; flex-direction: column; height: 100%; gap: 14px; }
@@ -17,33 +15,30 @@
 
 .c-col { font-family: var(--ui); font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .c-col-name { flex: 1; min-width: 0; }
-.c-col-os   { width: 280px; flex-shrink: 0; margin-left: -40px; padding-left: 28px; }
+.c-col-os   { width: 280px; flex-shrink: 0; margin-left: -80px; padding-left: 0; }
 .c-col-flag { width: 52px; flex-shrink: 0; }
 
 .c-table-body { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 
-/* Computer row */
 .c-row { display: flex; align-items: center; padding: 0 16px; height: 46px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; position: relative; }
 .c-row:hover { background: var(--bg-panel); border-left: 2px solid var(--border-hi); }
 
-/* DC row — muted grey-blue tint */
-.c-row.dc-row         { background: rgba(80, 80, 90, 0.13); border-left: 2px solid rgba(120, 120, 140, 0.55); }
-.c-row.dc-row:hover   { background: rgba(80, 80, 90, 0.22); border-left: 2px solid rgba(160, 160, 180, 0.8); }
+.c-row.dc-row         { background: rgba(80,60,10, 0.18); border-left: 2px solid rgba(240,192,48,0.40); }
+.c-row.dc-row:hover   { background: rgba(80,60,10, 0.30); border-left: 2px solid rgba(240,192,48,0.80); }
 
-/* Unconstrained — blood-red */
-.c-row.unconstrained-row       { border-left: 2px solid rgba(204,26,26,0.75); background: rgba(180,20,20,0.09); }
-.c-row.unconstrained-row:hover { background: rgba(204,26,26,0.15); border-left: 2px solid rgba(204,26,26,0.95); }
+.c-row.unconstrained-row       { border-left: 2px solid rgba(230,145,15,0.75); background: rgba(200,130,10,0.09); }
+.c-row.unconstrained-row:hover { background: rgba(240,192,48,0.14); border-left: 2px solid rgba(240,192,48,0.95); }
 
 .c-row.selected            { background: var(--accent-glow); border-left: 2px solid var(--accent); }
 .c-row.selected .c-name    { color: var(--accent); }
 
 .c-row.dcsync {
-   border-left: 2px solid rgba(200,30,30,0.9);
-   background: linear-gradient(90deg, rgba(180,20,20,0.11), rgba(120,10,10,0.09));
+   border-left: 2px solid rgba(192,140,20,0.9);
+   background: linear-gradient(90deg, rgba(160,110,10,0.13), rgba(140,90,8,0.09));
 }
 .c-row.dcsync:hover {
-   background: linear-gradient(90deg, rgba(204,26,26,0.20), rgba(150,15,15,0.17));
-   border-left-color: rgba(220,30,30,1);
+   background: linear-gradient(90deg, rgba(240,192,48,0.20), rgba(140,100,10,0.16));
+   border-left-color: rgba(220,175,40,1);
 }
 
 .c-name {
@@ -72,13 +67,7 @@
    white-space: nowrap;
 }
 
-.c-flag-cell {
-   width: 52px;
-   flex-shrink: 0;
-   display: flex;
-   justify-content: center;
-   align-items: center;
-}
+.c-flag-cell { width: 52px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; }
 
 .dc-badge {
    display: inline-flex;
@@ -94,6 +83,19 @@
    font-size: 9px;
    font-weight: 700;
    letter-spacing: 0.7px;
+   border-radius: 3px;
+}
+
+/* UN / CN delegation badges */
+.flag.yes-un {
+   background: rgba(230,100,10,0.14);
+   color: #f5a04a;
+   border: 1px solid rgba(230,100,10,0.45);
+}
+.flag.yes-cn {
+   background: rgba(52,152,219,0.12);
+   color: #5dade2;
+   border: 1px solid rgba(52,152,219,0.35);
 }
 
 .c-empty {
@@ -121,7 +123,7 @@
 .computers-loading {
    position: absolute;
    inset: 0;
-   background: rgba(5,5,5,0.88);
+   background: rgba(3,2,0,0.90);
    display: flex;
    flex-direction: column;
    align-items: center;
@@ -137,9 +139,7 @@
    border-radius: var(--radius);
 }
 
-/* ══════════════════════════════════════════
-   Unified overrides (OUs/GPOs/Groups/Trusts)
-═══════════════════════════════════════════ */
+/* ── Unified overrides ── */
 .ous-wrap, .gpos-wrap, .groups-wrap, .trusts-wrap, .acl-wrap { display: flex; flex-direction: column; height: 100%; gap: 14px; }
 .ous-header, .gpos-header, .groups-header, .trusts-header, .acl-header { flex-shrink: 0; border-bottom: none; padding-bottom: 0; }
 .ous-title-row, .gpos-title-row, .groups-title-row, .trusts-title-row, .acl-title-row { display: flex; align-items: baseline; justify-content: flex-start; gap: 14px; margin-bottom: 12px; }
@@ -162,7 +162,7 @@
 
 .ou-detail, .gpo-detail, .group-detail, .trust-detail, .acl-detail { width: 340px; flex-shrink: 0; border-left: 1px solid var(--border); border-radius: 0; background: var(--bg-base); display: flex; flex-direction: column; overflow: hidden; animation: slide-in-right 0.2s cubic-bezier(0.4,0,0.2,1); }
 
-.ous-loading, .gpos-loading, .groups-loading, .trusts-loading, .acl-loading { position: absolute; inset: 0; background: rgba(5,5,5,0.88); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-sec); font-size: 11px; font-family: var(--ui); letter-spacing: 1px; text-transform: uppercase; z-index: 10; backdrop-filter: blur(2px); border-radius: 6px; }
+.ous-loading, .gpos-loading, .groups-loading, .trusts-loading, .acl-loading { position: absolute; inset: 0; background: rgba(3,2,0,0.90); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-sec); font-size: 11px; font-family: var(--ui); letter-spacing: 1px; text-transform: uppercase; z-index: 10; backdrop-filter: blur(2px); border-radius: 6px; }
 
 /* Square corners */
 #tab-ous .search-input, #tab-gpo .search-input, #tab-groups .search-input, #tab-acl .search-input, #tab-trusts .search-input,
@@ -170,7 +170,7 @@
 .o-table-head, .g-table-head, .gr-table-head, .tr-table-head, .acl-table-head,
 .ou-detail, .gpo-detail, .group-detail, .trust-detail, .acl-detail,
 .ous-loading, .gpos-loading, .groups-loading, .trusts-loading, .acl-loading,
-.detail-close, .flag { border-radius: 0 !important; }
+.detail-close, .flag { border-radius: 3px !important; }
 
 /* Keep filter chips pill-shaped */
 #tab-ous .chip, #tab-gpo .chip, #tab-groups .chip, #tab-acl .chip, #tab-trusts .chip,

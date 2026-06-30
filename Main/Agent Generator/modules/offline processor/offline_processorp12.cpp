@@ -2,7 +2,7 @@
 //  SECTION TRUSTS — Domain Trust Offline Processor
 //
 //  Reads:
-//    raw_cache/raw_trusts.ndjson  (from TrustCollector)
+//    raw_cache/raw_trusts.jsonl  (from TrustCollector)
 //
 //  Writes:
 //    Domain Objects/domain_trusts.<ext>
@@ -402,13 +402,13 @@ static std::string trust_to_json(const TrustRecord& r) {
 // ─────────────────────────────────────────────────────────────────────────────
 bool OfflineProcessor::process_trusts(const OfflineProcessorOptions& opts)
 {
-    const std::string raw_path = opts.raw_dir    + "/raw_trusts.ndjson";
-    const std::string ext      = opts.output_ext.empty() ? "ndjson" : opts.output_ext;
+    const std::string raw_path = opts.raw_dir    + "/raw_trusts.jsonl";
+    const std::string ext      = opts.output_ext.empty() ? "jsonl" : opts.output_ext;
     const std::string out_path = opts.output_dir + "/domain_trusts." + ext;
 
     std::ifstream raw(raw_path);
     if (!raw) {
-        log_warn("[Trust] raw_trusts.ndjson not found: " + raw_path
+        log_warn("[Trust] raw_trusts.jsonl not found: " + raw_path
                  + " — trust processing skipped.");
         return true;  // Non-fatal: domain may have no trusts
     }

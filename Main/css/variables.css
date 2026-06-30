@@ -1,35 +1,47 @@
 /* ============================================================
-   variables.css — Boz + Qara + Qan Qırmızısı + Ağ palette
+   variables.css — Saf Qara + Saf Altın Elit Tema
+   Oxsium Framework — Gold Edition
    ============================================================ */
 
 :root {
-    --bg-deep:    #0a0a0a;
-    --bg-base:    #111111;
-    --bg-panel:   #1a1a1a;
-    --bg-card:    #1f1f1f;
-    --bg-input:   #141414;
-    --border:     #2a2a2a;
-    --border-hi:  #3d3d3d;
-    --accent:     #cc1a1a;
-    --accent-dim: #7a0f0f;
-    --accent-glow:#cc1a1a22;
-    --green:      #b0b0b0;
-    --green-dim:  #555555;
-    --red:        #cc1a1a;
-    --amber:      #999999;
-    --amber-dim:  #444444;
-    --text-pri:   #d4d4d4;
-    --text-sec:   #7a7a7a;
-    --text-dim:   #444444;
-    --text-hi:    #f5f5f5;
+    --bg-deep:    #050505;
+    --bg-base:    #0c0c0c;
+    --bg-panel:   #131313;
+    --bg-card:    #181818;
+    --bg-input:   #0f0f0f;
+    --bg-alt:     #101010;
+    --bg-hover:   #1a1a1a;
+    --bg-selected:#1a1000;
+
+    --border:     #2a2510;
+    --border-hi:  #4a4018;
+
+    /* ── Açıq, parlaq Altın aksan ── */
+    --accent:     #f0c030;
+    --accent-dim: #8a6a18;
+    --accent-glow:#f0c03022;
+
+    /* ── Status rəngləri ── */
+    --green:      #c8a855;
+    --green-dim:  #5a4820;
+    --red:        #a07820;
+    --amber:      #f0c030;
+    --amber-dim:  #6a5015;
+
+    /* ── Mətn ── */
+    --text-pri:   #e8d8a0;
+    --text-sec:   #9a8848;
+    --text-dim:   #504530;
+    --text-hi:    #fff8e0;
+
+    /* ── Şriftlər ── */
     --mono:       'Share Tech Mono', monospace;
     --head:       'Rajdhani', sans-serif;
     --ui:         'Space Mono', monospace;
+
+    /* ── Layout ── */
     --sidebar-w:  210px;
     --right-w:    260px;
     --radius:     6px;
     --radius-sm:  4px;
-    --bg-alt:     #161616;
-    --bg-hover:   #202020;
-    --bg-selected:#1f0a0a;
 }

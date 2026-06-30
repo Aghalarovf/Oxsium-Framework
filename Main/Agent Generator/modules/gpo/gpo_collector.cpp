@@ -1,12 +1,12 @@
 // ─── gpo_collector.cpp ───────────────────────────────────────────────────────
-//  Phase 1 — Extract: collects all GPOs via LDAP and writes raw_gpos.ndjson.
+//  Phase 1 — Extract: collects all GPOs via LDAP and writes raw_gpos.jsonl.
 //
 //  Mirrors gpos.py::get_domain_gpos() — LDAP-only path (no SMB/SYSVOL).
 //  SYSVOL content (cPassword, scripts, security settings) is intentionally
 //  left to a separate SYSVOL collector; this module focuses on the AD objects.
 //
 //  Input : LDAPEngine (already bound)
-//  Output: raw_cache/raw_gpos.ndjson  — one GPO per line
+//  Output: raw_cache/raw_gpos.jsonl  — one GPO per line
 // ─────────────────────────────────────────────────────────────────────────────
 #include "gpo_collector.h"
 #include <fstream>
@@ -118,7 +118,7 @@ std::vector<std::string> GPOCollector::required_attrs() const {
 // ─────────────────────────────────────────────────────────────────────────────
 int GPOCollector::collect(const GPOCollectorOptions& opts) {
     fs::create_directories(opts.output_dir);
-    output_path_ = fs::path(opts.output_dir) / "raw_gpos.ndjson";
+    output_path_ = fs::path(opts.output_dir) / "raw_gpos.jsonl";
 
     std::ofstream f(output_path_, std::ios::binary);
     if (!f) {
@@ -222,7 +222,7 @@ int GPOCollector::collect(const GPOCollectorOptions& opts) {
             link_disabled = is_link_disabled(it->second.link_texts, cn_guid);
         }
 
-        f << gpo_to_ndjson(e, domain_sid, domain_name,
+        f << gpo_to_jsonl(e, domain_sid, domain_name,
                             linked_containers, enforced, link_disabled,
                             generated_at)
           << "\n";
@@ -238,9 +238,9 @@ int GPOCollector::collect(const GPOCollectorOptions& opts) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  gpo_to_ndjson
+//  gpo_to_jsonl
 // ─────────────────────────────────────────────────────────────────────────────
-std::string GPOCollector::gpo_to_ndjson(
+std::string GPOCollector::gpo_to_jsonl(
     const LDAPEngine::AttrMap& entry,
     const std::string&         domain_sid,
     const std::string&         domain_name,

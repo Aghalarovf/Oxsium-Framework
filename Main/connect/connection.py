@@ -2,12 +2,17 @@ import os
 import sys
 import json
 import re
+import time
 import zipfile
 import io
+import threading
+import subprocess
+import urllib.request
+import urllib.error
 from datetime import datetime
 from pathlib import Path
 
-# ── sys.path setup: Main qovluğu əlavə etməli ────────────────────────────────────
+# ── sys.path setup: Add Main directory to path ───────────────────────────────────
 _PROJECT_ROOT = Path(__file__).parent.parent  # /Main
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -15,7 +20,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 # ── Config import ────────────────────────────────────────────────────────────────
 from connect.config import Config, logger
 
-# ── Config-dən paths oxunur ──────────────────────────────────────────────────────
+# ── Read paths from Config ───────────────────────────────────────────────────────
 PROJECT_ROOT = Config.PROJECT_ROOT
 DOMAIN_OBJECT_DIR = Config.DOMAIN_OBJECT_DIR
 DOMAIN_ACES_PARQUET = Config.DOMAIN_ACES_PARQUET
@@ -35,6 +40,79 @@ LEGACY_DOMAIN_TRUSTS_JSON = Path(PROJECT_ROOT) / "domain_trusts.json"
 LEGACY_DOMAIN_GPOS_JSON = Path(PROJECT_ROOT) / "domain_gpos.json"
 LEGACY_DOMAIN_ACES_JSON = Path(PROJECT_ROOT) / "domain_aces.json"
 
+# -- SQLite Engine -- subprocess icra (SQLite Engine/sqlite_engine.py) --
+# sqlite_engine.py birbaşa subprocess kimi çağırılır:
+#   python sqlite_engine.py <DOMAIN_OBJECT_DIR> --output <db_path> --quiet
+_SQLITE_ENGINE_CANDIDATES = [
+    Path(__file__).parent.parent / 'SQLite Engine' / 'sqlite_engine.py',  # canonical
+    Path(__file__).parent / 'SQLite Engine' / 'sqlite_engine.py',         # fallback
+    Path(__file__).parent / 'sqlite_engine.py',                            # fallback
+]
+_SQLITE_ENGINE_PATH = next((p for p in _SQLITE_ENGINE_CANDIDATES if p.exists()), None)
+
+if _SQLITE_ENGINE_PATH is None:
+    logger.warning('sqlite_engine not found -- searched: %s',
+                   ', '.join(str(p) for p in _SQLITE_ENGINE_CANDIDATES))
+else:
+    logger.info('sqlite_engine found: %s', _SQLITE_ENGINE_PATH)
+
+# -- Debounced DB builder --
+# Snapshots arrive in quick succession; run the engine once, 3 seconds after the last write.
+_db_build_timer: threading.Timer | None = None
+_db_build_lock  = threading.Lock()
+_DB_BUILD_DELAY = 3.0
+
+
+def _run_sqlite_engine() -> None:
+    """sqlite_engine.py-ni subprocess kimi icra edir.
+
+    QEYD: sqlite_reader.py (port 8800) burada artıq AVTOMATİK başladılmır.
+    domain_data.db tikildikdən sonra sqlite_reader.py-nin işə salınması
+    manual/əl ilə həyata keçirilir (məs. ayrıca terminal/prosesdən:
+    `python sqlite_reader.py <db_yolu> --port 8800`)."""
+    if _SQLITE_ENGINE_PATH is None:
+        logger.warning('sqlite_engine module not available -- DB build skipped')
+        return
+    db_out = DOMAIN_OBJECT_DIR / 'domain_data.db'
+    try:
+        result = subprocess.run(
+            [sys.executable, str(_SQLITE_ENGINE_PATH),
+             str(DOMAIN_OBJECT_DIR),
+             '--output', str(db_out),
+             '--quiet'],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            logger.info('sqlite_engine: DB created -> %s', db_out)
+        else:
+            logger.warning('sqlite_engine exited %d: %s',
+                           result.returncode, result.stderr.strip())
+    except Exception as exc:
+        logger.warning('sqlite_engine error: %s', exc)
+
+
+def _schedule_db_build() -> None:
+    """Debounced DB build -- called after a snapshot is written."""
+    global _db_build_timer
+    with _db_build_lock:
+        if _db_build_timer is not None:
+            _db_build_timer.cancel()
+        _db_build_timer = threading.Timer(_DB_BUILD_DELAY, _run_sqlite_engine)
+        _db_build_timer.daemon = True
+        _db_build_timer.start()
+
+
+# -- SQLite Reader -- ayrıca, müstəqil bir Flask prosesi (domain_data.db-ni
+# HTTP üzərindən salt-oxuma rejimində serverə qoyur). Bu proses connection.py
+# tərəfindən AVTOMATİK başladılmır -- sqlite_reader.py manual olaraq əl ilə
+# (məs. ayrıca terminal/prosesdən) işə salınmalıdır:
+#   python sqlite_reader.py <domain_data.db yolu> --port 8800
+SQLITE_READER_HOST = "127.0.0.1"
+SQLITE_READER_PORT = int(os.getenv("SQLITE_READER_PORT", 8800))
+SQLITE_READER_BASE = f"http://{SQLITE_READER_HOST}:{SQLITE_READER_PORT}"
+
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_limiter import Limiter
@@ -44,7 +122,6 @@ from flask_limiter.util import get_remote_address
 from user import users_dump as users
 from computer import computers
 from group import groups
-from group import group_member
 from ou import ous
 from gpo import gpos
 from trust import trusts
@@ -147,25 +224,32 @@ def _is_default_trustee(sid: str) -> bool:
 
 def _write_domain_users_snapshot(result: dict, is_local: bool) -> None:
     """
-    Overwrite domain_users.json on every /api/users request.
-    Keeps all enumerated user attributes (including admin rules/reasons when present).
+    Overwrite domain_users.jsonl on every /api/users request.
+    Format: line 1 = metadata, lines 2+ = one user record per line.
     """
-    out_path = DOMAIN_OBJECT_DIR / "domain_users.json"
+    out_path = DOMAIN_OBJECT_DIR / "domain_users.jsonl"
 
-    payload = {
+    meta_line = {
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "source": "local" if is_local else "domain",
         "success": bool(result.get("success")),
         "count": int(result.get("count") or 0),
-        "users": list(result.get("users") or []),
         "meta": result.get("meta") or {},
         "error": result.get("error") if not result.get("success") else None,
     }
+    users_list = list(result.get("users") or [])
 
     try:
         DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
-        # `w` mode guarantees old content is replaced on every request.
-        out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_acl_jsonl_snapshot(out_path, meta_line, users_list)
+
+        # Remove old JSON-format snapshot if present.
+        old_json = DOMAIN_OBJECT_DIR / "domain_users.json"
+        if old_json.exists() and old_json != out_path:
+            try:
+                old_json.unlink()
+            except Exception as exc:
+                logger.warning("Could not remove old users JSON snapshot %s: %s", old_json, exc)
 
         # Remove old legacy file in repo root so consumers use a single source.
         if LEGACY_DOMAIN_USERS_JSON.exists() and LEGACY_DOMAIN_USERS_JSON != out_path:
@@ -174,7 +258,9 @@ def _write_domain_users_snapshot(result: dict, is_local: bool) -> None:
             except Exception as exc:
                 logger.warning("Could not remove legacy users snapshot %s: %s", LEGACY_DOMAIN_USERS_JSON, exc)
     except Exception as exc:
-        logger.warning("Could not write domain users snapshot to %s: %s", out_path, exc)
+        logger.warning("Could not write domain users JSONL snapshot to %s: %s", out_path, exc)
+    else:
+        _schedule_db_build()  # Snapshot written -- trigger DB build with debounce
 
 
 def _write_domain_users_proto_snapshot(result: dict, output_path: Path) -> None:
@@ -202,26 +288,38 @@ def _write_domain_object_snapshot(
     legacy_path: Path | None = None,
 ) -> None:
     """
-    Generic Domain Object snapshot writer.
+    Generic Domain Object snapshot writer — JSONL format.
 
-    Uses overwrite semantics (`w` mode via write_text) on every request so stale
-    context is cleared and replaced with the latest enumeration result.
+    Line 1: metadata (generated_at, source, success, count, meta, error).
+    Lines 2+: one record per line (groups / ous / trusts / …).
+
+    Uses overwrite semantics on every request so stale context is cleared.
     """
-    out_path = DOMAIN_OBJECT_DIR / filename
+    # Always write to .jsonl regardless of what filename says
+    jsonl_filename = Path(filename).with_suffix(".jsonl").name
+    out_path = DOMAIN_OBJECT_DIR / jsonl_filename
 
-    payload = {
+    meta_line = {
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "source": "local" if is_local else "domain",
         "success": bool(result.get("success")),
         "count": int(result.get("count") or 0),
-        data_key: list(result.get(data_key) or []),
         "meta": result.get("meta") or {},
         "error": result.get("error") if not result.get("success") else None,
     }
+    records = list(result.get(data_key) or [])
 
     try:
         DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_acl_jsonl_snapshot(out_path, meta_line, records)
+
+        # Remove old .json-format snapshot if it still exists alongside the new .jsonl.
+        old_json = DOMAIN_OBJECT_DIR / filename
+        if old_json.exists() and old_json != out_path:
+            try:
+                old_json.unlink()
+            except Exception as exc:
+                logger.warning("Could not remove old JSON snapshot %s: %s", old_json, exc)
 
         if legacy_path and legacy_path.exists() and legacy_path != out_path:
             try:
@@ -229,23 +327,33 @@ def _write_domain_object_snapshot(
             except Exception as exc:
                 logger.warning("Could not remove legacy snapshot %s: %s", legacy_path, exc)
     except Exception as exc:
-        logger.warning("Could not write domain snapshot to %s: %s", out_path, exc)
+        logger.warning("Could not write domain JSONL snapshot to %s: %s", out_path, exc)
+    else:
+        _schedule_db_build()  # Snapshot written -- trigger DB build with debounce
 
 
-def _write_domain_aces_snapshot(result: dict, is_local: bool) -> None:
+# ---------------------------------------------------------------------------
+# Computers snapshots are stored in JSONL format:
+#   - Line 1: metadata object (generated_at, source, success, count, meta, ...)
+#   - Subsequent lines: one computer record per line (JSON object)
+# This allows large computer lists to be read/written line by line.
+# ---------------------------------------------------------------------------
+
+def _write_domain_computers_jsonl_snapshot(result: dict, is_local: bool) -> None:
     """
-    Write ACL findings to domain_aces.parquet (ZSTD) for compact storage and fast scans.
+    Write domain computers to domain_computers.jsonl.
 
-    On every enumeration run this overwrites the previous parquet snapshot so stale
-    context is cleared automatically.
+    Format:
+      - Line 1: metadata (generated_at, source, success, count, error, meta)
+      - Lines 2+: one JSON object per computer record
+
+    Overwrites the previous snapshot on every enumeration so stale data is
+    cleared automatically.
     """
-    out_path = DOMAIN_ACES_PARQUET
-    aces = list(result.get("acls") or result.get("aces") or [])
+    out_path = _jsonl_snapshot_path(DOMAIN_COMPUTERS_JSON)
+    computers_list = list(result.get("computers") or [])
 
     try:
-        import pyarrow as pa  # pyright: ignore[reportMissingImports]
-        import pyarrow.parquet as pq  # pyright: ignore[reportMissingImports]
-
         DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
 
         generated_at = datetime.utcnow().isoformat() + "Z"
@@ -254,36 +362,153 @@ def _write_domain_aces_snapshot(result: dict, is_local: bool) -> None:
         count = int(result.get("count") or 0)
         error = result.get("error") if not success else None
 
-        # Keep per-record context columns so queries don't need a sidecar file.
-        rows: list[dict] = []
-        if aces:
-            for ace in aces:
-                row = dict(ace or {})
-                row["generated_at"] = generated_at
-                row["source"] = source
-                row["snapshot_success"] = success
-                row["snapshot_count"] = count
-                row["snapshot_error"] = error
-                rows.append(row)
-        else:
-            # Ensure snapshot metadata still exists even when there are no ACE rows.
-            rows.append({
-                "generated_at": generated_at,
-                "source": source,
-                "snapshot_success": success,
-                "snapshot_count": count,
-                "snapshot_error": error,
-            })
+        meta_line = {
+            "generated_at": generated_at,
+            "source": source,
+            "success": success,
+            "count": count,
+            "error": error,
+            "meta": result.get("meta") or {},
+        }
 
-        table = pa.Table.from_pylist(rows)
-        pq.write_table(table, out_path, compression="zstd", use_dictionary=True)
+        _write_acl_jsonl_snapshot(out_path, meta_line, computers_list)
 
-        # Remove old JSON snapshots to avoid storage bloat.
-        if DOMAIN_ACES_JSON.exists():
+        # Remove old JSON-format snapshot — JSONL is now the source of truth.
+        if DOMAIN_COMPUTERS_JSON.exists() and DOMAIN_COMPUTERS_JSON != out_path:
+            try:
+                DOMAIN_COMPUTERS_JSON.unlink()
+            except Exception as exc:
+                logger.warning(
+                    "Could not remove legacy computers JSON snapshot %s: %s",
+                    DOMAIN_COMPUTERS_JSON, exc,
+                )
+
+        # Remove legacy root-level snapshot.
+        if LEGACY_DOMAIN_COMPUTERS_JSON.exists() and LEGACY_DOMAIN_COMPUTERS_JSON != out_path:
+            try:
+                LEGACY_DOMAIN_COMPUTERS_JSON.unlink()
+            except Exception as exc:
+                logger.warning(
+                    "Could not remove legacy computers snapshot %s: %s",
+                    LEGACY_DOMAIN_COMPUTERS_JSON, exc,
+                )
+    except Exception as exc:
+        logger.warning("Could not write domain computers JSONL snapshot to %s: %s", out_path, exc)
+
+
+def _read_domain_computers_jsonl_snapshot() -> dict:
+    """
+    Read domain computers from domain_computers.jsonl.
+
+    Returns a dict compatible with the standard enumeration result shape:
+      {"success": bool, "count": int, "computers": [...], "meta": {...}}
+    """
+    in_path = _jsonl_snapshot_path(DOMAIN_COMPUTERS_JSON)
+    if not in_path.exists():
+        return {
+            "success": False,
+            "error": f"Computers snapshot not found: {in_path}",
+            "code": 404,
+        }
+
+    try:
+        meta_line, rows = _read_acl_jsonl_snapshot(in_path)
+        computers_list = [dict(r) for r in rows if isinstance(r, dict)]
+        return {
+            "success": meta_line.get("success", True),
+            "count": meta_line.get("count", len(computers_list)),
+            "computers": computers_list,
+            "meta": {
+                **( meta_line.get("meta") or {} ),
+                "snapshot_type": "computers-jsonl",
+                "snapshot_path": str(in_path),
+                "generated_at": meta_line.get("generated_at"),
+                "source": meta_line.get("source"),
+            },
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"Could not read computers JSONL snapshot: {exc}",
+            "code": 500,
+        }
+
+
+# ---------------------------------------------------------------------------
+# ACL snapshots are stored in JSONL format:
+#   - Line 1: metadata object (generated_at, source, success, count, meta, ...)
+#   - Subsequent lines: one ACL record per line (JSON object)
+# This allows large ACL lists to be read/written line by line.
+# ---------------------------------------------------------------------------
+
+def _jsonl_snapshot_path(json_path: Path) -> Path:
+    """Convert a .json path to .jsonl for ACL snapshots."""
+    return json_path.with_suffix(".jsonl")
+
+
+def _write_acl_jsonl_snapshot(out_path: Path, meta_line: dict, records: list[dict]) -> None:
+    """Write a JSONL ACL snapshot: first line is metadata, the rest are records."""
+    lines = [json.dumps(meta_line, ensure_ascii=False, default=str)]
+    lines.extend(json.dumps(r, ensure_ascii=False, default=str) for r in records)
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _read_acl_jsonl_snapshot(in_path: Path) -> tuple[dict, list[dict]]:
+    """Read a JSONL ACL snapshot, return (metadata, records)."""
+    text = in_path.read_text(encoding="utf-8")
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return {}, []
+    meta_line = json.loads(lines[0])
+    if not isinstance(meta_line, dict):
+        meta_line = {}
+    records = [json.loads(ln) for ln in lines[1:]]
+    return meta_line, records
+
+
+def _write_domain_aces_snapshot(result: dict, is_local: bool) -> None:
+    """
+    Write ACL findings to domain_aces.jsonl for human-readable storage.
+
+    On every enumeration run this overwrites the previous JSONL snapshot so stale
+    context is cleared automatically.
+    """
+    out_path = _jsonl_snapshot_path(DOMAIN_ACES_JSON)
+    aces = list(result.get("acls") or result.get("aces") or [])
+
+    try:
+        DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
+
+        generated_at = datetime.utcnow().isoformat() + "Z"
+        source = "local" if is_local else "domain"
+        success = bool(result.get("success"))
+        count = int(result.get("count") or 0)
+        error = result.get("error") if not success else None
+
+        meta_line = {
+            "generated_at": generated_at,
+            "source": source,
+            "success": success,
+            "count": count,
+            "error": error,
+            "meta": result.get("meta") or {},
+        }
+
+        _write_acl_jsonl_snapshot(out_path, meta_line, aces)
+
+        # Remove old parquet snapshot if it exists.
+        if DOMAIN_ACES_PARQUET.exists():
+            try:
+                DOMAIN_ACES_PARQUET.unlink()
+            except Exception as exc:
+                logger.warning("Could not remove old ACL parquet snapshot %s: %s", DOMAIN_ACES_PARQUET, exc)
+
+        # Remove the old JSON-format snapshot now that JSONL is the source of truth.
+        if DOMAIN_ACES_JSON.exists() and DOMAIN_ACES_JSON != out_path:
             try:
                 DOMAIN_ACES_JSON.unlink()
             except Exception as exc:
-                logger.warning("Could not remove old ACL JSON snapshot %s: %s", DOMAIN_ACES_JSON, exc)
+                logger.warning("Could not remove legacy ACL JSON snapshot %s: %s", DOMAIN_ACES_JSON, exc)
 
         if LEGACY_DOMAIN_ACES_JSON.exists() and LEGACY_DOMAIN_ACES_JSON != out_path:
             try:
@@ -291,7 +516,7 @@ def _write_domain_aces_snapshot(result: dict, is_local: bool) -> None:
             except Exception as exc:
                 logger.warning("Could not remove legacy ACL snapshot %s: %s", LEGACY_DOMAIN_ACES_JSON, exc)
     except Exception as exc:
-        logger.warning("Could not write domain ACL parquet snapshot to %s: %s", out_path, exc)
+        logger.warning("Could not write domain ACL JSONL snapshot to %s: %s", out_path, exc)
 
 
 def _normalize_object_ace_type_value(value) -> str:
@@ -415,8 +640,8 @@ def _extract_dangerous_rows(result: dict) -> list[dict]:
 
 
 def _write_domain_dangerous_ace_snapshot(result: dict, is_local: bool) -> None:
-    """Write dangerous ACE subset to domain_dangerous_ace.json for fast reuse."""
-    out_path = DOMAIN_DANGEROUS_ACE_JSON
+    """Write dangerous ACE subset to domain_dangerous_ace.jsonl for fast reuse."""
+    out_path = _jsonl_snapshot_path(DOMAIN_DANGEROUS_ACE_JSON)
     try:
         DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -435,14 +660,13 @@ def _write_domain_dangerous_ace_snapshot(result: dict, is_local: bool) -> None:
             # If the helper is unavailable for any reason, fall back to original rows.
             pass
 
-        payload = {
+        meta_line = {
             "success": True,
             "count": len(rows),
-            "acls": rows,
             "meta": {
                 "generated_at": generated_at,
                 "source": source,
-                "snapshot_type": "dangerous-ace-json",
+                "snapshot_type": "dangerous-ace-jsonl",
                 "snapshot_path": str(out_path),
                 "snapshot_success": success,
                 "snapshot_count": count,
@@ -451,33 +675,37 @@ def _write_domain_dangerous_ace_snapshot(result: dict, is_local: bool) -> None:
             },
         }
 
-        out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_acl_jsonl_snapshot(out_path, meta_line, rows)
+
+        # Remove the old JSON-format snapshot now that JSONL is the source of truth.
+        if DOMAIN_DANGEROUS_ACE_JSON.exists() and DOMAIN_DANGEROUS_ACE_JSON != out_path:
+            try:
+                DOMAIN_DANGEROUS_ACE_JSON.unlink()
+            except Exception as exc:
+                logger.warning("Could not remove legacy dangerous ACE snapshot %s: %s", DOMAIN_DANGEROUS_ACE_JSON, exc)
     except Exception as exc:
         logger.warning("Could not write dangerous ACE snapshot to %s: %s", out_path, exc)
 
 
 def _read_domain_dangerous_ace_snapshot() -> dict:
-    """Read dangerous ACE subset from domain_dangerous_ace.json."""
-    if not DOMAIN_DANGEROUS_ACE_JSON.exists():
+    """Read dangerous ACE subset from domain_dangerous_ace.jsonl."""
+    in_path = _jsonl_snapshot_path(DOMAIN_DANGEROUS_ACE_JSON)
+    if not in_path.exists():
         return {
             "success": False,
-            "error": f"ACL snapshot not found: {DOMAIN_DANGEROUS_ACE_JSON}",
+            "error": f"ACL snapshot not found: {in_path}",
             "code": 404,
         }
 
     try:
-        raw = json.loads(DOMAIN_DANGEROUS_ACE_JSON.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            raise ValueError("Invalid ACL snapshot format")
-
-        rows = raw.get("acls") if isinstance(raw.get("acls"), list) else []
+        meta_line, rows = _read_acl_jsonl_snapshot(in_path)
         filtered = [dict(r) for r in rows if isinstance(r, dict)]
 
-        meta = raw.get("meta") if isinstance(raw.get("meta"), dict) else {}
+        meta = meta_line.get("meta") if isinstance(meta_line.get("meta"), dict) else {}
         meta = dict(meta)
         meta.update({
-            "snapshot_type": "dangerous-ace-json",
-            "snapshot_path": str(DOMAIN_DANGEROUS_ACE_JSON),
+            "snapshot_type": "dangerous-ace-jsonl",
+            "snapshot_path": str(in_path),
             "snapshot_rows": len(filtered),
         })
 
@@ -496,46 +724,37 @@ def _read_domain_dangerous_ace_snapshot() -> dict:
 
 
 def _read_domain_aces_parquet_snapshot() -> dict:
-    """Read full ACL rows from domain_aces.parquet."""
-    if not DOMAIN_ACES_PARQUET.exists():
+    """Read full ACL rows from domain_aces.jsonl."""
+    in_path = _jsonl_snapshot_path(DOMAIN_ACES_JSON)
+    if not in_path.exists():
         return {
             "success": False,
-            "error": f"ACL snapshot not found: {DOMAIN_ACES_PARQUET}",
+            "error": f"ACL snapshot not found: {in_path}",
             "code": 404,
         }
 
     try:
-        import pyarrow.parquet as pq  # pyright: ignore[reportMissingImports]
+        meta_line, rows = _read_acl_jsonl_snapshot(in_path)
+        rows = [dict(r) for r in rows if isinstance(r, dict)]
 
-        table = pq.read_table(DOMAIN_ACES_PARQUET)
-        raw_rows = table.to_pylist()
-        rows: list[dict] = []
-        for row in raw_rows:
-            if not isinstance(row, dict):
-                continue
-            if not any(k in row for k in ("target_name", "target_dn", "principal_sid", "rights")):
-                continue
-            clean = dict(row)
-            for key in ("generated_at", "source", "snapshot_success", "snapshot_count", "snapshot_error"):
-                clean.pop(key, None)
-            if isinstance(clean.get("rights"), tuple):
-                clean["rights"] = list(clean["rights"])
-            rows.append(clean)
+        meta = meta_line.get("meta") if isinstance(meta_line.get("meta"), dict) else {}
+        meta = dict(meta)
+        meta.update({
+            "snapshot_type": "all-aces-jsonl",
+            "snapshot_path": str(in_path),
+            "snapshot_rows": len(rows),
+        })
 
         return {
             "success": True,
             "count": len(rows),
             "acls": rows,
-            "meta": {
-                "snapshot_type": "all-aces-parquet",
-                "snapshot_path": str(DOMAIN_ACES_PARQUET),
-                "snapshot_rows": len(rows),
-            },
+            "meta": meta,
         }
     except Exception as exc:
         return {
             "success": False,
-            "error": f"Could not read ACL parquet snapshot: {exc}",
+            "error": f"Could not read ACL JSONL snapshot: {exc}",
             "code": 500,
         }
 
@@ -574,8 +793,8 @@ def _extract_extended_right_rows(result: dict) -> list[dict]:
 
 
 def _write_domain_extended_rights_snapshot(result: dict, is_local: bool) -> None:
-    """Write extended-right ACEs to domain_extended_rights.json for fast reuse."""
-    out_path = DOMAIN_EXTENDED_RIGHTS_JSON
+    """Write extended-right ACEs to domain_extended_rights.jsonl for fast reuse."""
+    out_path = _jsonl_snapshot_path(DOMAIN_EXTENDED_RIGHTS_JSON)
     try:
         DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -592,14 +811,13 @@ def _write_domain_extended_rights_snapshot(result: dict, is_local: bool) -> None
         except Exception:
             pass
 
-        payload = {
+        meta_line = {
             "success": True,
             "count": len(rows),
-            "acls": rows,
             "meta": {
                 "generated_at": generated_at,
                 "source": source,
-                "snapshot_type": "extended-rights-json",
+                "snapshot_type": "extended-rights-jsonl",
                 "snapshot_path": str(out_path),
                 "snapshot_success": success,
                 "snapshot_count": count,
@@ -608,26 +826,30 @@ def _write_domain_extended_rights_snapshot(result: dict, is_local: bool) -> None
             },
         }
 
-        out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_acl_jsonl_snapshot(out_path, meta_line, rows)
+
+        # Remove the old JSON-format snapshot now that JSONL is the source of truth.
+        if DOMAIN_EXTENDED_RIGHTS_JSON.exists() and DOMAIN_EXTENDED_RIGHTS_JSON != out_path:
+            try:
+                DOMAIN_EXTENDED_RIGHTS_JSON.unlink()
+            except Exception as exc:
+                logger.warning("Could not remove legacy extended-rights snapshot %s: %s", DOMAIN_EXTENDED_RIGHTS_JSON, exc)
     except Exception as exc:
         logger.warning("Could not write extended-rights snapshot to %s: %s", out_path, exc)
 
 
 def _read_domain_extended_rights_snapshot() -> dict:
-    """Read extended-right ACEs from domain_extended_rights.json."""
-    if not DOMAIN_EXTENDED_RIGHTS_JSON.exists():
+    """Read extended-right ACEs from domain_extended_rights.jsonl."""
+    in_path = _jsonl_snapshot_path(DOMAIN_EXTENDED_RIGHTS_JSON)
+    if not in_path.exists():
         return {
             "success": False,
-            "error": f"ACL snapshot not found: {DOMAIN_EXTENDED_RIGHTS_JSON}",
+            "error": f"ACL snapshot not found: {in_path}",
             "code": 404,
         }
 
     try:
-        raw = json.loads(DOMAIN_EXTENDED_RIGHTS_JSON.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            raise ValueError("Invalid ACL snapshot format")
-
-        rows = raw.get("acls") if isinstance(raw.get("acls"), list) else []
+        meta_line, rows = _read_acl_jsonl_snapshot(in_path)
         filtered: list[dict] = []
         for row in rows:
             if not isinstance(row, dict):
@@ -642,11 +864,11 @@ def _read_domain_extended_rights_snapshot() -> dict:
             row["object_acetype"] = object_ace_type
             filtered.append(row)
 
-        meta = raw.get("meta") if isinstance(raw.get("meta"), dict) else {}
+        meta = meta_line.get("meta") if isinstance(meta_line.get("meta"), dict) else {}
         meta = dict(meta)
         meta.update({
-            "snapshot_type": "extended-rights-json",
-            "snapshot_path": str(DOMAIN_EXTENDED_RIGHTS_JSON),
+            "snapshot_type": "extended-rights-jsonl",
+            "snapshot_path": str(in_path),
             "snapshot_rows": len(rows),
             "snapshot_filtered_rows": len(filtered),
         })
@@ -666,15 +888,40 @@ def _read_domain_extended_rights_snapshot() -> dict:
 
 
 def _read_snapshot_sids(snapshot_path: Path, list_key: str) -> list[str]:
-    """Read SID values from a Domain Object snapshot JSON list."""
-    if not snapshot_path.exists():
+    """
+    Read SID values from a Domain Object snapshot.
+
+    Supports both JSON (legacy) and JSONL formats.
+    For JSONL: line 1 is metadata, subsequent lines are individual records.
+    Falls back to the JSONL counterpart (.jsonl) when the .json file is absent.
+    """
+    # Prefer JSONL counterpart if JSON file is gone (computers migrated to JSONL).
+    jsonl_path = snapshot_path.with_suffix(".jsonl")
+    effective_path = snapshot_path if snapshot_path.exists() else jsonl_path
+
+    if not effective_path.exists():
         return []
 
     try:
-        raw = json.loads(snapshot_path.read_text(encoding="utf-8"))
-        items = raw.get(list_key) if isinstance(raw, dict) else []
-        if not isinstance(items, list):
-            return []
+        text = effective_path.read_text(encoding="utf-8")
+
+        # JSONL format: each line is a separate JSON object.
+        if effective_path.suffix == ".jsonl":
+            lines = [ln for ln in text.splitlines() if ln.strip()]
+            # Line 0 is metadata — skip it, records start at line 1.
+            items = []
+            for ln in lines[1:]:
+                try:
+                    obj = json.loads(ln)
+                    if isinstance(obj, dict):
+                        items.append(obj)
+                except Exception:
+                    continue
+        else:
+            raw = json.loads(text)
+            items = raw.get(list_key) if isinstance(raw, dict) else []
+            if not isinstance(items, list):
+                return []
 
         sids: list[str] = []
         for obj in items:
@@ -685,7 +932,7 @@ def _read_snapshot_sids(snapshot_path: Path, list_key: str) -> list[str]:
                 sids.append(sid)
         return sids
     except Exception as exc:
-        logger.warning("Could not read SID snapshot %s: %s", snapshot_path, exc)
+        logger.warning("Could not read SID snapshot %s: %s", effective_path, exc)
         return []
 
 
@@ -794,6 +1041,155 @@ def test_connection():
     }), 503
 
 
+def _clear_domain_object_dir() -> None:
+    """
+    Domain Object qovluğundakı bütün faylları silir.
+
+    Hər yeni /api/connect uğurlu olduqda collector pipeline işə düşməzdən
+    əvvəl çağırılır ki, köhnə domenə aid JSONL/JSON/DB faylları yeni
+    nəticələrlə qarışmasın — təmiz slate üzərindən yazılsın.
+
+    Silmə qaydaları:
+      • Yalnız birbaşa fayllar silinir (alt qovluqlar toxunulmaz qalır).
+      • Hər silinmə xətası ayrıca loglanır, digər faylların silinməsini
+        DAYANDIRMIR.
+      • Qovluq mövcud deyilsə heç nə edilmir (mkdir sonradan
+        collector-lar tərəfindən çağırılacaq).
+    """
+    if not DOMAIN_OBJECT_DIR.exists():
+        logger.info("clear_domain_object_dir: qovluq mövcud deyil, keçilir — %s", DOMAIN_OBJECT_DIR)
+        return
+
+    deleted, failed = 0, 0
+    for item in DOMAIN_OBJECT_DIR.iterdir():
+        if not item.is_file():
+            continue
+        try:
+            item.unlink()
+            deleted += 1
+            logger.debug("clear_domain_object_dir: silindi — %s", item.name)
+        except Exception as exc:
+            failed += 1
+            logger.warning("clear_domain_object_dir: silinə bilmədi %s: %s", item.name, exc)
+
+    logger.info(
+        "clear_domain_object_dir: %d fayl silindi, %d uğursuz — %s",
+        deleted, failed, DOMAIN_OBJECT_DIR,
+    )
+
+
+def _run_full_collector_pipeline(enum_req: dict) -> None:
+    """
+    Bütün domain collector-larını (users/computers/ous/gpos/groups/trusts/acl)
+    ardıcıl olaraq işə salır və hər birinin nəticəsini öz .jsonl snapshot
+    faylına yazır. Bu funksiya /api/connect uğurlu olduqdan sonra ayrıca bir
+    background thread-də çağırılır (bax: connect()) -- həmin sorğunun HTTP
+    cavabını GƏCİKDİRMİR.
+
+    Hər .jsonl yazılışı _schedule_db_build() vasitəsilə debounced DB tikintisi
+    planlaşdırır. Bütün collector-lar bitdikdən sonra debounce gözlənilmədən
+    DB sinxron tikilir ki, sonuncu snapshot da daxil olsun. sqlite_reader.py
+    (port 8800) burada AVTOMATİK başladılmır -- manual olaraq əl ilə işə
+    salınmalıdır. Frontend onun hazır olduğunu /api/health (8800) pollinqi
+    ilə aşkarlayır.
+
+    Tək bir collector-un uğursuz olması digərlərini DAYANDIRMIR -- hər biri
+    öz try/except blokunda işləyir ki, məsələn ACL enumeration uğursuz olsa
+    belə Users/Computers snapshot-ları yenə DB-yə düşsün.
+    """
+    ip = enum_req.get("ip") or enum_req.get("dc") or enum_req.get("domain")
+    domain = enum_req.get("domain")
+    logger.info("collector pipeline started: ip=%s domain=%s", ip, domain)
+
+
+    # ── Köhnə faylları təmizlə ───────────────────────────────────────────────
+    # Yeni collector nəticələri yazılmadan əvvəl Domain Object qovluğu
+    # sıfırlanır ki, əvvəlki domenə aid stale data yeni nəticələrlə qarışmasın.
+    _clear_domain_object_dir()
+    try:
+        def _acl_collector(ip_, domain_, username_, password_, config_):
+            return get_domain_acls(ip_, domain_, username_, password_, config_,
+                                    acl_filter=AclFilterConfig())
+
+        acl_result = _run_enumeration_with_target_fallback(enum_req, _acl_collector)
+        if acl_result.get("success"):
+            _write_domain_aces_snapshot(acl_result, is_local=False)
+            _write_domain_extended_rights_snapshot(acl_result, is_local=False)
+            _write_domain_dangerous_ace_snapshot(acl_result, is_local=False)
+    except Exception as exc:
+        logger.warning("collector pipeline: acl collector failed: %s", exc)
+
+    try:
+        # get_domain_groups öz içindən domain_groups.jsonl-ə yazır (members: [] boş).
+        # _write_domain_object_snapshot ÇAĞIRILMIR — çünki o funksiya faylı
+        # boş members-lərlə üzərinə yazar və members mərhələsinin nəticəsini məhv edər.
+        _run_enumeration_with_target_fallback(enum_req, groups.get_domain_groups)
+    except Exception as exc:
+        logger.warning("collector pipeline: groups collector failed: %s", exc)
+
+    # group_member collector — get_domain_groups-dan sonra işləməlidir ki,
+    # domain_groups.jsonl mövcud olsun. LDAP-dan members-ləri çəkir və
+    # domain_groups.jsonl-i members massivi dolu şəkildə yenidən yazır.
+    try:
+        _run_enumeration_with_target_fallback(enum_req, groups.get_all_group_members)
+    except Exception as exc:
+        logger.warning("collector pipeline: group_member collector failed: %s", exc)
+
+    try:
+        gpos_result = _run_enumeration_with_target_fallback(enum_req, gpos.get_domain_gpos)
+        _write_domain_gpos_snapshot(gpos_result)
+    except Exception as exc:
+        logger.warning("collector pipeline: gpos collector failed: %s", exc)
+
+    try:
+        ous_result = _run_enumeration_with_target_fallback(enum_req, ous.get_domain_ous)
+        _write_domain_object_snapshot(
+            filename="domain_ous.json",
+            result=ous_result,
+            is_local=False,
+            data_key="ous",
+            legacy_path=LEGACY_DOMAIN_OUS_JSON,
+        )
+    except Exception as exc:
+        logger.warning("collector pipeline: ous collector failed: %s", exc)
+
+    try:
+        trusts_result = _run_enumeration_with_target_fallback(enum_req, trusts.get_domain_trusts)
+        _write_domain_object_snapshot(
+            filename="domain_trusts.json",
+            result=trusts_result,
+            is_local=False,
+            data_key="trusts",
+            legacy_path=LEGACY_DOMAIN_TRUSTS_JSON,
+        )
+    except Exception as exc:
+        logger.warning("collector pipeline: trusts collector failed: %s", exc)
+
+    try:
+        computers_result = _run_enumeration_with_target_fallback(enum_req, computers.get_domain_computers)
+        _write_domain_computers_jsonl_snapshot(result=computers_result, is_local=False)
+    except Exception as exc:
+        logger.warning("collector pipeline: computers collector failed: %s", exc)
+
+    try:
+        users_result = _run_enumeration_with_target_fallback(enum_req, users.get_domain_users)
+        _write_domain_users_snapshot(users_result, is_local=False)
+    except Exception as exc:
+        logger.warning("collector pipeline: users collector failed: %s", exc)
+
+    # Bütün collector-lar bitdi -- debounce timer-i ləğv edib DB-ni dərhal
+    # (sinxron) tikir ki, son snapshot da daxil olsun. sqlite_reader.py burada
+    # avtomatik başladılmır -- manual olaraq əl ilə işə salınmalıdır.
+    with _db_build_lock:
+        global _db_build_timer
+        if _db_build_timer is not None:
+            _db_build_timer.cancel()
+            _db_build_timer = None
+    _run_sqlite_engine()
+
+    logger.info("collector pipeline finished: ip=%s domain=%s", ip, domain)
+
+
 @app.route("/api/connect", methods=["POST"])
 @limiter.limit(Config.RATE_LIMIT_CONNECT)
 def connect():
@@ -868,21 +1264,48 @@ def connect():
         _apply_powershell_profile(result, profile)
         result["connect_mode"] = connect_mode
 
-        if connect_mode == "fast":
-            return jsonify(result)
+        if connect_mode != "fast":
+            # Port/host məlumatları üçün yüngül probe (env-probe/counts YOX —
+            # bunlar artıq aşağıdakı collector pipeline tərəfindən təmin edilir).
+            apply_deep_defaults(result, ip, check_port=check_port)
 
-        apply_deep_defaults(result, ip, check_port=check_port)
+        # ── Collector pipeline tetiklenmesi ─────────────────────────────
+        # Connect uğurlu oldu. GUI-yə nə canlı enumeration datası, nə də
+        # GLOBAL_STATE ölçüsündə cavab qaytarılmır. Bunun əvəzinə bütün
+        # collector-lar (users/computers/ous/gpos/groups/trusts/acl) ayrıca
+        # bir background thread-də işə salınır; hər biri bitdikcə öz .jsonl
+        # faylını yazır, sonda domain_data.db tikilir (bax:
+        # _run_full_collector_pipeline). sqlite_reader.py (port 8800) burada
+        # avtomatik başladılmır -- manual olaraq əl ilə işə salınmalıdır.
+        # Frontend bunu /api/health (8800) pollinqi ilə izləyir (bax: 00-global.js).
+        enum_req = dict(req)
+        enum_req["mode"]     = "remote"
+        enum_req["ip"]       = ip
+        enum_req["domain"]   = domain
+        enum_req["username"] = username
+        enum_req["password"] = password
+        enum_req["hash"]     = hash_value
+        enum_req["protocol"] = proto
+        enum_req["dc"]       = result.get("dc") or ip
 
-        if connect_mode == "deep" and skip_counts:
-            return jsonify(result)
+        threading.Thread(
+            target=_run_full_collector_pipeline,
+            args=(enum_req,),
+            daemon=True,
+        ).start()
 
-        enrich_with_env_probe(
-            result=result,
-            req=req,
-            ip=ip,
-            collect_ldap_environment_with_fallback=_collect_ldap_environment_with_fallback,
-            collect_counts_via_enumeration_fallback=_collect_counts_via_enumeration_fallback,
-        )
+        return jsonify({
+            "success": True,
+            "message": "Collector tamamlandı. .jsonl faylları SQLite (.db)-yə çevrilir.",
+            "status": "processing_db",
+            "connect_mode": connect_mode,
+            "protocol": proto,
+            "ip": ip,
+            "domain": domain,
+            "dc": result.get("dc") or ip,
+            "user": username,
+            "db_reader_base": SQLITE_READER_BASE,
+        }), 202
 
     status = 401 if any(k in result.get("error", "") for k in ("password", "Authentication", "credentials")) else 500
     return jsonify(result) if result.get("success") else (jsonify(result), status)
@@ -919,6 +1342,12 @@ def list_users():
         _write_domain_users_proto_snapshot(result, proto_out_path)
 
     _write_domain_users_snapshot(result, is_local=local_mode)
+
+    # connection.py YALNIZ collector-a əmr verir və nəticəni .jsonl-ə yazır
+    # (yuxarıda) + DB build-i debounce ilə planlaşdırır (_write_domain_users_snapshot
+    # daxilində). Render BURADA BAŞ VERMİR — frontend domain_data.db-dən
+    # render üçün birbaşa sqlite_reader.py-nin /api/users endpoint-inə
+    # müraciət edir.
     return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
 
 
@@ -934,13 +1363,7 @@ def list_computers():
         if is_local_request(req)
         else _run_enumeration_with_target_fallback(req, computers.get_domain_computers)
     )
-    _write_domain_object_snapshot(
-        filename="domain_computers.json",
-        result=result,
-        is_local=is_local_request(req),
-        data_key="computers",
-        legacy_path=LEGACY_DOMAIN_COMPUTERS_JSON,
-    )
+    _write_domain_computers_jsonl_snapshot(result=result, is_local=is_local_request(req))
     return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
 
 
@@ -966,6 +1389,63 @@ def list_ous():
     return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
 
 
+def _write_domain_gpos_snapshot(result: dict) -> None:
+    """
+    Write GPO snapshot to domain_gpos.jsonl, including extra summary lines
+    (all_cpasswords, inheritance_blocked, ou_inheritance) appended at the
+    end. Used by both the /api/gpo route and the full collector pipeline
+    (see _run_full_collector_pipeline) so both paths stay in sync.
+    """
+    out_path = DOMAIN_OBJECT_DIR / "domain_gpos.jsonl"
+    try:
+        DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
+        meta_line = {
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "source": "domain",
+            "success": bool(result.get("success")),
+            "count": int(result.get("count") or 0),
+            "sysvol_available": result.get("sysvol_available"),
+            "error": result.get("error") if not result.get("success") else None,
+        }
+        gpos_list = list(result.get("gpos") or [])
+        _write_acl_jsonl_snapshot(out_path, meta_line, gpos_list)
+
+        # Extra fields (all_cpasswords, inheritance_blocked, ou_inheritance)
+        # are appended as an extra line at the end of the file
+        extra_lines = []
+        if result.get("all_cpasswords"):
+            extra_lines.append(
+                json.dumps({"all_cpasswords": result["all_cpasswords"]},
+                           ensure_ascii=False, default=str)
+            )
+        inh_line = {
+            "inheritance_blocked": result.get("inheritance_blocked", []),
+            "ou_inheritance":      result.get("ou_inheritance", []),
+        }
+        extra_lines.append(json.dumps(inh_line, ensure_ascii=False, default=str))
+        if extra_lines:
+            with open(out_path, "a", encoding="utf-8") as _f:
+                _f.write("\n".join(extra_lines) + "\n")
+
+        # Remove old .json file
+        old_json = DOMAIN_OBJECT_DIR / "domain_gpos.json"
+        if old_json.exists() and old_json != out_path:
+            try:
+                old_json.unlink()
+            except Exception as exc:
+                logger.warning("Could not remove old GPO JSON snapshot %s: %s", old_json, exc)
+
+        if LEGACY_DOMAIN_GPOS_JSON.exists() and LEGACY_DOMAIN_GPOS_JSON != out_path:
+            try:
+                LEGACY_DOMAIN_GPOS_JSON.unlink()
+            except Exception as exc:
+                logger.warning("Could not remove legacy GPO snapshot %s: %s", LEGACY_DOMAIN_GPOS_JSON, exc)
+    except Exception as exc:
+        logger.warning("Could not write GPO JSONL snapshot to %s: %s", out_path, exc)
+    else:
+        _schedule_db_build()  # Snapshot written -- trigger DB build with debounce
+
+
 @app.route("/api/gpo", methods=["POST"])
 @app.route("/api/gpos", methods=["POST"])
 @limiter.limit(Config.RATE_LIMIT_ENUM)
@@ -979,22 +1459,10 @@ def list_gpos():
         else _run_enumeration_with_target_fallback(req, gpos.get_domain_gpos)
     )
 
-    # Tam nəticəni saxla — all_cpasswords, wmi_filters, inheritance_blocked,
-    # ou_inheritance, sysvol_available kimi əlavə sahələr _write_domain_object_snapshot
-    # tərəfindən itirilir, ona görə birbaşa yazırıq.
-    out_path = DOMAIN_OBJECT_DIR / "domain_gpos.json"
-    try:
-        DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(
-            json.dumps(result, indent=2, default=str), encoding="utf-8"
-        )
-        if LEGACY_DOMAIN_GPOS_JSON.exists() and LEGACY_DOMAIN_GPOS_JSON != out_path:
-            try:
-                LEGACY_DOMAIN_GPOS_JSON.unlink()
-            except Exception as exc:
-                logger.warning("Could not remove legacy GPO snapshot %s: %s", LEGACY_DOMAIN_GPOS_JSON, exc)
-    except Exception as exc:
-        logger.warning("Could not write GPO snapshot to %s: %s", out_path, exc)
+    # Save the full result — extra fields such as all_cpasswords, wmi_filters,
+    # inheritance_blocked, ou_inheritance, sysvol_available would be lost by
+    # _write_domain_object_snapshot, so we use the dedicated GPO writer.
+    _write_domain_gpos_snapshot(result)
 
     return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
 
@@ -1006,18 +1474,25 @@ def list_groups():
     req, error_response = get_enumeration_request_data()
     if error_response:
         return error_response
-    result = (
-        _local_enumeration_removed("Group")
-        if is_local_request(req)
-        else _run_enumeration_with_target_fallback(req, groups.get_domain_groups)
-    )
-    _write_domain_object_snapshot(
-        filename="domain_groups.json",
-        result=result,
-        is_local=is_local_request(req),
-        data_key="groups",
-        legacy_path=LEGACY_DOMAIN_GROUPS_JSON,
-    )
+
+    if is_local_request(req):
+        result = _local_enumeration_removed("Group")
+        return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
+
+    # MƏRHƏLƏ 1: get_domain_groups ozunden domain_groups.jsonl-e yazir (members: [] bos).
+    # _write_domain_object_snapshot CAĞIRILMIR -- o funksiya faylin uzurine bos members-le
+    # yazaraq members merhelesinin neticesini mehv edir.
+    result = _run_enumeration_with_target_fallback(req, groups.get_domain_groups)
+
+    # MƏRHƏLƏ 2: members-leri doldur ve domain_groups.jsonl-i yeniden yaz.
+    if result.get("success"):
+        try:
+            members_result = _run_enumeration_with_target_fallback(req, groups.get_all_group_members)
+            if members_result.get("success"):
+                result = members_result
+        except Exception as exc:
+            logger.warning("list_groups: group_member collector failed: %s", exc)
+
     return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
 
 
@@ -1041,7 +1516,7 @@ def list_group_members():
         group_dn = "__all__"
 
     def _enum_group_members(ip, domain, username, password, config):
-        return group_member.get_group_members(ip, domain, username, password, group_dn, config)
+        return groups.get_group_members(ip, domain, username, password, group_dn, config)
 
     result = _run_enumeration_with_target_fallback(req, _enum_group_members)
     return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
@@ -1118,7 +1593,7 @@ def list_acl_entries():
                 source_result,
                 _extract_extended_right_rows(source_result),
                 "extended-rights-live",
-                str(DOMAIN_EXTENDED_RIGHTS_JSON),
+                str(_jsonl_snapshot_path(DOMAIN_EXTENDED_RIGHTS_JSON)),
             ) if source_result.get("success") else source_result
             should_refresh_snapshots = bool(source_result.get("success"))
         elif acl_filter_name == "live-dangerous":
@@ -1127,7 +1602,7 @@ def list_acl_entries():
                 source_result,
                 _extract_dangerous_rows(source_result),
                 "dangerous-ace-live",
-                str(DOMAIN_DANGEROUS_ACE_JSON),
+                str(_jsonl_snapshot_path(DOMAIN_DANGEROUS_ACE_JSON)),
             ) if source_result.get("success") else source_result
             should_refresh_snapshots = bool(source_result.get("success"))
         else:
@@ -1579,38 +2054,166 @@ def agent_build_status():
 
 
 # ---------------------------------------------------------------------------
-# ZIP Uploader  — faylları Domain Object qovluğuna çıxarır
+# Offline Snapshot Reader  — reads domain_*.jsonl files from the Domain
+# Object directory directly, without requiring a connect/LDAP call.
+# ---------------------------------------------------------------------------
+
+# section name → (jsonl filename, data key used in the response)
+SNAPSHOT_SECTION_MAP = {
+    "users":     ("domain_users.jsonl",     "users"),
+    "computers": ("domain_computers.jsonl", "computers"),
+    "ous":       ("domain_ous.jsonl",       "ous"),
+    "gpos":      ("domain_gpos.jsonl",      "gpos"),
+    "groups":    ("domain_groups.jsonl",    "groups"),
+    "trusts":    ("domain_trusts.jsonl",    "trusts"),
+    "acl":       ("domain_aces.jsonl",      "acls"),
+}
+
+
+def _read_generic_jsonl_snapshot(filename: str, data_key: str) -> dict:
+    """
+    Reads the given domain_*.jsonl file and returns it in the standard
+    enumeration response format: {success, count, <data_key>: [...], meta}.
+
+    As with GPO snapshots, extra metadata lines (all_cpasswords,
+    inheritance_blocked, ou_inheritance) that are dicts but do not carry the
+    expected record fields (e.g. "name"/"username"/"sid") are collected
+    separately and added under an "extra" key in the response — they are not
+    mixed into the record list.
+    """
+    in_path = DOMAIN_OBJECT_DIR / filename
+    if not in_path.exists():
+        return {
+            "success": False,
+            "error": f"Snapshot file not found: {filename}",
+            "code": 404,
+        }
+
+    try:
+        meta_line, rows = _read_acl_jsonl_snapshot(in_path)
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"Could not read snapshot ({filename}): {exc}",
+            "code": 500,
+        }
+
+    records = []
+    extra_lines = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        # Extra summary lines written in GPO snapshots (all_cpasswords,
+        # inheritance_blocked/ou_inheritance) are separated from the main records.
+        if set(row.keys()) <= {"all_cpasswords", "inheritance_blocked", "ou_inheritance"}:
+            extra_lines.append(row)
+        else:
+            records.append(row)
+
+    response = {
+        "success": meta_line.get("success", True),
+        "count": meta_line.get("count", len(records)),
+        data_key: records,
+        "meta": {
+            **(meta_line.get("meta") or {}),
+            "snapshot_type": f"{data_key}-jsonl",
+            "snapshot_path": str(in_path),
+            "generated_at": meta_line.get("generated_at"),
+            "source": meta_line.get("source"),
+        },
+    }
+    if extra_lines:
+        merged_extra = {}
+        for line in extra_lines:
+            merged_extra.update(line)
+        response["extra"] = merged_extra
+
+    if not response["success"] and meta_line.get("error"):
+        response["error"] = meta_line["error"]
+
+    return response
+
+
+@app.route("/api/snapshot/<section>", methods=["GET", "POST"])
+@limiter.limit("60 per minute")
+def read_offline_snapshot(section):
+    """
+    For ZIP Import (offline) mode — reads domain_<section>.jsonl from the
+    Domain Object directory without any LDAP/connect call, and returns it in
+    the standard enumeration response format.
+
+    This endpoint does not require a domain connection; after a ZIP import
+    the frontend loads all sections (users/computers/ous/gpos/groups/trusts/acl)
+    from here.
+    """
+    section = str(section or "").strip().lower()
+    cfg = SNAPSHOT_SECTION_MAP.get(section)
+    if not cfg:
+        return jsonify({
+            "success": False,
+            "error": f"Unknown snapshot section: {section}",
+            "code": 400,
+        }), 400
+
+    filename, data_key = cfg
+    result = _read_generic_jsonl_snapshot(filename, data_key)
+    status = 200 if result.get("success") else _enumeration_status(result)
+    return jsonify(result), status
+
+
+@app.route("/api/snapshot-status", methods=["GET"])
+@limiter.limit("60 per minute")
+def snapshot_status():
+    """
+    Reports which domain_*.jsonl files are present in the Domain Object
+    directory — the frontend can use this after a ZIP import to check
+    whether offline data is available.
+    """
+    availability = {}
+    for section, (filename, _data_key) in SNAPSHOT_SECTION_MAP.items():
+        path = DOMAIN_OBJECT_DIR / filename
+        availability[section] = path.exists()
+    return jsonify({
+        "success": True,
+        "domain_object_dir": str(DOMAIN_OBJECT_DIR),
+        "available": availability,
+        "any_available": any(availability.values()),
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# ZIP Uploader  — extracts files to the Domain Object directory
 # ---------------------------------------------------------------------------
 
 @app.route("/api/upload-zip", methods=["POST"])
 @limiter.limit("30 per minute")
 def upload_zip():
     """
-    Yüklənən ZIP faylını açır və içindəki bütün faylları
-    DOMAIN_OBJECT_DIR (/Main/Domain Object/) qovluğuna yerləşdirir.
-    Agent Generator altındakı Domain Objects yox, Ümumi Domain Object qovluğuna.
+    Extracts the uploaded ZIP file and places all its contents into
+    DOMAIN_OBJECT_DIR (/Main/Domain Object/).
+    The general Domain Object directory, not the one under Agent Generator.
     """
     if "file" not in request.files:
-        return jsonify({"success": False, "error": "Fayl göndərilməyib.", "code": 400}), 400
+        return jsonify({"success": False, "error": "No file sent.", "code": 400}), 400
 
     uploaded = request.files["file"]
 
     if not uploaded.filename:
-        return jsonify({"success": False, "error": "Fayl adı boşdur.", "code": 400}), 400
+        return jsonify({"success": False, "error": "Filename is empty.", "code": 400}), 400
 
     if not uploaded.filename.lower().endswith(".zip"):
-        return jsonify({"success": False, "error": "Yalnız ZIP faylı qəbul edilir.", "code": 400}), 400
+        return jsonify({"success": False, "error": "Only ZIP files are accepted.", "code": 400}), 400
 
     try:
         file_bytes = uploaded.read()
         if len(file_bytes) == 0:
-            return jsonify({"success": False, "error": "ZIP fayl boşdur.", "code": 400}), 400
+            return jsonify({"success": False, "error": "ZIP file is empty.", "code": 400}), 400
 
         with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
-            # Zip bomb müdafiəsi: max 500 MB
+            # Zip bomb protection: max 500 MB
             total_size = sum(info.file_size for info in zf.infolist())
             if total_size > 500 * 1024 * 1024:
-                return jsonify({"success": False, "error": "ZIP faylı çox böyükdür (max 500 MB).", "code": 400}), 400
+                return jsonify({"success": False, "error": "ZIP file is too large (max 500 MB).", "code": 400}), 400
 
             DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1618,11 +2221,11 @@ def upload_zip():
             skipped = []
 
             for info in zf.infolist():
-                # Qovluqları atla
+                # Skip directories
                 if info.filename.endswith("/"):
                     continue
 
-                # Path traversal müdafiəsi
+                # Path traversal protection
                 safe_name = Path(info.filename).name
                 if not safe_name or safe_name.startswith("."):
                     skipped.append(info.filename)
@@ -1636,6 +2239,10 @@ def upload_zip():
                 extracted_files.append(safe_name)
                 logger.info("upload-zip: %s -> %s", info.filename, dest_path)
 
+        # ZIP files extracted to Domain Object directory.
+        # Trigger sqlite_engine in the background -- DB is updated immediately.
+        threading.Thread(target=_run_sqlite_engine, daemon=True).start()
+
         return jsonify({
             "success": True,
             "extracted": extracted_files,
@@ -1645,10 +2252,37 @@ def upload_zip():
         }), 200
 
     except zipfile.BadZipFile:
-        return jsonify({"success": False, "error": "Keçərsiz ZIP faylı.", "code": 400}), 400
+        return jsonify({"success": False, "error": "Invalid ZIP file.", "code": 400}), 400
     except Exception as exc:
         logger.error("upload-zip error: %s", exc)
         return jsonify({"success": False, "error": str(exc), "code": 500}), 500
+
+
+# ---------------------------------------------------------------------------
+# SQLite DB Builder endpoint
+# ---------------------------------------------------------------------------
+
+@app.route("/api/build-sqlite-db", methods=["POST"])
+@limiter.limit("10 per minute")
+def build_sqlite_db():
+    """
+    Converts hardcoded JSONL files in the Domain Object directory to domain_data.db.
+    Called by the frontend after a ZIP import or domain connect.
+    Runs in the background -- response is returned immediately.
+    """
+    if _SQLITE_ENGINE_PATH is None:
+        return jsonify({
+            "success": False,
+            "error": "sqlite_engine.py not found",
+        }), 503
+
+    db_out = str(DOMAIN_OBJECT_DIR / "domain_data.db")
+    threading.Thread(target=_run_sqlite_engine, daemon=True).start()
+    return jsonify({
+        "success": True,
+        "message": "DB build started in background",
+        "output": db_out,
+    }), 202
 
 
 # ---------------------------------------------------------------------------

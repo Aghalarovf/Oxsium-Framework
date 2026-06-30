@@ -28,7 +28,7 @@ struct DomainInfoCollectorOptions {
 //                   minPwdLength, maxPwdAge, minPwdAge, lockoutDuration,
 //                   lockoutThreshold, lockoutObservationWindow, pwdHistoryLength,
 //                   ms-DS-MachineAccountQuota
-//          output : raw_domaininfo.ndjson
+//          output : raw_domaininfo.jsonl
 //
 //    (2) Domain Controllers (computer objects with userAccountControl bit 0x2000)
 //          base   : <domainNC>
@@ -36,7 +36,7 @@ struct DomainInfoCollectorOptions {
 //          attrs  : distinguishedName, cn, dNSHostName, operatingSystem,
 //                   operatingSystemVersion, whenCreated, userAccountControl,
 //                   objectSid, servicePrincipalName, msDS-SupportedEncryptionTypes
-//          output : raw_domaininfo.ndjson (embedded in domain object)
+//          output : raw_domaininfo.jsonl (embedded in domain object)
 //
 //    (3) FSMO Role Holders (5 single-object BASE lookups via well-known attribute paths)
 //          - Schema Master     : CN=Schema,CN=Configuration,<forestNC>
@@ -98,7 +98,7 @@ struct DomainInfoCollectorOptions {
 //                   presence of DC Policy is noted; actual value requires SYSVOL access)
 //          output : embedded as smb_signing_policy_present flag
 //
-//  Output schema — raw_domaininfo.ndjson (single-line JSON object):
+//  Output schema — raw_domaininfo.jsonl (single-line JSON object):
 //  {
 //    "fqdn"                      : "corp.local",
 //    "netbios_name"              : "CORP",
@@ -172,7 +172,7 @@ struct DomainInfoCollectorOptions {
 //    "machine_account_quota"     : 10
 //  }
 //
-//  Offline analysis (DomainInfoOfflineProcessor) reads raw_domaininfo.ndjson and emits:
+//  Offline analysis (DomainInfoOfflineProcessor) reads raw_domaininfo.jsonl and emits:
 //    domain_info.json  — enriched domain info with risk analysis
 // ─────────────────────────────────────────────────────────────────────────────
 class DomainInfoCollector {
@@ -216,7 +216,7 @@ private:
                                    DomainInfo& info);
 
     // ── Serializer ────────────────────────────────────────────────────────────
-    std::string domaininfo_to_ndjson(const DomainInfo& info,
+    std::string domaininfo_to_jsonl(const DomainInfo& info,
                                      const std::string& generated_at) const;
 
     // ── Helpers ───────────────────────────────────────────────────────────────

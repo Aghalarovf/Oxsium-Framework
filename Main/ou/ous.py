@@ -437,13 +437,18 @@ def get_domain_ous(ip, domain, username, password, config):
 
         result = {"success": True, "count": len(ous), "ous": ous}
 
-        # ── domain_ous.json-a yaz ────────────────────────────────────────────
+        # ── domain_ous.jsonl-a yaz ───────────────────────────────────────────
         output_path = os.path.join(
-            str(config.DOMAIN_OBJECT_DIR), "domain_ous.json"
+            str(config.DOMAIN_OBJECT_DIR), "domain_ous.jsonl"
         )
         try:
             with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(result, f, ensure_ascii=False, indent=2, default=str)
+                # Meta sətir: success + count
+                meta = {"success": result["success"], "count": result["count"]}
+                f.write(json.dumps(meta, ensure_ascii=False, default=str) + "\n")
+                # Hər OU ayrı sətirdə
+                for ou in result["ous"]:
+                    f.write(json.dumps(ou, ensure_ascii=False, default=str) + "\n")
         except Exception as write_exc:
             result["json_export_error"] = str(write_exc)
 

@@ -2,7 +2,7 @@
 //  SECTION DOMINFO — Domain Information Offline Processor
 //
 //  Reads:
-//    raw_cache/raw_domaininfo.ndjson  (from DomainInfoCollector)
+//    raw_cache/raw_domaininfo.jsonl  (from DomainInfoCollector)
 //
 //  Writes:
 //    Domain Objects/domain_info.<ext>  — enriched domain info with risk findings
@@ -33,7 +33,7 @@
 //      - Fine-grained policies present (informational)
 //
 //  Output schema — domain_info.json (single JSON object):
-//  Inherits all fields from raw_domaininfo.ndjson plus:
+//  Inherits all fields from raw_domaininfo.jsonl plus:
 //  {
 //    ...raw fields...,
 //    "risk_findings": [
@@ -140,7 +140,7 @@ static void             add_finding       (DomainInfoResult& r,
 bool OfflineProcessor::process_domaininfo(const OfflineProcessorOptions& opts) {
     fs::create_directories(opts.output_dir);
 
-    const std::string raw_path = opts.raw_dir    + "/raw_domaininfo.ndjson";
+    const std::string raw_path = opts.raw_dir    + "/raw_domaininfo.jsonl";
     const std::string out_path = opts.output_dir + "/domain_info."
                                 + (opts.output_ext.empty() ? "json" : opts.output_ext);
 
@@ -150,7 +150,7 @@ bool OfflineProcessor::process_domaininfo(const OfflineProcessorOptions& opts) {
         return false;
     }
 
-    // raw_domaininfo.ndjson is a single line (one domain object)
+    // raw_domaininfo.jsonl is a single line (one domain object)
     const std::string& line = lines[0];
     if (line.empty() || line[0] != '{') {
         log_err("[DomainInfo] Invalid JSON in: " + raw_path);

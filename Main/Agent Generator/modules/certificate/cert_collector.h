@@ -23,20 +23,20 @@ struct CertificateCollectorOptions {
 //          base : CN=Certificate Templates,CN=Public Key Services,
 //                 CN=Services,<configNC>
 //          filter: (objectClass=pKICertificateTemplate)
-//          output: raw_cert_templates.ndjson
+//          output: raw_cert_templates.jsonl
 //
 //    (2) PKI Infrastructure Objects (Enrollment Services, NTAuthCertificates,
 //          Certification Authorities, AIA, CDP)
 //          base : five separate sub-trees under
 //                 CN=Public Key Services,CN=Services,<configNC>
-//          output: raw_pki_objects.ndjson
+//          output: raw_pki_objects.jsonl
 //
 //  No SMB / RPC contact at collection time.
 //  CA RPC properties (EditFlags, InterfaceFlags, CA Security Descriptor)
 //  are collected separately by a future RPC stage and stored in
-//  raw_ca_rpc.ndjson — offline analysis reads all three files.
+//  raw_ca_rpc.jsonl — offline analysis reads all three files.
 //
-//  Output schema — raw_cert_templates.ndjson (one template per line):
+//  Output schema — raw_cert_templates.jsonl (one template per line):
 //  {
 //    "dn"                        : "CN=User,CN=Certificate Templates,...",
 //    "cn"                        : "User",
@@ -71,7 +71,7 @@ struct CertificateCollectorOptions {
 //    "generated_at"              : "2026-05-29T07:50:43Z"
 //  }
 //
-//  Output schema — raw_pki_objects.ndjson (one PKI object per line):
+//  Output schema — raw_pki_objects.jsonl (one PKI object per line):
 //  {
 //    "category"              : "Enrollment Services",
 //    "dn"                    : "CN=CORP-CA,CN=Enrollment Services,...",
@@ -94,8 +94,8 @@ struct CertificateCollectorOptions {
 //  }
 //
 //  Offline analysis (CertOfflineProcessor) reads both files and emits:
-//    domain_cert_templates.ndjson  — enriched templates with ESC flag summary
-//    domain_pki_objects.ndjson     — enriched PKI objects with ACE analysis
+//    domain_cert_templates.jsonl  — enriched templates with ESC flag summary
+//    domain_pki_objects.jsonl     — enriched PKI objects with ACE analysis
 // ─────────────────────────────────────────────────────────────────────────────
 class CertificateCollector {
 public:
@@ -127,11 +127,11 @@ private:
     static std::vector<std::string> template_attrs();
     static std::vector<std::string> pki_object_attrs();
 
-    // ── NDJSON serializers ────────────────────────────────────────────────────
-    std::string template_to_ndjson   (const LDAPEngine::AttrMap& entry,
+    // ── JSONL serializers ────────────────────────────────────────────────────
+    std::string template_to_jsonl   (const LDAPEngine::AttrMap& entry,
                                       const std::string& generated_at) const;
 
-    std::string pki_object_to_ndjson (const LDAPEngine::AttrMap& entry,
+    std::string pki_object_to_jsonl (const LDAPEngine::AttrMap& entry,
                                       const std::string& category,
                                       const std::string& generated_at) const;
 

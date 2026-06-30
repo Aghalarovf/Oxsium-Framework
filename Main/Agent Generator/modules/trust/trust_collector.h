@@ -58,7 +58,7 @@ struct TrustCollectorOptions {
 //    Forest trust    : filtering ON when QUARANTINED_DOMAIN is set
 //    Shortcut trust  : within-forest, no SID filtering applies
 //
-//  Output schema — raw_trusts.ndjson (one object per line):
+//  Output schema — raw_trusts.jsonl (one object per line):
 //  {
 //    "trust_partner"           : "partner.corp",        // FQDN of trusted domain
 //    "flat_name"               : "PARTNER",             // NetBIOS / flat name
@@ -86,7 +86,7 @@ struct TrustCollectorOptions {
 //  }
 //
 //  Offline analysis: TrustOfflineProcessor (offline_processorp12.cpp)
-//    reads raw_trusts.ndjson and emits domain_trusts.json with risk findings.
+//    reads raw_trusts.jsonl and emits domain_trusts.json with risk findings.
 // ─────────────────────────────────────────────────────────────────────────────
 class TrustCollector {
 public:

@@ -104,43 +104,74 @@ bool OfflineProcessor::rule_02_operator_groups(const std::set<std::string>& all_
                                                 const std::string& user_sid,
                                                 std::vector<PAdminRule>& out)
 {
-    static const int rids[] = {
-        OfflineAdminRID::ACCOUNT_OPERATORS,
-        OfflineAdminRID::SERVER_OPERATORS,
-        OfflineAdminRID::BACKUP_OPERATORS,
-        OfflineAdminRID::GROUP_POLICY_CREATORS,
-        OfflineAdminRID::PRINT_OPERATORS,
-        OfflineAdminRID::CRYPTOGRAPHIC_OPERATORS,
-        OfflineAdminRID::HYPERV_ADMINISTRATORS,
-        OfflineAdminRID::STORAGE_REPLICA_ADMINISTRATORS,
-        OfflineAdminRID::KEY_ADMINS,
-        OfflineAdminRID::ENTERPRISE_KEY_ADMINS,
-        OfflineAdminRID::RAS_IAS_SERVERS,
-        OfflineAdminRID::CERT_PUBLISHERS,
-        OfflineAdminRID::REMOTE_MANAGEMENT_USERS,
-        0
+    static const struct { int rid; const char* name; } op_rids[] = {
+        { OfflineAdminRID::ACCOUNT_OPERATORS,              "Account Operators"                   },
+        { OfflineAdminRID::SERVER_OPERATORS,               "Server Operators"                    },
+        { OfflineAdminRID::BACKUP_OPERATORS,               "Backup Operators"                    },
+        { OfflineAdminRID::GROUP_POLICY_CREATORS,          "Group Policy Creator Owners"         },
+        { OfflineAdminRID::PRINT_OPERATORS,                "Print Operators"                     },
+        { OfflineAdminRID::CRYPTOGRAPHIC_OPERATORS,        "Cryptographic Operators"             },
+        { OfflineAdminRID::HYPERV_ADMINISTRATORS,          "Hyper-V Administrators"              },
+        { OfflineAdminRID::STORAGE_REPLICA_ADMINISTRATORS, "Storage Replica Administrators"      },
+        { OfflineAdminRID::KEY_ADMINS,                     "Key Admins"                          },
+        { OfflineAdminRID::ENTERPRISE_KEY_ADMINS,          "Enterprise Key Admins"               },
+        { OfflineAdminRID::RAS_IAS_SERVERS,                "RAS and IAS Servers"                 },
+        { OfflineAdminRID::CERT_PUBLISHERS,                "Cert Publishers"                     },
+        { OfflineAdminRID::REMOTE_MANAGEMENT_USERS,        "Remote Management Users"             },
+        { 0, nullptr }
     };
 
+    PAdminRuleDetail detail;
     bool matched = false;
-    for (int i = 0; rids[i]; ++i) if (primary_gid == rids[i]) { matched = true; break; }
-    if (!matched) {
-        for (const auto& sid : all_sids) {
-            int r = rid_from_sid(sid);
-            for (int i = 0; rids[i]; ++i) if (r == rids[i]) { matched = true; break; }
-            if (matched) break;
+
+    // Primary group
+    if (primary_gid) {
+        for (int i = 0; op_rids[i].name; ++i) {
+            if (primary_gid == op_rids[i].rid) {
+                detail.matched_rids.push_back(op_rids[i].rid);
+                detail.matched_groups.push_back(std::string(op_rids[i].name) + " (primaryGroup)");
+                detail.match_sources.push_back("primary_group");
+                matched = true; break;
+            }
         }
     }
+
+    // Token group SIDs
+    for (const auto& sid : all_sids) {
+        int r = rid_from_sid(sid);
+        for (int i = 0; op_rids[i].name; ++i) {
+            if (r == op_rids[i].rid) {
+                detail.matched_rids.push_back(r);
+                detail.matched_sids.push_back(sid);
+                detail.matched_groups.push_back(op_rids[i].name);
+                detail.match_sources.push_back("token_group");
+                matched = true; break;
+            }
+        }
+    }
+
+    // User's own SID
     if (!matched) {
         int r = rid_from_sid(user_sid);
-        for (int i = 0; rids[i]; ++i) if (r == rids[i]) { matched = true; break; }
+        for (int i = 0; op_rids[i].name; ++i) {
+            if (r == op_rids[i].rid) {
+                detail.matched_rids.push_back(r);
+                detail.matched_sids.push_back(user_sid);
+                detail.matched_groups.push_back(op_rids[i].name);
+                detail.match_sources.push_back("user_sid");
+                matched = true; break;
+            }
+        }
     }
 
     if (matched) {
         PAdminRule rule;
-        rule.level    = 2;
-        rule.severity = "tier1";
-        rule.label    = "Operator Groups (Account/Server/Backup/GPO/Print/"
-                        "Cryptographic/Hyper-V/Storage Replica Administrators)";
+        rule.level      = 2;
+        rule.severity   = "tier1";
+        rule.label      = "Operator Groups (Account/Server/Backup/GPO/Print/"
+                          "Cryptographic/Hyper-V/Storage Replica Administrators)";
+        rule.detail     = detail;
+        rule.has_detail = true;
         out.push_back(rule);
     }
     return matched;
@@ -158,26 +189,35 @@ bool OfflineProcessor::rule_03_generic_all_domain(const std::set<std::string>& i
 }
 
 // Rule 4 — DCSync
+// Matches ONLY the three specific DCSync extended-right GUIDs on the domain root
+// AND on the Configuration NC (config_nc_aces_).
+// GenericAll and AllExtendedRights-without-guid are intentionally excluded here:
+//   • GenericAll is covered by Rule 3 (generic_all_domain).
+//   • AllExtendedRights-without-guid is covered by Rule 7 (all_extended_rights).
+// Including them here would create duplicate admin_rules entries and inflate severity.
 bool OfflineProcessor::rule_04_dcsync(const std::set<std::string>& ids) const {
     static const char* GUIDS[] = {
-        "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2",
-        "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2",
-        "89e95b76-444d-4c62-991a-0facbeda640c",
+        "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2",  // DS-Replication-Get-Changes
+        "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2",  // DS-Replication-Get-Changes-All
+        "89e95b76-444d-4c62-991a-0facbeda640c",  // DS-Replication-Get-Changes-In-Filtered-Set
         nullptr
     };
-    for (const auto& ace : domain_root_aces_) {
-        if (!ace.is_allow) continue;
-        if (ids.find(ace.trustee_sid) == ids.end()) continue;
-        if ((ace.mask & OfflineAceRight::ACE_GENERIC_ALL) == OfflineAceRight::ACE_GENERIC_ALL)
-            return true;
-        if ((ace.mask & OfflineAceRight::ACE_ALL_EXTENDED) && ace.object_type_guid.empty())
-            return true;
-        if (!ace.object_type_guid.empty()) {
+
+    // Helper: scan one ACE list for DCSync GUIDs only
+    auto scan = [&](const std::vector<RawAceEntry>& aces) -> bool {
+        for (const auto& ace : aces) {
+            if (!ace.is_allow) continue;
+            if (ids.find(ace.trustee_sid) == ids.end()) continue;
+            if (ace.object_type_guid.empty()) continue;  // must be a specific GUID
+            if (!(ace.mask & OfflineAceRight::ACE_ALL_EXTENDED)) continue;
             for (int i = 0; GUIDS[i]; ++i)
                 if (ace.object_type_guid == GUIDS[i]) return true;
         }
-    }
-    return false;
+        return false;
+    };
+
+    // Check domain root ACEs and Configuration NC ACEs
+    return scan(domain_root_aces_) || scan(config_nc_aces_);
 }
 
 // Rule 6 — AdminSDHolder dangerous rights
@@ -191,7 +231,8 @@ bool OfflineProcessor::rule_06_adminsdholder(const std::set<std::string>& ids) c
     return false;
 }
 
-// Rule 7 — AllExtendedRights on domain
+// Rule 7 — AllExtendedRights on domain (includes DCSync GUIDs + User-Force-Change-Password)
+// Also checks Configuration NC ACEs where AllExtendedRights can grant DCSync.
 bool OfflineProcessor::rule_07_all_extended_rights(const std::set<std::string>& ids) const {
     static const char* GUIDS[] = {
         "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2",
@@ -200,17 +241,22 @@ bool OfflineProcessor::rule_07_all_extended_rights(const std::set<std::string>& 
         "00299570-246d-11d0-a768-00aa006e0529",
         nullptr
     };
-    for (const auto& ace : domain_root_aces_) {
-        if (!ace.is_allow) continue;
-        if (ids.find(ace.trustee_sid) == ids.end()) continue;
-        if ((ace.mask & OfflineAceRight::ACE_GENERIC_ALL) == OfflineAceRight::ACE_GENERIC_ALL)
-            return true;
-        if (!(ace.mask & OfflineAceRight::ACE_ALL_EXTENDED)) continue;
-        if (ace.object_type_guid.empty()) return true;
-        for (int i = 0; GUIDS[i]; ++i)
-            if (ace.object_type_guid == GUIDS[i]) return true;
-    }
-    return false;
+
+    auto scan = [&](const std::vector<RawAceEntry>& aces) -> bool {
+        for (const auto& ace : aces) {
+            if (!ace.is_allow) continue;
+            if (ids.find(ace.trustee_sid) == ids.end()) continue;
+            if ((ace.mask & OfflineAceRight::ACE_GENERIC_ALL) == OfflineAceRight::ACE_GENERIC_ALL)
+                return true;
+            if (!(ace.mask & OfflineAceRight::ACE_ALL_EXTENDED)) continue;
+            if (ace.object_type_guid.empty()) return true;
+            for (int i = 0; GUIDS[i]; ++i)
+                if (ace.object_type_guid == GUIDS[i]) return true;
+        }
+        return false;
+    };
+
+    return scan(domain_root_aces_) || scan(config_nc_aces_);
 }
 
 // Rule 8 — Nested → Domain Admins
@@ -299,10 +345,19 @@ bool OfflineProcessor::rule_10_dns_admins(const std::vector<std::string>& member
 // Rule 12 — Nested → Operator groups
 bool OfflineProcessor::rule_12_nested_operator_groups(const std::set<std::string>& all_sids) {
     static const int rids[] = {
-        OfflineAdminRID::ACCOUNT_OPERATORS, OfflineAdminRID::SERVER_OPERATORS,
-        OfflineAdminRID::BACKUP_OPERATORS,  OfflineAdminRID::PRINT_OPERATORS,
-        OfflineAdminRID::CRYPTOGRAPHIC_OPERATORS, OfflineAdminRID::HYPERV_ADMINISTRATORS,
-        OfflineAdminRID::STORAGE_REPLICA_ADMINISTRATORS, 0
+        OfflineAdminRID::ACCOUNT_OPERATORS,
+        OfflineAdminRID::SERVER_OPERATORS,
+        OfflineAdminRID::BACKUP_OPERATORS,
+        OfflineAdminRID::PRINT_OPERATORS,
+        OfflineAdminRID::CRYPTOGRAPHIC_OPERATORS,
+        OfflineAdminRID::HYPERV_ADMINISTRATORS,
+        OfflineAdminRID::STORAGE_REPLICA_ADMINISTRATORS,
+        OfflineAdminRID::KEY_ADMINS,
+        OfflineAdminRID::ENTERPRISE_KEY_ADMINS,
+        OfflineAdminRID::RAS_IAS_SERVERS,
+        OfflineAdminRID::CERT_PUBLISHERS,
+        OfflineAdminRID::REMOTE_MANAGEMENT_USERS,
+        0
     };
     for (const auto& sid : all_sids) {
         int r = rid_from_sid(sid);
@@ -445,12 +500,33 @@ void OfflineProcessor::analyze_admin(ProcessedUser& u) const {
     if (rule_14_privileged_primary(u.primary_group_id, u.admin_rules))
         u.is_admin = true;
 
-    // is_direct_admin
+    // is_direct_admin: check CN names in member_of AND token-group RIDs
+    // (DN set-intersection is unreliable when ldap3 returns mismatched formats)
+    static const char* DIRECT_ADMIN_CNS[] = {
+        "domain admins", "enterprise admins", "schema admins",
+        "administrators", "builtin administrators",
+        "domain controllers",
+        "enterprise read-only domain controllers",
+        "read-only domain controllers",
+        nullptr
+    };
     for (const auto& g : u.member_of) {
-        std::string cn = lower(g);
-        if (cn == "domain admins" || cn == "enterprise admins" ||
-            cn == "schema admins" || cn == "builtin administrators") {
-            u.is_direct_admin = true; break;
+        std::string gl = lower(g);
+        for (int i = 0; DIRECT_ADMIN_CNS[i]; ++i) {
+            if (gl == DIRECT_ADMIN_CNS[i]) { u.is_direct_admin = true; break; }
+        }
+        if (u.is_direct_admin) break;
+    }
+    // Fallback: if not found by name, trust rule_01 match with non-nested source
+    if (!u.is_direct_admin && r1) {
+        for (const auto& rule : u.admin_rules) {
+            if (rule.level != 1) continue;
+            for (const auto& src : rule.detail.match_sources) {
+                if (src == "token_group" || src == "user_sid") {
+                    u.is_direct_admin = true; break;
+                }
+            }
+            break;
         }
     }
 
@@ -485,25 +561,49 @@ void OfflineProcessor::analyze_encryption(ProcessedUser& u) const {
     bool absent = (enc == -1);
     u.enc_implicit_rc4 = absent || (enc == 0);
 
+    // Each entry stored as a compact JSON object — serialized raw in user_to_json
+    // to match Python format: [{"name": "RC4-HMAC", "risk": 700, "is_weak": true}]
+    static const struct { int bit; const char* name; int risk; } ENC_MAP[] = {
+        { 0x001, "DES-CBC-CRC",                      950 },
+        { 0x002, "DES-CBC-MD5",                      900 },
+        { 0x004, "RC4-HMAC",                         700 },
+        { 0x008, "AES128-CTS-HMAC-SHA1-96",          200 },
+        { 0x010, "AES256-CTS-HMAC-SHA1-96",          100 },
+        { 0x040, "AES256-CTS-HMAC-SHA1-96-SK",        80 },
+        { 0x080, "AES128-CTS-HMAC-SHA256-128",        60 },
+        { 0x100, "AES256-CTS-HMAC-SHA384-192",        40 },
+        { 0, nullptr, 0 }
+    };
+
     u.msds_supportedencryptiontypesname.clear();
     if (!absent && enc != 0) {
-        if (enc & 0x01) u.msds_supportedencryptiontypesname.push_back("des-cbc-crc");
-        if (enc & 0x02) u.msds_supportedencryptiontypesname.push_back("des-cbc-md5");
-        if (enc & 0x04) u.msds_supportedencryptiontypesname.push_back("rc4-hmac");
-        if (enc & 0x08) u.msds_supportedencryptiontypesname.push_back("aes128-cts-hmac-sha1-96");
-        if (enc & 0x10) u.msds_supportedencryptiontypesname.push_back("aes256-cts-hmac-sha1-96");
+        for (int i = 0; ENC_MAP[i].name; ++i) {
+            if (enc & ENC_MAP[i].bit) {
+                bool is_weak = ENC_MAP[i].risk > 500;
+                std::string entry = "{\"name\":\"";
+                entry += ENC_MAP[i].name;
+                entry += "\",\"risk\":";
+                entry += std::to_string(ENC_MAP[i].risk);
+                entry += ",\"is_weak\":";
+                entry += (is_weak ? "true" : "false");
+                entry += "}";
+                u.msds_supportedencryptiontypesname.push_back(entry);
+            }
+        }
     }
-    bool explicit_rc4 = !absent && (enc & 0x04);
-    bool has_des      = !absent && (enc & 0x03);
-    bool aes128       = !absent && (enc & 0x08);
-    bool aes256       = !absent && (enc & 0x10);
 
-    if (u.enc_implicit_rc4 || explicit_rc4 || has_des)
-        u.enc_risk_score = 700;
-    else if (aes128 && !aes256)
-        u.enc_risk_score = 400;
-    else
-        u.enc_risk_score = 0;
+    // Risk score — highest risk among active algorithm bits
+    int max_risk = 0;
+    if (!absent && enc != 0) {
+        if (enc & 0x001) max_risk = std::max(max_risk, 950);
+        if (enc & 0x002) max_risk = std::max(max_risk, 900);
+        if (enc & 0x004) max_risk = std::max(max_risk, 700);
+        if (enc & 0x008) max_risk = std::max(max_risk, 200);
+        if (enc & 0x010) max_risk = std::max(max_risk, 100);
+    } else if (u.enc_implicit_rc4) {
+        max_risk = 700;
+    }
+    u.enc_risk_score = max_risk;
 
     if (u.unconstrained_delegation && u.enc_risk_score > 0)
         u.enc_risk_score = std::min(1000, u.enc_risk_score + 200);
@@ -512,15 +612,33 @@ void OfflineProcessor::analyze_encryption(ProcessedUser& u) const {
 }
 
 void OfflineProcessor::analyze_delegation(ProcessedUser& u) const {
-    u.unconstrained_delegation       = (u.uac_flags & UAC::TRUSTED_FOR_DELEGATION)  != 0;
-    u.constrained_delegation         = !u.msds_allowedtodelegateto.empty();
-    u.protocol_transition_delegation = (u.uac_flags & UAC::TRUSTED_TO_AUTH_FOR_DEL) != 0;
-    u.delegation_blocked             = (u.uac_flags & UAC::NOT_DELEGATED)            != 0;
-    u.not_delegated                  = u.delegation_blocked;
-    u.trusted_for_delegation         = u.unconstrained_delegation;
-    u.trusted_to_auth_for_delegation = u.protocol_transition_delegation;
-    u.delegation_effective           = (u.unconstrained_delegation || u.constrained_delegation)
-                                       && !u.delegation_blocked;
+    // uac_flags is populated only when decode_uac() has been called (online path).
+    // In the offline path parse_raw_user() reads pre-decoded booleans directly from
+    // raw_users.jsonl (the collector already writes unconstrained_delegation, etc.).
+    // In that case uac_flags == 0 and re-deriving from the bitmask would silently
+    // zero-out every delegation flag that the collector correctly set.
+    //
+    // Rule: prefer the UAC bitmask when it is non-zero (online / decode_uac path);
+    //       fall back to the already-set booleans when uac_flags == 0 (offline path).
+    if (u.uac_flags != 0) {
+        u.unconstrained_delegation       = (u.uac_flags & UAC::TRUSTED_FOR_DELEGATION)  != 0;
+        u.protocol_transition_delegation = (u.uac_flags & UAC::TRUSTED_TO_AUTH_FOR_DEL) != 0;
+        u.delegation_blocked             = (u.uac_flags & UAC::NOT_DELEGATED)            != 0;
+        u.trusted_for_delegation         = u.unconstrained_delegation;
+        u.trusted_to_auth_for_delegation = u.protocol_transition_delegation;
+        u.not_delegated                  = u.delegation_blocked;
+    } else {
+        // Offline path: boolean fields already set from JSONL by parse_raw_user().
+        // Sync the aliased fields that the collector does not write explicitly.
+        u.delegation_blocked             = u.not_delegated;
+        u.protocol_transition_delegation = u.trusted_to_auth_for_delegation;
+    }
+
+    // constrained_delegation: authoritative source is the SPN list, not the stored bool.
+    u.constrained_delegation = !u.msds_allowedtodelegateto.empty();
+
+    u.delegation_effective = (u.unconstrained_delegation || u.constrained_delegation)
+                              && !u.delegation_blocked;
 
     for (const auto& s : u.msds_allowedtodelegateto) {
         PDelegationTarget dt; dt.raw = s;

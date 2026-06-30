@@ -1,7 +1,7 @@
 // ─── network_collector_p1.cpp ────────────────────────────────────────────────
 // SECTION 1  Utility helpers  — JSON, CIDR expansion, ISO timestamp
 // SECTION 2  Host discovery   — ICMP ping + ARP probe, rDNS, MAC vendor
-// SECTION 3  collect()        — main entry point + NDJSON writer
+// SECTION 3  collect()        — main entry point + JSONL writer
 // SECTION 4  DEFAULT_PORTS    — large static port→service table (1000+ entries)
 // ─────────────────────────────────────────────────────────────────────────────
 #include "network_collector.h"
@@ -103,10 +103,10 @@ std::string NetworkCollector::now_iso8601() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  NDJSON writer  — host_to_ndjson
+//  JSONL writer  — host_to_jsonl
 //  One line per host; open_ports is an inline JSON array.
 // ─────────────────────────────────────────────────────────────────────────────
-std::string NetworkCollector::host_to_ndjson(const NetworkHost& h) {
+std::string NetworkCollector::host_to_jsonl(const NetworkHost& h) {
     std::ostringstream o;
 
     // ── Build open_ports array ────────────────────────────────────────────────
@@ -878,7 +878,7 @@ std::vector<std::string> NetworkCollector::discover_hosts(
 // ═════════════════════════════════════════════════════════════════════════════
 int NetworkCollector::collect(const NetworkCollectorOptions& opts) {
     fs::create_directories(opts.output_dir);
-    output_path_ = fs::path(opts.output_dir) / "raw_network.ndjson";
+    output_path_ = fs::path(opts.output_dir) / "raw_network.jsonl";
 
     std::ofstream f(output_path_, std::ios::out | std::ios::trunc);
     if (!f) {
@@ -947,7 +947,7 @@ int NetworkCollector::collect(const NetworkCollectorOptions& opts) {
 
         {
             std::lock_guard<std::mutex> lk(file_mtx);
-            f << host_to_ndjson(host) << "\n";
+            f << host_to_jsonl(host) << "\n";
             ++count;
         }
     };

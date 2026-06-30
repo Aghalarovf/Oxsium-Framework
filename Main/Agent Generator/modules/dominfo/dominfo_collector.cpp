@@ -81,21 +81,21 @@ int DomainInfoCollector::collect(const DomainInfoCollectorOptions& opts) {
     collect_smb_signing(domain_nc, info);
 
     // ── Write output ──────────────────────────────────────────────────────────
-    output_path_ = fs::path(opts.output_dir) / "raw_domaininfo.ndjson";
+    output_path_ = fs::path(opts.output_dir) / "raw_domaininfo.jsonl";
     std::ofstream f(output_path_, std::ios::binary);
     if (!f) {
         log_err("[DomainInfo] Failed to open: " + output_path_.string());
         return -1;
     }
 
-    f << domaininfo_to_ndjson(info, generated_at) << "\n";
+    f << domaininfo_to_jsonl(info, generated_at) << "\n";
 
     if (!f) {
         log_err("[DomainInfo] Write error: " + output_path_.string());
         return -1;
     }
 
-    log_ok("[DomainInfo] raw_domaininfo.ndjson -> " + output_path_.string());
+    log_ok("[DomainInfo] raw_domaininfo.jsonl -> " + output_path_.string());
     log_ok("[DomainInfo] FQDN: " + info.fqdn
         + " | DCs: " + std::to_string(info.domain_controllers.size())
         + " | FL: " + functional_level_name(info.functional_level));
@@ -719,9 +719,9 @@ std::string DomainInfoCollector::generalized_time_to_iso(const std::string& gt) 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  domaininfo_to_ndjson  — serializes DomainInfo → JSON string
+//  domaininfo_to_jsonl  — serializes DomainInfo → JSON string
 // ─────────────────────────────────────────────────────────────────────────────
-std::string DomainInfoCollector::domaininfo_to_ndjson(
+std::string DomainInfoCollector::domaininfo_to_jsonl(
     const DomainInfo& info,
     const std::string& generated_at) const
 {

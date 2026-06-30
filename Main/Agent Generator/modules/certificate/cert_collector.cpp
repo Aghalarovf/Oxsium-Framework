@@ -167,7 +167,7 @@ int CertificateCollector::collect_templates(
     const std::string& generated_at,
     int max_results)
 {
-    templates_output_path_ = fs::path(output_dir) / "raw_cert_templates.ndjson";
+    templates_output_path_ = fs::path(output_dir) / "raw_cert_templates.jsonl";
 
     std::ofstream f(templates_output_path_, std::ios::binary);
     if (!f) {
@@ -189,7 +189,7 @@ int CertificateCollector::collect_templates(
     bool ok = engine_.search(filter, template_attrs(),
         [&](const LDAPEngine::AttrMap& entry) {
             if (max_results > 0 && count >= max_results) return;
-            f << template_to_ndjson(entry, generated_at) << "\n";
+            f << template_to_jsonl(entry, generated_at) << "\n";
             ++count;
         });
     engine_.cfg_.base_dn = saved_base;
@@ -198,7 +198,7 @@ int CertificateCollector::collect_templates(
         log_info("[CertCollector] Template LDAP search returned 0 results — AD CS likely not deployed.");
     }
 
-    log_ok("[CertCollector] raw_cert_templates.ndjson <- "
+    log_ok("[CertCollector] raw_cert_templates.jsonl <- "
         + std::to_string(count) + " template(s)");
     return count;
 }
@@ -212,7 +212,7 @@ int CertificateCollector::collect_pki_objects(
     const std::string& output_dir,
     const std::string& generated_at)
 {
-    pki_objects_output_path_ = fs::path(output_dir) / "raw_pki_objects.ndjson";
+    pki_objects_output_path_ = fs::path(output_dir) / "raw_pki_objects.jsonl";
 
     std::ofstream f(pki_objects_output_path_, std::ios::binary);
     if (!f) {
@@ -238,7 +238,7 @@ int CertificateCollector::collect_pki_objects(
     if (!ca_deployed) {
         log_info("[CertCollector] AD CS (Enrollment Services) not found — "
                  "CA role not deployed in this domain. PKI collection skipped.");
-        log_ok("[CertCollector] raw_pki_objects.ndjson <- 0 PKI object(s)");
+        log_ok("[CertCollector] raw_pki_objects.jsonl <- 0 PKI object(s)");
         return 0;
     }
 
@@ -251,7 +251,7 @@ int CertificateCollector::collect_pki_objects(
         if (!pb->one_level) {
             engine_.search_base(base, pki_object_attrs(),
                 [&](const LDAPEngine::AttrMap& entry) {
-                    f << pki_object_to_ndjson(entry, pb->label, generated_at) << "\n";
+                    f << pki_object_to_jsonl(entry, pb->label, generated_at) << "\n";
                     ++count;
                     ++total;
                 });
@@ -260,7 +260,7 @@ int CertificateCollector::collect_pki_objects(
             engine_.cfg_.base_dn = base;
             engine_.search("(objectClass=*)", pki_object_attrs(),
                 [&](const LDAPEngine::AttrMap& entry) {
-                    f << pki_object_to_ndjson(entry, pb->label, generated_at) << "\n";
+                    f << pki_object_to_jsonl(entry, pb->label, generated_at) << "\n";
                     ++count;
                     ++total;
                 });
@@ -274,15 +274,15 @@ int CertificateCollector::collect_pki_objects(
         // Silently skip empty containers — normal when CA has no objects there
     }
 
-    log_ok("[CertCollector] raw_pki_objects.ndjson <- "
+    log_ok("[CertCollector] raw_pki_objects.jsonl <- "
         + std::to_string(total) + " PKI object(s)");
     return total;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  template_to_ndjson
+//  template_to_jsonl
 // ─────────────────────────────────────────────────────────────────────────────
-std::string CertificateCollector::template_to_ndjson(
+std::string CertificateCollector::template_to_jsonl(
     const LDAPEngine::AttrMap& e,
     const std::string& generated_at) const
 {
@@ -388,9 +388,9 @@ std::string CertificateCollector::template_to_ndjson(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  pki_object_to_ndjson
+//  pki_object_to_jsonl
 // ─────────────────────────────────────────────────────────────────────────────
-std::string CertificateCollector::pki_object_to_ndjson(
+std::string CertificateCollector::pki_object_to_jsonl(
     const LDAPEngine::AttrMap& e,
     const std::string& category,
     const std::string& generated_at) const

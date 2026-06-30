@@ -193,7 +193,9 @@ class AclCollector:
             if scope == ObjectScope.ALL_WITH_ACL:
                 config_dn = f"CN=Configuration,{self._base_dn}"
                 schema_dn = f"CN=Schema,CN=Configuration,{self._base_dn}"
-                for extra in (config_dn, schema_dn):
+                dns_domain = f"DC=DomainDnsZones,{self._base_dn}"
+                dns_forest = f"DC=ForestDnsZones,{self._base_dn}"
+                for extra in (config_dn, schema_dn, dns_domain, dns_forest):
                     if extra not in effective_bases:
                         effective_bases.append(extra)
 

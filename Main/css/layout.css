@@ -1,4 +1,6 @@
-
+/* ============================================================
+   layout.css — Gold Edition
+   ============================================================ */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -13,24 +15,40 @@ body {
     flex-direction: column;
 }
 
-/* SCANLINE OVERLAY */
+/* SCANLINE OVERLAY — incə qızıl tint */
 body::before {
     content: '';
     position: fixed;
     inset: 0;
-    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
+    background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.10) 2px,
+        rgba(0,0,0,0.10) 4px
+    );
     pointer-events: none;
     z-index: 9999;
 }
 
-/* BODY LAYOUT */
+/* Üst qızıl gradient xətti */
+body::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, var(--accent) 30%, var(--accent) 70%, transparent 100%);
+    opacity: 0.5;
+    pointer-events: none;
+    z-index: 10000;
+}
+
 .layout {
     display: flex;
     flex: 1;
     overflow: hidden;
 }
 
-/* MAIN CONTENT */
 .main {
     flex: 1;
     overflow-y: auto;
@@ -40,7 +58,7 @@ body::before {
     scrollbar-color: var(--border) transparent;
 }
 
-/* Bottom status bar */
+/* Status bar */
 .statusbar {
     height: 26px;
     background: var(--bg-base);
@@ -55,15 +73,9 @@ body::before {
     letter-spacing: 0.5px;
 }
 
-.statusbar-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
+.statusbar-item { display: flex; align-items: center; gap: 6px; }
 .statusbar-item .s-label { color: var(--text-dim); }
 .statusbar-item .s-val   { color: var(--text-sec); }
-.statusbar-item .s-val.ok   { color: var(--green); }
+.statusbar-item .s-val.ok   { color: var(--accent); }
 .statusbar-item .s-val.warn { color: var(--amber); }
-
 .statusbar-right { margin-left: auto; }

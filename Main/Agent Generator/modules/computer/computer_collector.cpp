@@ -98,7 +98,7 @@ std::vector<std::string> ComputerCollector::required_attrs() const {
 // ─────────────────────────────────────────────────────────────────────────────
 int ComputerCollector::collect(const ComputerCollectorOptions& opts) {
     fs::create_directories(opts.output_dir);
-    output_path_ = fs::path(opts.output_dir) / "raw_computers.ndjson";
+    output_path_ = fs::path(opts.output_dir) / "raw_computers.jsonl";
 
     std::ofstream f(output_path_, std::ios::binary);
     if (!f) {
@@ -118,7 +118,7 @@ int ComputerCollector::collect(const ComputerCollectorOptions& opts) {
     bool ok = engine_.search(filter, required_attrs(),
         [&](const LDAPEngine::AttrMap& entry) {
             if (opts.max_results > 0 && count >= opts.max_results) return;
-            f << computer_to_ndjson(entry, generated_at, opts.stale_days) << "\n";
+            f << computer_to_jsonl(entry, generated_at, opts.stale_days) << "\n";
             ++count;
         });
 
@@ -136,9 +136,9 @@ int ComputerCollector::collect(const ComputerCollectorOptions& opts) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  computer_to_ndjson
+//  computer_to_jsonl
 // ─────────────────────────────────────────────────────────────────────────────
-std::string ComputerCollector::computer_to_ndjson(
+std::string ComputerCollector::computer_to_jsonl(
     const LDAPEngine::AttrMap& entry,
     const std::string& generated_at,
     int stale_days) const

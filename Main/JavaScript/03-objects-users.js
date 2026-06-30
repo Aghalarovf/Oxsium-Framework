@@ -50,34 +50,57 @@ function encryptionBadgeClass(val) {
   })[weakest] || 'yes-encryption-medium';
 }
 
-/* ── Load ── */
+/* ── Load ──
+   Köhnə tryLoadSnapshotSection('users') + canlı LDAP fallback məntiqi
+   ləğv edilib. Users bölməsi indi BİRBAŞA sqlite_reader.py (port 8800)
+   REST API-na bağlıdır: domain_data.db-dəki "users" cədvəli /api/list
+   endpoint-i üzərindən axtarış/limit dəstəyi ilə oxunur. Heç bir nəhəng
+   JSON/JSONL faylı brauzer yaddaşına yüklənmir. */
 async function loadUsers() {
-  if (!state.connected) { addLog('Users: domain connection required', 'warn'); return; }
   document.getElementById('users-loading').style.display = 'flex';
   document.getElementById('u-table-body').innerHTML = '';
   closeDetail();
 
   try {
-    const resp = await fetch(`${API_BASE}/api/users`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildEnumerationPayload()),
-    });
-    const data = await resp.json();
-    if (!resp.ok || !data.success) throw new Error(data.error || 'Failed to load users');
+    // limit yüksək saxlanılır ki, "Users" statistikası (silinməmiş say) və
+    // "Deleted" filtri tam dataset üzərində dəqiq hesablansın — server
+    // tərəfində deleted/non-deleted ayrı COUNT dəstəyi olmadığı üçün bu
+    // hesablama client tərəfdə aparılır.
+    let url = `${DB_BASE}/api/list/users?limit=100000`;
+    if (usersSearch && usersSearch.trim()) {
+      url += `&q=${encodeURIComponent(usersSearch.trim())}`;
+    }
 
-    usersData = data.users;
-    usersMeta = data.meta || {};
+    const resp = await fetch(url, { method: 'GET' });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok || !data) {
+      throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine xətası (HTTP ${resp.status})`);
+    }
+
+    usersData = Array.isArray(data.records) ? data.records : (Array.isArray(data.rows) ? data.rows : []);
     enumCacheLoaded.users = true;
-    setObjectCountStat('cnt-users', usersData.length);
-    document.getElementById('nav-users-count').textContent = usersData.length;
+
+    // "Users" sayğacı yalnız silinməmiş (Recycle Bin-də olmayan) obyektləri
+    // göstərir — AD Recycle Bin-dən bərpa edilmiş "deleted" userlər buraya
+    // daxil edilmir, onlar ayrıca "Deleted" filtri ilə görünür.
+    const nonDeletedCount = usersData.filter(u => !u.deleted).length;
+    const deletedCount    = usersData.length - nonDeletedCount;
+
+    setObjectCountStat('cnt-users', nonDeletedCount);
+    document.getElementById('nav-users-count').textContent = nonDeletedCount;
     document.getElementById('users-meta').textContent =
-      `${usersData.length} users · domain: ${(state.domain || '').toUpperCase()}`;
+      `${nonDeletedCount} users` +
+      (deletedCount > 0 ? ` · ${deletedCount} deleted (Recycle Bin)` : '') +
+      ` · mənbə: Oxsium SQLite Engine (.db)`;
+
+    addLog(`Users sqlite_reader.py-dən yükləndi: ${nonDeletedCount} hesab` +
+      (deletedCount > 0 ? ` (+${deletedCount} deleted)` : '') +
+      ` (Oxsium SQLite Engine)`, 'ok');
     renderUsers();
     updatePentestCounts();
-    addLog(`Users loaded: ${usersData.length} accounts enumerated`, 'ok');
   } catch (err) {
     addLog(`Users: ${err.message}`, 'err');
-    document.getElementById('u-table-body').innerHTML = `<div class="u-empty"><p>${err.message}</p></div>`;
+    document.getElementById('u-table-body').innerHTML = `<div class="u-empty"><p>${escapeHtml(err.message)}</p></div>`;
   } finally {
     document.getElementById('users-loading').style.display = 'none';
   }
@@ -95,24 +118,31 @@ function renderUsers() {
       (u.sid || '').toLowerCase().includes(usersSearch)
     );
   }
-  if (usersFilter === 'admin')    list = list.filter(u => u.is_admin);
-  if (usersFilter === 'spn')      list = list.filter(u => u.spn && u.spn.length > 0);
-  if (usersFilter === 'asrep')    list = list.filter(u => u.asrep);
-  if (usersFilter === 'disabled') list = list.filter(u => u.disabled);
-  if (usersFilter === 'nopwd')    list = list.filter(u => u.pwd_not_required);
-  if (usersFilter === 'dcsync')   list = list.filter(u => u.dcsync);
-  if (usersFilter === 'delegation') {
-    list = list.filter(u => {
-      const unconstrained = (typeof u.unconstrained_delegation === 'boolean')
-        ? u.unconstrained_delegation
-        : !!u.trusted_for_delegation;
-      const constrained = (typeof u.constrained_delegation === 'boolean')
-        ? u.constrained_delegation
-        : !!(u.msds_allowedtodelegateto && u.msds_allowedtodelegateto.length > 0);
-      return unconstrained || constrained;
-    });
+  if (usersFilter === 'deleted') {
+    // Yalnız AD Recycle Bin-dən bərpa edilmiş (silinmiş) userlər.
+    list = list.filter(u => u.deleted);
+  } else {
+    // Bütün digər filterlərdə (All daxil olmaqla) silinmiş userlər
+    // heç vaxt görünmür.
+    list = list.filter(u => !u.deleted);
+    if (usersFilter === 'admin')    list = list.filter(u => u.is_admin || !!u.potential_admin);
+    if (usersFilter === 'spn')      list = list.filter(u => u.spn && u.spn.length > 0);
+    if (usersFilter === 'asrep')    list = list.filter(u => u.asrep);
+    if (usersFilter === 'nopwd')    list = list.filter(u => u.pwd_not_required);
+    if (usersFilter === 'dcsync')   list = list.filter(u => u.dcsync);
+    if (usersFilter === 'delegation') {
+      list = list.filter(u => {
+        const unconstrained = (typeof u.unconstrained_delegation === 'boolean')
+          ? u.unconstrained_delegation
+          : !!u.trusted_for_delegation;
+        const constrained = (typeof u.constrained_delegation === 'boolean')
+          ? u.constrained_delegation
+          : !!(u.msds_allowedtodelegateto && u.msds_allowedtodelegateto.length > 0);
+        return unconstrained || constrained;
+      });
+    }
+    if (usersFilter === 'encryption') list = list.filter(u => typeof u.msds_supportedencryptiontypes !== 'undefined' && u.msds_supportedencryptiontypes !== null);
   }
-  if (usersFilter === 'encryption') list = list.filter(u => typeof u.msds_supportedencryptiontypes !== 'undefined' && u.msds_supportedencryptiontypes !== null);
 
   if (list.length === 0) { body.innerHTML = '<div class="u-empty"><p>No matching users</p></div>'; return; }
 
@@ -126,20 +156,20 @@ function renderUsers() {
       (hasRiskDesc        ? ' desc-risk' : '');
     row.dataset.sam = u.username;
 
-    const avatarCls = u.is_admin ? 'u-avatar admin' : u.disabled ? 'u-avatar disabled' : 'u-avatar';
+    const isPadAdmin = u.potential_admin === 'PAD';
+    const isAbsAdmin = !isPadAdmin && !!u.is_admin;
+    const avatarCls  = u.deleted ? 'u-avatar deleted'
+                     : isAbsAdmin  ? 'u-avatar admin'
+                     : isPadAdmin  ? 'u-avatar pad'
+                     : u.disabled  ? 'u-avatar disabled'
+                     :               'u-avatar';
     const initial   = u.username.charAt(0).toUpperCase();
     const sidFull   = u.sid || '—';
-    const adminRuleLevels = Array.isArray(u.admin_rules)
-      ? u.admin_rules.map(r => Number(r?.level)).filter(Number.isFinite)
-      : [];
-    const isPadAdmin = u.is_admin && adminRuleLevels.length > 0 &&
-      adminRuleLevels.every(l => l === 2 || l === 10) &&
-      adminRuleLevels.some(l => l === 2 || l === 10);
-    const adminBadge = !u.is_admin
-      ? '<span class="flag no">—</span>'
-      : isPadAdmin
-        ? '<span class="flag yes-admin-pad">PAD</span>'
-        : '<span class="flag yes-admin">ADM</span>';
+    const adminBadge = isPadAdmin
+      ? '<span class="flag yes-admin-pad">PAD</span>'
+      : isAbsAdmin
+        ? '<span class="flag yes-admin">ADM</span>'
+        : '<span class="flag no">—</span>';
 
     row.innerHTML = `
       <div class="u-name">
@@ -150,7 +180,7 @@ function renderUsers() {
       <div class="u-flag-cell">${adminBadge}</div>
       <div class="u-flag-cell">${u.spn?.length > 0    ? '<span class="flag yes-spn">SPN</span>'   : '<span class="flag no">—</span>'}</div>
       <div class="u-flag-cell">${u.asrep              ? '<span class="flag yes-asrep">ASP</span>'   : '<span class="flag no">—</span>'}</div>
-      <div class="u-flag-cell">${u.disabled           ? '<span class="flag yes-dis">DIS</span>'   : '<span class="flag yes-ok">●</span>'}</div>
+      <div class="u-flag-cell">${u.deleted ? '<span class="flag yes-deleted">DEL</span>' : (u.disabled ? '<span class="flag yes-dis">DIS</span>' : '<span class="flag yes-ok">●</span>')}</div>
       <div class="u-flag-cell">${u.pwd_not_required   ? '<span class="flag yes-nopwd">NP</span>'  : '<span class="flag no">—</span>'}</div>
       <div class="u-flag-cell">${u.dcsync             ? '<span class="flag yes-dcsync">DCS</span>': '<span class="flag no">—</span>'}</div>
       <div class="u-flag-cell">${(() => {
@@ -199,6 +229,9 @@ function openDetail(u, row) {
   document.getElementById('d-name').textContent   = u.username;
   document.getElementById('d-dn').textContent     = u.dn || '—';
 
+  const isPadAdmin = u.potential_admin === 'PAD';
+  const isAbsAdmin = !isPadAdmin && !!u.is_admin;
+
   const body = document.getElementById('detail-body');
   body.innerHTML = '';
 
@@ -224,8 +257,12 @@ function openDetail(u, row) {
   }
 
   body.innerHTML += detailSection('Account Flags', [
-    ['Status',           u.disabled ? 'Disabled' : 'Enabled',                u.disabled ? 'red' : 'green'],
-    ['Admin',            u.is_admin  ? 'Yes' : 'No',                          u.is_admin ? 'amber' : ''],
+    ['Status',           u.deleted ? 'Deleted (Recycle Bin)' : (u.disabled ? 'Disabled' : 'Enabled'), (u.deleted || u.disabled) ? 'red' : 'green'],
+    ['Admin',
+      isAbsAdmin ? 'Yes — Absolute Admin'
+      : isPadAdmin ? `Potential (${u.potential_admin})`
+      : 'No',
+      isAbsAdmin ? 'red' : isPadAdmin ? 'amber' : ''],
     ['DCSync Rights',    u.dcsync    ? 'YES ⚠ CRITICAL' : 'No',               u.dcsync ? 'red' : ''],
     ['Pre-Auth Req.',    u.preauth_required === false ? 'NOT Required (⚠ AS-REP)' : 'Required', u.preauth_required === false ? 'red' : 'green'],
     ['Pwd Not Required', u.pwd_not_required ? 'YES ⚠' : 'No',                 u.pwd_not_required ? 'red' : ''],
@@ -255,7 +292,7 @@ function openDetail(u, row) {
     </div>`;
 
   // ── Admin Reason ─────────────────────────────────────────────────────────
-  if (u.is_admin && u.admin_rules && u.admin_rules.length > 0) {
+  if ((isAbsAdmin || isPadAdmin) && u.admin_rules && u.admin_rules.length > 0) {
     const SEVERITY_META = {
       absolute: { label: 'Absolute Admin',         color: '#FF4444', bg: 'rgba(255,68,68,0.10)',  border: 'rgba(255,68,68,0.35)'  },
       tier1:    { label: 'Potential Admin Lvl 1',  color: '#FF8C00', bg: 'rgba(255,140,0,0.10)',  border: 'rgba(255,140,0,0.35)'  },
@@ -268,9 +305,10 @@ function openDetail(u, row) {
       const ruleNum = `Rule ${rule.level}`;
 
       // Rule 1 / Rule 2 üçün detail — hansı qruplar match etdi
+      const ruleDetail = rule.detail_json || rule.detail;
       let detailHtml = '';
-      if (rule.detail && rule.detail.matched_groups && rule.detail.matched_groups.length > 0) {
-        const groups = rule.detail.matched_groups.map(g =>
+      if (ruleDetail && ruleDetail.matched_groups && ruleDetail.matched_groups.length > 0) {
+        const groups = ruleDetail.matched_groups.map(g =>
           `<span class="admin-reason-group">${g}</span>`
         ).join('');
         detailHtml = `<div class="admin-reason-groups">${groups}</div>`;
@@ -295,10 +333,12 @@ function openDetail(u, row) {
 
     body.innerHTML += `
       <div class="detail-section">
-        <div class="detail-section-title" style="color:var(--amber);">Admin Reason (${u.admin_rules.length})</div>
+        <div class="detail-section-title" style="color:${isAbsAdmin ? 'var(--red)' : 'var(--amber)'};">
+          ${isAbsAdmin ? 'Absolute Admin Reason' : 'Potential Admin Reason'} (${u.admin_rules.length})
+        </div>
         <div class="admin-reason-list">${rulesHtml}</div>
       </div>`;
-  } else if (!u.is_admin) {
+  } else if (!isAbsAdmin) {
     // Admin deyilsə göstərmə
   }
 
@@ -437,6 +477,7 @@ function formatUserAsTxt(u) {
     `DCSync: ${u.dcsync ? 'Yes' : 'No'}`,
     `No Password Required: ${u.pwd_not_required ? 'Yes' : 'No'}`,
     `Disabled: ${u.disabled ? 'Yes' : 'No'}`,
+    `Deleted (Recycle Bin): ${u.deleted ? 'Yes' : 'No'}`,
     `SPN Count: ${(u.spn || []).length}`,
     `Groups: ${(u.member_of || []).join(', ') || '—'}`,
     `Delegation Targets (DG): ${(u.msds_allowedtodelegateto || []).join(', ') || '—'}`,

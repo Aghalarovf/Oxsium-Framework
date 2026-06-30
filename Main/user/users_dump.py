@@ -44,10 +44,24 @@ Required by rules resolved at session level (bool flags):
 
   sid_history               list[str]   — sIDHistory attribute values
 
+AD Recycle Bin (deleted users)
+-------------------------------
+  deleted                   bool   — True only for records recovered from
+                                      CN=Deleted Objects via the
+                                      LDAP_SERVER_SHOW_DELETED_OID control.
+                                      All live users get deleted=False.
+  deleted_dn                str    — current DN under Deleted Objects
+  last_known_parent         str    — original parent container DN
+  when_deleted               str   — best-effort deletion timestamp (whenChanged)
+  meta.recycle_bin.feature_enabled  bool — whether the forest-level
+                                      AD Recycle Bin Optional Feature is on
+  meta.recycle_bin.deleted_users_count int
+
 Each bool flag that cannot be determined defaults to False.
 ACE lists that cannot be fetched default to [].
 """
 
+import json
 import logging
 import os
 import re
@@ -92,10 +106,19 @@ _LDAP_MATCHING_RULE_IN_CHAIN = "1.2.840.113556.1.4.1941"
 _PRIVILEGED_USER_RIDS        = {500, 502}
 _ENABLE_TOKEN_GROUPS         = os.getenv("LDAP_ENABLE_TOKEN_GROUPS", "0") == "1"
 
+# DÜZƏLİŞ: üçüncü GUID (8970210d-4501-11d3-ad06-00c04f79758a) Microsoft-un
+# rəsmi MS-ADTS Control Access Rights cədvəlində MÖVCUD DEYİL — yəni real
+# heç bir AD hüququna uyğun gəlmir (çox güman ki yazılış səhvi idi). Düzgün
+# "DS-Replication-Get-Changes-In-Filtered-Set" GUID-i 89e95b76-...-dir və
+# admins_check.py-dakı eyni adlı yoxlama ilə uyğunlaşdırıldı.
+_GUID_DS_REPLICATION_GET_CHANGES = str(uuid.UUID("1131f6aa-9c07-11d1-f79f-00c04fc2dcd2"))
+_GUID_DS_REPLICATION_GET_CHANGES_ALL = str(uuid.UUID("1131f6ad-9c07-11d1-f79f-00c04fc2dcd2"))
+_GUID_DS_REPLICATION_GET_CHANGES_IN_FILTERED_SET = str(uuid.UUID("89e95b76-444d-4c62-991a-0facbeda640c"))
+
 _DCSYNC_RIGHT_GUIDS = {
-    str(uuid.UUID("1131f6aa-9c07-11d1-f79f-00c04fc2dcd2")),
-    str(uuid.UUID("1131f6ad-9c07-11d1-f79f-00c04fc2dcd2")),
-    str(uuid.UUID("8970210d-4501-11d3-ad06-00c04f79758a")),
+    _GUID_DS_REPLICATION_GET_CHANGES,
+    _GUID_DS_REPLICATION_GET_CHANGES_ALL,
+    _GUID_DS_REPLICATION_GET_CHANGES_IN_FILTERED_SET,
 }
 
 _ACE_OBJECT_TYPE_PRESENT        = 0x01
@@ -106,6 +129,17 @@ _RIGHT_WRITE_DACL               = 0x00040000
 _RIGHT_WRITE_OWNER              = 0x00080000
 _RIGHT_GENERIC_ALL              = 0x10000000
 _SD_FLAGS_CONTROL               = ("1.2.840.113556.1.4.801", True, b"\x30\x03\x02\x01\x04")
+
+# LDAP_SERVER_SHOW_DELETED_OID — tombstone/Recycle Bin obyektlərini (Deleted
+# Objects konteynerindəki) standart axtarışlara daxil etmək üçün. Bu control
+# olmadan isDeleted=TRUE olan obyektlər LDAP nəticələrində görünmür.
+_SHOW_DELETED_CONTROL_OID  = "1.2.840.113556.1.4.417"
+_SHOW_DELETED_CONTROL      = (_SHOW_DELETED_CONTROL_OID, True, None)
+
+# AD Recycle Bin Optional Feature-in forest-level GUID-i. Bu feature aktiv
+# olmadıqda silinmiş obyektlər tam atributları ilə deyil, məhdud "tombstone"
+# formada saxlanılır (defolt tombstoneLifetime ərzində).
+_RECYCLE_BIN_FEATURE_GUID = "766ddcd8-acd0-445e-f3b9-a7f9b6744f2a"
 
 _USER_ATTRS: list[str] = [
     "sAMAccountName",
@@ -521,10 +555,12 @@ def _sid_bytes_to_str(data: bytes | bytearray) -> str:
 
 
 def _paged_search(conn, base_dn: str, ldap_filter: str,
-                  attributes: list[str], page_size: int) -> list:
+                  attributes: list[str], page_size: int,
+                  controls: list | None = None) -> list:
     all_entries: list = []
+    search_kwargs = {"controls": controls} if controls else {}
     conn.search(base_dn, ldap_filter, search_scope=SUBTREE,
-                attributes=attributes, paged_size=page_size)
+                attributes=attributes, paged_size=page_size, **search_kwargs)
     all_entries.extend(conn.entries)
     while True:
         cookie = (
@@ -538,13 +574,217 @@ def _paged_search(conn, base_dn: str, ldap_filter: str,
             break
         conn.search(base_dn, ldap_filter, search_scope=SUBTREE,
                     attributes=attributes, paged_size=page_size,
-                    paged_cookie=cookie)
+                    paged_cookie=cookie, **search_kwargs)
         all_entries.extend(conn.entries)
     return all_entries
 
 
-def _resolve_admin_membership(conn, base_dn: str, page_size: int) -> tuple[set[str], set[str]]:
-    # Rule 8 must track only Rule 1 groups (512/518/519/544), not every adminCount group.
+# ---------------------------------------------------------------------------
+# AD Recycle Bin — deleted user detection
+# ---------------------------------------------------------------------------
+# Silinmiş obyektlər standart LDAP axtarışlarında görünmür; onları görmək üçün
+# LDAP_SERVER_SHOW_DELETED_OID control-u tələb olunur. AD Recycle Bin
+# Optional Feature aktivdirsə obyekt bütün atributları ilə (deletedObjectLifetime,
+# defolt 180 gün) qalır və CN=Deleted Objects konteynerindən bərpa edilə bilər;
+# əks halda yalnız tombstoneLifetime (defolt 180 gün, köhnə domenlərdə 60 gün)
+# müddətincə məhdud "tombstone" atribut dəsti saxlanılır.
+_DELETED_USER_ATTRS: list[str] = [
+    "sAMAccountName",
+    "objectSid",
+    "distinguishedName",
+    "isDeleted",
+    "whenCreated",
+    "whenChanged",
+    "msDS-LastKnownRDN",
+    "lastKnownParent",
+    "userPrincipalName",
+    "description",
+    "mail",
+]
+
+# Silinən obyektin sAMAccountName-i AD tərəfindən "<original>\nDEL:<GUID>"
+# formasına mangle edilir (CN=Deleted Objects altında unikallıq üçün).
+_DEL_MANGLE_RE = re.compile(
+    r"[\s\x00-\x1f]*DEL:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\s*$",
+    re.IGNORECASE,
+)
+
+
+def _clean_deleted_sam_account_name(raw: str) -> str:
+    if not raw:
+        return raw
+    return _DEL_MANGLE_RE.sub("", raw).strip()
+
+
+def _check_recycle_bin_enabled(conn, base_dn: str) -> bool:
+    """Forest-də AD Recycle Bin Optional Feature-in aktiv olub-olmadığını
+    yoxlayır (domain partition obyektinin msDS-EnabledFeature atributu
+    üzərindən). Aktiv deyilsə, silinmiş userlər yalnız tombstone formasında
+    (məhdud atributlarla) tapıla bilər və real bərpa "reanimate-tombstone"
+    üsulu ilə daha çətin olur.
+    """
+    try:
+        conn.search(base_dn, "(objectClass=*)", search_scope=BASE,
+                    attributes=["msDS-EnabledFeature"])
+        if not conn.entries:
+            return False
+        features = _read_attr_list(conn.entries[0], "msDS-EnabledFeature")
+        return any("recycle bin feature" in f.lower() for f in features)
+    except Exception as exc:
+        logger.debug("Recycle Bin feature check failed: %s", exc)
+        return False
+
+
+def _get_deleted_users(conn, base_dn: str, page_size: int) -> tuple[list[dict], str | None]:
+    """CN=Deleted Objects konteynerindən (show-deleted control vasitəsilə)
+    silinmiş user obyektlərini oxuyur. Standart user_filter-dən fərqli olaraq
+    objectCategory artıq "person" olmaya bilər (silinmə zamanı dəyişə bilir),
+    ona görə yalnız objectClass=user + isDeleted=TRUE şərti istifadə olunur.
+
+    Qeyd: bu axtarış CN=Deleted Objects üzərində ən azı "List Object" hüququ
+    tələb edir — defolt olaraq bunu yalnız Domain Admins / SYSTEM görə bilir.
+    Hüquq yoxdursa LDAP boş nəticə (və ya icazə xətası) qaytarır; hər iki hal
+    səssizcə tutulur ki, əsas user enumeration-u pozmasın.
+    """
+    deleted_filter = "(&(objectClass=user)(isDeleted=TRUE))"
+    try:
+        entries = _paged_search(
+            conn, base_dn, deleted_filter, _DELETED_USER_ATTRS, page_size,
+            controls=[_SHOW_DELETED_CONTROL],
+        )
+    except Exception as exc:
+        logger.warning("AD Recycle Bin axtarışı uğursuz oldu: %s", exc)
+        return [], str(exc)
+
+    deleted_users: list[dict] = []
+    for entry in entries:
+        raw_sam        = _read_str(entry, "sAMAccountName")
+        last_known_rdn = _read_str(entry, "msDS-LastKnownRDN")
+        clean_username = _clean_deleted_sam_account_name(raw_sam) or raw_sam
+        display_name   = last_known_rdn or clean_username
+
+        deleted_dn        = _read_str(entry, "distinguishedName")
+        last_known_parent = _read_str(entry, "lastKnownParent")
+        user_sid           = _normalize_sid(_read_str(entry, "objectSid"))
+
+        deleted_users.append({
+            "username":           clean_username,
+            "display_name":       display_name,
+            "dn":                 deleted_dn,
+            "sid":                user_sid,
+            "upn":                _read_str(entry, "userPrincipalName"),
+            "description":        _read_str(entry, "description"),
+            "mail":               _read_str(entry, "mail"),
+            "deleted_dn":         deleted_dn,
+            "last_known_parent":  last_known_parent,
+            "when_created":       _read_timestamp(entry, "whenCreated"),
+            "when_deleted":       _read_timestamp(entry, "whenChanged"),
+        })
+
+    return deleted_users, None
+
+
+def _build_deleted_user_record(d: dict) -> dict:
+    """Recycle Bin-dən tapılan minimal məlumatı domain_users.jsonl-dəki canlı
+    user sxemi ilə eyni açarlara malik tam sətrə çevirir (bilinməyən sahələr
+    təhlükəsiz defolt dəyərlərlə doldurulur), üstəgəl "deleted": True və
+    bərpa üçün faydalı əlavə atributlar.
+    """
+    sid = d.get("sid", "") or ""
+    domain_sid = sid.rsplit("-", 1)[0] if sid and "-" in sid else ""
+
+    return {
+        "username":     d.get("username", ""),
+        "dn":           d.get("dn", ""),
+        "display_name": d.get("display_name", ""),
+        "sid":          sid,
+        "upn":          d.get("upn", ""),
+        "description":  d.get("description", ""),
+        "mail":         d.get("mail", ""),
+        "phone":        "",
+        "department":   "",
+        "title":        "",
+
+        "disabled":           True,
+        "locked_out":         False,
+        "must_change_pwd":    False,
+        "smartcard_required": False,
+        "normal_account":     False,
+
+        "pwd_never_expires": False,
+        "pwd_not_required":  False,
+        "pwd_cant_change":   False,
+        "preauth_required":  False,
+
+        "is_admin":        False,
+        "potential_admin": "",
+        "is_direct_admin": False,
+        "is_nested_admin": False,
+        "admin_rules":     [],
+
+        "dcsync": False,
+
+        "asrep":                          False,
+        "kerberoastable":                 False,
+        "spn":                            [],
+        "trusted_for_delegation":         False,
+        "unconstrained_delegation":       False,
+        "constrained_delegation":         False,
+        "delegation_effective":           False,
+        "delegation_blocked":             False,
+        "trusted_to_auth_for_delegation": False,
+        "protocol_transition_delegation": False,
+        "not_delegated":                  False,
+
+        "msds_allowedtodelegateto": [],
+        "msds_allowedtodelegateto_structurized": [],
+        "msds_supportedencryptiontypes": None,
+        "msds_supportedencryptiontypesname": [],
+        "msds_supportedencryptiontypes_name": [],
+        "enc_risk_score": 0,
+        "enc_implicit_rc4": False,
+
+        "member_of": [],
+
+        "when_created": d.get("when_created"),
+        "when_changed": d.get("when_deleted"),
+        "last_logon":   None,
+        "pwd_last_set": None,
+
+        "logon_count": 0,
+
+        "domain_sid":               domain_sid,
+        "primary_group_id":         0,
+        "primary_group_sid":        "",
+        "bad_pwd_count":            0,
+        "bad_pwd_time":             None,
+        "account_expires":          None,
+        "account_never_expires":    False,
+        "msds_resultant_pso":       "",
+        "pwd_expiry_time":          None,
+        "key_credential_link":      [],
+        "has_key_credential_link":  False,
+        "script_path":              "",
+        "home_directory":           "",
+        "home_drive":               "",
+
+        # ── AD Recycle Bin / tombstone-specific ─────────────────────────
+        "deleted":           True,
+        "deleted_dn":        d.get("deleted_dn", ""),
+        "last_known_parent": d.get("last_known_parent", ""),
+        "when_deleted":      d.get("when_deleted"),
+    }
+
+
+def _resolve_admin_membership(conn, base_dn: str, page_size: int) -> set[str]:
+    """Rule 1 qruplarının (RID 512/518/519/544) DN-lərini qaytarır.
+
+    Transitive üzv sorğusu (`memberOf:1.2.840.113556.1.4.1941:=`) bu funksiyadan
+    çıxarıldı: is_nested_admin artıq domain_groups.jsonl snapshot-ından
+    _is_nested_member() vasitəsilə hesablanır — ağır LDAP rekursiv sorğusuna
+    ehtiyac yoxdur.
+    """
     admin_groups = _paged_search(
         conn,
         base_dn,
@@ -553,33 +793,22 @@ def _resolve_admin_membership(conn, base_dn: str, page_size: int) -> tuple[set[s
         page_size,
     )
     direct_group_dns: set[str] = set()
-    transitive_dns: set[str] = set()
     for entry in admin_groups:
         try:
             group_dn = str(entry.distinguishedName.value)
+            if group_dn:
+                direct_group_dns.add(group_dn)
         except Exception:
             continue
-        if group_dn:
-            direct_group_dns.add(group_dn)
-        escaped = _ldap_escape_dn(group_dn)
-        try:
-            members = _paged_search(
-                conn, base_dn,
-                f"(&(objectClass=user)(memberOf:{_LDAP_MATCHING_RULE_IN_CHAIN}:={escaped}))",
-                ["distinguishedName"],
-                page_size,
-            )
-            for m in members:
-                try:
-                    transitive_dns.add(str(m.distinguishedName.value))
-                except Exception:
-                    continue
-        except Exception as exc:
-            logger.warning("Transitive member lookup failed [%s]: %s", group_dn, exc)
-    return direct_group_dns, transitive_dns
+    return direct_group_dns
 
 
-def _resolve_operator_membership(conn, base_dn: str, page_size: int) -> tuple[set[str], set[str]]:
+def _resolve_operator_membership(conn, base_dn: str, page_size: int) -> set[str]:
+    """Rule 2 operator qruplarının DN-lərini qaytarır.
+
+    Transitive üzv sorğusu çıxarıldı: is_nested_operator_admin artıq
+    domain_groups.jsonl snapshot-ından _is_nested_member() ilə hesablanır.
+    """
     operator_groups = _paged_search(
         conn,
         base_dn,
@@ -588,30 +817,14 @@ def _resolve_operator_membership(conn, base_dn: str, page_size: int) -> tuple[se
         page_size,
     )
     operator_group_dns: set[str] = set()
-    transitive_dns: set[str] = set()
     for entry in operator_groups:
         try:
             group_dn = str(entry.distinguishedName.value)
+            if group_dn:
+                operator_group_dns.add(group_dn)
         except Exception:
             continue
-        if group_dn:
-            operator_group_dns.add(group_dn)
-        escaped = _ldap_escape_dn(group_dn)
-        try:
-            members = _paged_search(
-                conn, base_dn,
-                f"(&(objectClass=user)(memberOf:{_LDAP_MATCHING_RULE_IN_CHAIN}:={escaped}))",
-                ["distinguishedName"],
-                page_size,
-            )
-            for m in members:
-                try:
-                    transitive_dns.add(str(m.distinguishedName.value))
-                except Exception:
-                    continue
-        except Exception as exc:
-            logger.warning("Transitive operator member lookup failed [%s]: %s", group_dn, exc)
-    return operator_group_dns, transitive_dns
+    return operator_group_dns
 
 
 def _shorten_group_dns(group_dns: list[str]) -> list[str]:
@@ -624,48 +837,169 @@ def _shorten_group_dns(group_dns: list[str]) -> list[str]:
     return result
 
 
+def _load_groups_from_snapshot(config) -> list[dict]:
+    """domain_groups.jsonl-dən qrup snapshot-ını oxuyur və admins_check.py-ın
+    _build_group_sid_index / _collect_rule*_group_sids tərəfindən gözlənilən
+    formata normallaşdırır.
+
+    Giriş (domain_groups.jsonl sətri):
+        {"group_sid": "S-1-5-32-544", "group_name": "Administrators",
+         "members": [{"sid": "S-1-5-21-...-512", "is_group": true, ...}, ...]}
+
+    Çıxış (ctx["groups"] üçün hər element):
+        {"sid": "S-1-5-32-544", "rid": 544, "name": "Administrators",
+         "member_sids": ["S-1-5-21-...-512", ...]}
+
+    Qeyd: members siyahısında həm qrup, həm də user üzvlər saxlanılır çünki
+    _is_nested_member rekursiyası hər iki tip SID-i izləyir.
+    """
+    try:
+        path = os.path.join(str(config.DOMAIN_OBJECT_DIR), "domain_groups.jsonl")
+        if not os.path.isfile(path):
+            logger.debug("_load_groups_from_snapshot: %s mövcud deyil, atlanır.", path)
+            return []
+        groups: list[dict] = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                # İlk sətir meta ola bilər ({"success": true, "count": N})
+                group_sid = str(obj.get("group_sid") or "").strip().upper()
+                if not group_sid:
+                    continue
+                # RID: SID-in son komponentindən çıxarılır (S-1-5-32-544 → 544)
+                try:
+                    rid = int(group_sid.rsplit("-", 1)[1])
+                except Exception:
+                    rid = 0
+                # members[].sid — qrup üzvlərinin SID-ləri (həm qruplar, həm userlər)
+                member_sids = [
+                    str(m.get("sid") or "").strip().upper()
+                    for m in (obj.get("members") or [])
+                    if m.get("sid")
+                ]
+                groups.append({
+                    "sid":         group_sid,
+                    "rid":         rid,
+                    "name":        str(obj.get("group_name") or "").strip(),
+                    "member_sids": member_sids,
+                })
+        logger.debug(
+            "_load_groups_from_snapshot: %d qrup yükləndi (%s).",
+            len(groups), path,
+        )
+        return groups
+    except Exception as exc:
+        logger.warning("_load_groups_from_snapshot uğursuz oldu: %s", exc)
+        return []
+
+
 def _get_dcsync_sids(conn, base_dn: str, page_size: int) -> tuple[set[str], str | None]:
+    """Domain root VƏ Configuration NC üzərində TAM DCSync hüququna malik SID-ləri qaytarır.
+
+    DÜZƏLİŞ 1 (AND məntiqi): Əvvəlki versiya bu üç GUID-dən İSTƏNİLƏN BİRİNİ
+    (Get-Changes, Get-Changes-All, ya da Filtered-Set) tapan kimi həmin SID-i
+    "DCSync" kimi işarələyirdi (OR məntiqi). Real DCSync hücumu isə eyni
+    principala HƏM Get-Changes, HƏM DƏ Get-Changes-All hüquqlarının birgə
+    verilməsini tələb edir. AND məntiqi tətbiq edilir.
+
+    DÜZƏLİŞ 2 (Configuration NC kor nöqtəsi): Replication hüquqları domain
+    root-da deyil, Configuration NC kökündə (CN=Configuration,<forest-root-dn>)
+    verilə bilər. Əvvəlki versiya yalnız domain root-u yoxlayırdı; bu, real
+    bir kor nöqtə idi — yalnız Config NC-də DCSync hüququ olan istifadəçilər
+    (məs. dcsync_confnc test ssenarisi) aşkarlanmırdı. İndi hər iki NC DACL-i
+    eyni məntiqlə parse edilir.
+    """
     dcsync_sids: set[str] = set()
     if not _IMPACKET_OK:
         return dcsync_sids, "impacket is not installed"
     last_error: str | None = None
-    try:
-        conn.search(base_dn, "(objectClass=*)", search_scope=BASE,
-                    attributes=["nTSecurityDescriptor"], controls=[_SD_FLAGS_CONTROL])
-        if not conn.entries:
-            return dcsync_sids, None
-        ntsd_raw = _read_attr(conn.entries[0], "nTSecurityDescriptor")
-        if isinstance(ntsd_raw, list):
-            ntsd_raw = ntsd_raw[0] if ntsd_raw else None
-        if not isinstance(ntsd_raw, bytes):
-            return dcsync_sids, None
-        sd = _ldaptypes.SR_SECURITY_DESCRIPTOR()
-        sd.fromString(ntsd_raw)
-        if not sd["Dacl"]:
-            return dcsync_sids, None
-        for ace in sd["Dacl"].aces:
-            try:
-                ace_type = ace["AceType"]
-                ace_body = ace["Ace"]
-                if ace_type == _ACCESS_ALLOWED_ACE_TYPE:
+
+    def _parse_nc_dacl_for_dcsync(nc_dn: str) -> None:
+        """Verilmiş NC kökünün DACL-ini parse edib dcsync_sids-ə DCSync SID-lərini əlavə edir.
+
+        Eyni identity üçün hər iki NC-dəki GUID-lər toplanır — bu o deməkdir
+        ki, bir identity-yə Get-Changes domain root-da, Get-Changes-All isə
+        Config NC-də verilib-sə, bu funksiya onları AYRI yığımlarda görəcək.
+        Lakin real ssenarilərdə hər iki GUID eyni NC-də verilir; cross-NC
+        birləşməsi çox nadir olduğundan burada hər NC öz SID-GUID yığımına
+        sahib olur. Cross-NC halı Rule 4 (admins_check) tərəfindən ACE
+        siyahıları vasitəsilə ayrıca yoxlanılır.
+        """
+        nonlocal last_error
+        sid_guids: dict[str, set[str]] = {}
+        try:
+            conn.search(
+                nc_dn, "(objectClass=*)", search_scope=BASE,
+                attributes=["nTSecurityDescriptor"], controls=[_SD_FLAGS_CONTROL],
+            )
+            if not conn.entries:
+                return
+            ntsd_raw = _read_attr(conn.entries[0], "nTSecurityDescriptor")
+            if isinstance(ntsd_raw, list):
+                ntsd_raw = ntsd_raw[0] if ntsd_raw else None
+            if not isinstance(ntsd_raw, bytes):
+                return
+            sd = _ldaptypes.SR_SECURITY_DESCRIPTOR()
+            sd.fromString(ntsd_raw)
+            if not sd["Dacl"]:
+                return
+            for ace in sd["Dacl"].aces:
+                try:
+                    ace_type = ace["AceType"]
+                    ace_body = ace["Ace"]
+                    if ace_type == _ACCESS_ALLOWED_ACE_TYPE:
+                        if (int(ace_body["Mask"]["Mask"]) & _GENERIC_ALL_MASK) == _GENERIC_ALL_MASK:
+                            dcsync_sids.add(_normalize_sid(ace_body["Sid"].formatCanonical()))
+                        continue
+                    if ace_type != _ACCESS_ALLOWED_OBJECT_ACE_TYPE:
+                        continue
                     if (int(ace_body["Mask"]["Mask"]) & _GENERIC_ALL_MASK) == _GENERIC_ALL_MASK:
                         dcsync_sids.add(_normalize_sid(ace_body["Sid"].formatCanonical()))
+                        continue
+                    if not (ace_body["Flags"] & _ACE_OBJECT_TYPE_PRESENT):
+                        continue
+                    obj_guid = str(uuid.UUID(bytes_le=bytes(ace_body["ObjectType"])))
+                    if obj_guid in _DCSYNC_RIGHT_GUIDS:
+                        sid = _normalize_sid(ace_body["Sid"].formatCanonical())
+                        sid_guids.setdefault(sid, set()).add(obj_guid)
+                except Exception:
                     continue
-                if ace_type != _ACCESS_ALLOWED_OBJECT_ACE_TYPE:
-                    continue
-                if (int(ace_body["Mask"]["Mask"]) & _GENERIC_ALL_MASK) == _GENERIC_ALL_MASK:
-                    dcsync_sids.add(_normalize_sid(ace_body["Sid"].formatCanonical()))
-                    continue
-                if not (ace_body["Flags"] & _ACE_OBJECT_TYPE_PRESENT):
-                    continue
-                obj_guid = str(uuid.UUID(bytes_le=bytes(ace_body["ObjectType"])))
-                if obj_guid in _DCSYNC_RIGHT_GUIDS:
-                    dcsync_sids.add(_normalize_sid(ace_body["Sid"].formatCanonical()))
-            except Exception:
-                continue
-    except Exception as exc:
-        last_error = str(exc)
-        logger.warning("DCSync ACL parse failed for %s: %s", base_dn, exc)
+
+            # ── DCSync üçün HƏR İKİSİ lazımdır: Get-Changes VƏ Get-Changes-All ──
+            # (Get-Changes-In-Filtered-Set tək başına kifayət etmir.)
+            for sid, guids in sid_guids.items():
+                if (_GUID_DS_REPLICATION_GET_CHANGES in guids
+                        and _GUID_DS_REPLICATION_GET_CHANGES_ALL in guids):
+                    dcsync_sids.add(sid)
+
+        except Exception as exc:
+            last_error = str(exc)
+            logger.warning("DCSync ACL parse failed for %s: %s", nc_dn, exc)
+
+    # ── Domain root NC ────────────────────────────────────────────────────────
+    _parse_nc_dacl_for_dcsync(base_dn)
+
+    # ── Configuration NC root — əvvəllər yoxlanmayan kor nöqtə ──────────────
+    # rootDSE-dən forest-wide Configuration NC DN-i alınır; sadəcə
+    # f"CN=Configuration,{base_dn}" istifadəsi alt-domain ssenariində
+    # səhv ola bilər — forest root həmişə rootDSE-dədir.
+    config_nc = _get_configuration_nc(conn)
+    if config_nc:
+        _parse_nc_dacl_for_dcsync(config_nc)
+    else:
+        logger.warning(
+            "_get_dcsync_sids: Configuration NC tapılmadı — "
+            "yalnız Config NC-də DCSync hüququ olan istifadəçilər "
+            "has_dcsync_right fast-path-indən keçə bilməz "
+            "(Rule 4 ACE yoxlaması hələ də işləyəcək)."
+        )
+
     return dcsync_sids, last_error
 
 
@@ -743,7 +1077,203 @@ def _fetch_object_aces(conn, dn: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Session-level ACL pre-fetch
+# rootDSE helpers
+# ---------------------------------------------------------------------------
+
+def _get_configuration_nc(conn) -> str | None:
+    """rootDSE-dən forest-wide Configuration NC-nin DN-ini tapır.
+
+    base_dn-dən asılı olmayaraq düzgün nəticə verir — alt-domain üzərindən
+    işlədikdə sadəcə f"CN=Configuration,{base_dn}" səhv ola bilər, çünki
+    Configuration NC həmişə forest root-un DN-inə bağlıdır.
+    """
+    try:
+        conn.search(
+            "",
+            "(objectClass=*)",
+            search_scope=BASE,
+            attributes=["configurationNamingContext", "schemaNamingContext"],
+        )
+        if conn.entries:
+            val = conn.entries[0].configurationNamingContext.value
+            if val:
+                return str(val)
+    except Exception as exc:
+        logger.warning("rootDSE configurationNamingContext oxunmadı: %s", exc)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Snapshot-based ACL loading  (domain_aces.jsonl → session_acl_ctx)
+# ---------------------------------------------------------------------------
+
+# domain_aces.jsonl-dəki rights string-lərini admins_check.py-ın mask
+# yoxlamalarına uyğun bitmask dəyərlərinə çevirir.
+#
+# Mapping məntiqi:
+#   admins_check._rule_03 / _rule_06 → GenericAll, WriteDACL, WriteOwner,
+#     GenericWrite (0x40000000), WriteProperty (0x20)
+#   admins_check._rule_04 / _rule_07 → GenericAll, AllExtendedRights (0x100)
+#     + object_type GUID (DS-Replication-Get-Changes / Get-Changes-All)
+_ACE_RIGHT_TO_MASK: dict[str, int] = {
+    "GenericAll":          0x10000000 | 0x000F01FF,   # GA bit + full mask
+    "GenericWrite":        0x40000000,                 # ActiveDirectoryRights.GenericWrite
+    "WriteDACL":           0x00040000,
+    "WriteOwner":          0x00080000,
+    "WriteProperty":       0x00000020,
+    "All-Extended-Rights": 0x00000100,                 # RIGHT_ALL_EXTENDED
+    "ExtendedRights":      0x00000100,
+    # DS-Replication hüquqları: mask-da 0x100 biti olmalı, GUID object_type-a keçir
+    "DS-Replication-Get-Changes":                    0x00000100,
+    "DS-Replication-Get-Changes-All":                0x00000100,
+    "DS-Replication-Get-Changes-In-Filtered-Set":    0x00000100,
+    "DS-Replication-Get-Changes-In-Filtered-Set-Alt":0x00000100,
+    # Digər hüquqlar
+    "CreateChild":    0x00000001,
+    "DeleteChild":    0x00000002,
+    "ListChildObjects":0x00000004,
+    "ReadProperty":   0x00000010,
+    "Delete":         0x00010000,
+    "DeleteTree":     0x00000040,
+    "ListObject":     0x00000080,
+}
+
+
+def _normalize_snapshot_ace(obj: dict) -> dict:
+    """domain_aces.jsonl formatından admins_check.py-ın gözlədiyi formata çevirir.
+
+    Giriş:
+        {"principal_sid": "S-1-...", "rights": ["GenericAll"], "object_ace_type":
+         "...-guid-...", "ace_qualifier": "Allow"}
+
+    Çıxış:
+        {"sid": "S-1-...", "trustee_sid": "S-1-...", "mask": 0x10000000|...,
+         "access_mask": ..., "object_type": "guid", "ace_type": "ACCESS_ALLOWED_ACE_TYPE"}
+    """
+    mask = 0
+    for right in (obj.get("rights") or []):
+        mask |= _ACE_RIGHT_TO_MASK.get(right, 0)
+
+    qualifier = str(obj.get("ace_qualifier") or "").upper()
+    ace_type  = "ACCESS_ALLOWED_ACE_TYPE" if "ALLOW" in qualifier else "ACCESS_DENIED_ACE_TYPE"
+    sid       = str(obj.get("principal_sid") or "").strip().upper()
+
+    return {
+        "sid":         sid,
+        "trustee_sid": sid,
+        "mask":        mask,
+        "access_mask": mask,
+        "object_type": str(obj.get("object_ace_type") or "").lower().strip(),
+        "ace_type":    ace_type,
+    }
+
+
+def _load_aces_from_snapshot(config, base_dn: str) -> dict:
+    """domain_aces.jsonl-dən ACE-ləri oxuyub _collect_session_acl_context ilə
+    eyni strukturda ctx dict qaytarır — LDAP sorğusu göndərilmir.
+
+    target_dn → ctx açarı xəritəsi:
+      base_dn                             → domain_root_aces
+      CN=AdminSDHolder,CN=System,...      → adminsdholder_aces
+      CN=Configuration,...                → configuration_root_aces
+      CN=krbtgt,CN=Users,...              → krbtgt_aces
+      CN=Domain Admins,CN=Users,...       → domain_admins_group_aces
+      OU=Domain Controllers,...           → dc_ou_aces
+      CN=Policies,CN=System,...           → gpo_container_aces
+    """
+    ctx: dict = {
+        "domain_root_aces":          [],
+        "adminsdholder_aces":        [],
+        "krbtgt_aces":               [],
+        "domain_admins_group_aces":  [],
+        "dc_ou_aces":                [],
+        "gpo_container_aces":        [],
+        "computer_target_aces":      [],
+        "configuration_root_aces":   [],
+        "user_aces":                 [],
+        "has_dcsync_right":                     False,
+        "has_rbcd_on_dc":                       False,
+        "has_force_change_password_on_da":      False,
+        "can_write_key_credential_link":        False,
+        "can_write_key_credential_link_on_dc":  False,
+        "has_gpo_write_dacl_on_dc_linked_gpo":  False,
+        "has_adcs_esc1_enrollment":             False,
+        "has_adcs_esc4_template_write_dacl":    False,
+        "has_all_extended_rights_on_domain":    False,
+        "has_generic_write_on_da_user":         False,
+        "has_write_spn_on_other":               False,
+        "can_read_laps_password":               False,
+        "can_write_gmsa_membership":            False,
+    }
+
+    try:
+        path = os.path.join(str(config.DOMAIN_OBJECT_DIR), "domain_aces.jsonl")
+        if not os.path.isfile(path):
+            logger.debug("_load_aces_from_snapshot: %s mövcud deyil.", path)
+            return ctx
+
+        bdn   = base_dn.lower()
+        _DN   = {
+            "domain_root":      bdn,
+            "adminsdholder":    f"cn=adminsdholder,cn=system,{bdn}",
+            "configuration_nc": f"cn=configuration,{bdn}",
+            "krbtgt":           f"cn=krbtgt,cn=users,{bdn}",
+            "domain_admins":    f"cn=domain admins,cn=users,{bdn}",
+            "dc_ou":            f"ou=domain controllers,{bdn}",
+            "gpo_container":    f"cn=policies,cn=system,{bdn}",
+        }
+
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+
+                # Meta sətiri atla (target_dn yoxdur)
+                target_dn = str(obj.get("target_dn") or "").strip().lower()
+                if not target_dn:
+                    continue
+
+                ace = _normalize_snapshot_ace(obj)
+
+                if target_dn == _DN["domain_root"]:
+                    ctx["domain_root_aces"].append(ace)
+                elif target_dn == _DN["adminsdholder"]:
+                    ctx["adminsdholder_aces"].append(ace)
+                elif target_dn == _DN["configuration_nc"]:
+                    ctx["configuration_root_aces"].append(ace)
+                elif target_dn == _DN["krbtgt"]:
+                    ctx["krbtgt_aces"].append(ace)
+                elif target_dn == _DN["domain_admins"]:
+                    ctx["domain_admins_group_aces"].append(ace)
+                elif target_dn == _DN["dc_ou"]:
+                    ctx["dc_ou_aces"].append(ace)
+                elif target_dn == _DN["gpo_container"]:
+                    ctx["gpo_container_aces"].append(ace)
+
+        logger.debug(
+            "_load_aces_from_snapshot: domain_root=%d adminsdholder=%d "
+            "config_nc=%d krbtgt=%d da_group=%d dc_ou=%d gpo=%d",
+            len(ctx["domain_root_aces"]),
+            len(ctx["adminsdholder_aces"]),
+            len(ctx["configuration_root_aces"]),
+            len(ctx["krbtgt_aces"]),
+            len(ctx["domain_admins_group_aces"]),
+            len(ctx["dc_ou_aces"]),
+            len(ctx["gpo_container_aces"]),
+        )
+    except Exception as exc:
+        logger.warning("_load_aces_from_snapshot uğursuz oldu: %s", exc)
+
+    return ctx
+
+
+# ---------------------------------------------------------------------------
+# Session-level ACL pre-fetch (LDAP — artıq _load_aces_from_snapshot tərəfindən əvəz olunub)
 # ---------------------------------------------------------------------------
 
 def _collect_session_acl_context(conn, base_dn: str) -> dict:
@@ -759,6 +1289,7 @@ def _collect_session_acl_context(conn, base_dn: str) -> dict:
         "dc_ou_aces":                [],
         "gpo_container_aces":        [],
         "computer_target_aces":      [],
+        "configuration_root_aces":   [],   # Rule 4 / Rule 7 kor nöqtəsini bağlayır
         # bool flags resolved via ACL / attribute reads
         "has_dcsync_right":                     False,
         "has_rbcd_on_dc":                       False,
@@ -777,6 +1308,18 @@ def _collect_session_acl_context(conn, base_dn: str) -> dict:
 
     # Domain root
     ctx["domain_root_aces"] = _fetch_object_aces(conn, base_dn)
+
+    # Configuration NC root — rootDSE-dən düzgün DN alınır (multi-domain
+    # forest-də alt-domain base_dn-indən f"CN=Configuration,{base_dn}"
+    # səhv olardı; forest root-un Configuration NC-si həmişə rootDSE-dədir).
+    config_nc = _get_configuration_nc(conn)
+    if config_nc:
+        ctx["configuration_root_aces"] = _fetch_object_aces(conn, config_nc)
+    else:
+        logger.warning(
+            "_collect_session_acl_context: Configuration NC tapılmadı — "
+            "Rule 4/7 yalnız domain root üzərindən işləyəcək."
+        )
 
     # AdminSDHolder
     adminsdholder_dn = f"CN=AdminSDHolder,CN=System,{base_dn}"
@@ -844,6 +1387,7 @@ def _build_user_admin_ctx(
     principal_sid_map: dict[str, str],
     dcsync_sids: set[str],
     session_acl_ctx: dict,
+    groups_from_snapshot: list[dict] | None = None,
 ) -> dict:
     """
     Compose the full context dict for admins_check.check_admin().
@@ -891,6 +1435,10 @@ def _build_user_admin_ctx(
         "has_dcsync_right":      has_dcsync,
         "sid_history":           sid_history,
         "is_nested_operator_admin": is_nested_operator_admin,
+        # Rule 8/12: _build_group_sid_index və _collect_rule*_group_sids
+        # tərəfindən istifadə olunur. Snapshot mövcud deyilsə boş siyahı —
+        # köhnə LDAP yolu hər zaman olduğu kimi işləyir.
+        "groups":                groups_from_snapshot or [],
     }
 
     # Merge session-level ACL context (ACE lists + bool flags), but don't
@@ -930,13 +1478,11 @@ def get_domain_users(ip: str, domain: str, username: str,
                             receive_timeout=config.LDAP_RECEIVE_TIMEOUT)
 
         # ── Session-level pre-fetches ────────────────────────────────────────
-        admin_group_dns, transitive_dns = _resolve_admin_membership(conn, base_dn, page_size)
+        admin_group_dns = _resolve_admin_membership(conn, base_dn, page_size)
         admin_group_dns_lower = {dn.lower() for dn in admin_group_dns}
-        transitive_dns_lower = {dn.lower() for dn in transitive_dns}
 
-        operator_group_dns, operator_transitive_dns = _resolve_operator_membership(conn, base_dn, page_size)
-        operator_group_dns_lower       = {dn.lower() for dn in operator_group_dns}
-        operator_transitive_dns_lower   = {dn.lower() for dn in operator_transitive_dns}
+        operator_group_dns = _resolve_operator_membership(conn, base_dn, page_size)
+        operator_group_dns_lower = {dn.lower() for dn in operator_group_dns}
 
         dcsync_sids, dcsync_error = _get_dcsync_sids(conn, base_dn, page_size)
 
@@ -946,9 +1492,20 @@ def get_domain_users(ip: str, domain: str, username: str,
             logger.warning("Failed to get principal SID map: %s", exc)
             principal_sid_map = {}
 
-        session_acl_ctx = _collect_session_acl_context(conn, base_dn)
+        session_acl_ctx = _load_aces_from_snapshot(config, base_dn)
 
-        # ── User enumeration ─────────────────────────────────────────────────
+        # ── AD Recycle Bin — silinmiş userlərin yoxlanması ────────────────────
+        recycle_bin_enabled = _check_recycle_bin_enabled(conn, base_dn)
+        deleted_users_raw, deleted_users_error = _get_deleted_users(conn, base_dn, page_size)
+
+        # ── domain_groups.jsonl snapshot → Rule 8/12 nested detection ────────
+        # Transitive LDAP sorğusu (memberOf:1.2.840.113556.1.4.1941:=) əvəzinə
+        # snapshot üzərindən _is_nested_member() istifadə olunur.
+        groups_snapshot = _load_groups_from_snapshot(config)
+        _snap_ctx        = {"groups": groups_snapshot}
+        _snap_group_idx  = admins_check._build_group_sid_index(_snap_ctx)
+        _snap_rule1_sids = admins_check._collect_rule1_group_sids(_snap_ctx)
+        _snap_rule2_sids = admins_check._collect_rule2_group_sids(_snap_ctx)
         if USER_EXTRA_FILTERS:
             extra       = "".join(USER_EXTRA_FILTERS)
             user_filter = f"(&(objectClass=user)(objectCategory=person){extra})"
@@ -976,11 +1533,32 @@ def get_domain_users(ip: str, domain: str, username: str,
             groups_lower: set[str]  = {g.lower() for g in groups_raw}
             groups_short: list[str] = _shorten_group_dns(groups_raw)
 
+            # PRIMARY check: DN-level intersection (ldap3 normalisation may differ)
             is_direct_admin = bool(admin_group_dns_lower.intersection(groups_lower))
-            is_group_admin  = user_dn.lower() in transitive_dns_lower
+            # FALLBACK: CN-name check — handles ldap3 DN format mismatches
+            if not is_direct_admin:
+                _RULE1_CN_LOWER = frozenset({
+                    "domain admins", "enterprise admins", "schema admins",
+                    "administrators", "builtin administrators",
+                    "domain controllers",
+                    "enterprise read-only domain controllers",
+                    "read-only domain controllers",
+                })
+                is_direct_admin = any(g.lower() in _RULE1_CN_LOWER for g in groups_short)
             is_direct_operator = bool(operator_group_dns_lower and operator_group_dns_lower.intersection(groups_lower))
-            is_operator_group  = user_dn.lower() in operator_transitive_dns_lower
             user_sid        = _normalize_sid(_read_str(entry, "objectSid"))
+
+            # ── Nested detection: snapshot üzərindən, LDAP transitive sorğusu yox ──
+            # _is_nested_member domain_groups.jsonl-dən qurulmuş index üzərindən
+            # rekursiv axtarış aparır — is_direct_* hallar xaric edilir.
+            is_group_admin = (
+                bool(_snap_rule1_sids)
+                and admins_check._is_nested_member(user_sid, _snap_rule1_sids, _snap_group_idx)
+            )
+            is_operator_group = (
+                bool(_snap_rule2_sids)
+                and admins_check._is_nested_member(user_sid, _snap_rule2_sids, _snap_group_idx)
+            )
 
             # Nested admin means the user reaches an adminCount group through
             # group nesting, but is not a direct member of the admin group.
@@ -998,16 +1576,17 @@ def get_domain_users(ip: str, domain: str, username: str,
                 principal_sid_map = principal_sid_map,
                 dcsync_sids    = dcsync_sids,
                 session_acl_ctx= session_acl_ctx,
+                groups_from_snapshot = groups_snapshot,
             )
             admin_ctx_map[sam_name] = admin_ctx   # proto serializasiyası üçün saxla
-            admin_result = admins_check.check_admin(admin_ctx)
-            is_admin     = admin_result["is_admin"]
-            matched_levels = {
-                int(rule.get("level"))
-                for rule in admin_result.get("matched_rules", [])
-                if isinstance(rule, dict) and str(rule.get("level", "")).isdigit()
-            }
-            is_potential_admin = is_admin and matched_levels and matched_levels.issubset({2, 10})
+            admin_result       = admins_check.check_admin(admin_ctx)
+            # check_admin is_direct_admin (yalnız absolute qaydalar) və
+            # potential_admin ("PAD" əgər yalnız tier1/2/3 varsa) qaytarır.
+            is_potential_admin = bool(admin_result.get("potential_admin"))
+            # is_direct_admin: admins_check.check_admin() tərəfindən absolute
+            # qaydalar əsasında hesablanır — memberOf yoxlamasını override edir.
+            if admin_result.get("is_direct_admin"):
+                is_direct_admin = True
 
             # ── Supplementary flags (unchanged from original) ─────────────────
             pwd_last_set_int  = _read_int(entry, "pwdLastSet", default=-1)
@@ -1015,7 +1594,8 @@ def get_domain_users(ip: str, domain: str, username: str,
             is_locked_out     = _read_int(entry, "lockoutTime", default=0) > 0
             is_asrep          = uac_parsed["dont_req_preauth"] and bool(sam_name)
             spn_list          = _read_attr_list(entry, "servicePrincipalName")
-            is_kerberoastable = bool(spn_list)
+            # Disabled accounts cannot be Kerberoasted (KDC rejects AS-REQ for them)
+            is_kerberoastable = bool(spn_list) and not uac_parsed["disabled"]
             delegation_targets = _normalize_delegation_targets(_read_attr_list(entry, "msDS-AllowedToDelegateTo"))
             delegation_state = _derive_delegation_state(uac_parsed, delegation_targets)
 
@@ -1029,11 +1609,22 @@ def get_domain_users(ip: str, domain: str, username: str,
                 domain_sid = user_sid.rsplit("-", 1)[0]
                 user_group_sids_for_dcsync.add(_normalize_sid(f"{domain_sid}-{primary_group_id}"))
 
+            # DÜZƏLİŞ: is_dcsync iki mənbədən hesablanır:
+            #   1. dcsync_sids — _get_dcsync_sids() tərəfindən domain root VƏ
+            #      Config NC üzərindən toplanan SID-lər (has_dcsync_right fast-path).
+            #   2. Rule 4 nəticəsi — admins_check._rule_04_dcsync_get_changes_all()
+            #      session_acl_ctx-dəki domain_root_aces VƏ configuration_root_aces
+            #      üzərindən ACE-ləri birbaşa parse edib yoxlayır. Bu, _get_dcsync_sids()
+            #      impacket olmadan işləmədikdə (və ya Config NC tapılmadıqda) ehtiyat
+            #      yol kimi çıxış imkanı verir.
+            _rule4_matched = any(
+                r.get("level") == 4 for r in admin_result.get("matched_rules", [])
+            )
             is_dcsync = bool(
                 dcsync_sids and (
                     user_sid in dcsync_sids or bool(user_group_sids_for_dcsync & dcsync_sids)
                 )
-            )
+            ) or _rule4_matched
 
             # ── Yeni atributlar ───────────────────────────────────────────────
             # domain_sid: user SID-dən çıxarılır (S-1-5-21-X-Y-Z)
@@ -1084,6 +1675,8 @@ def get_domain_users(ip: str, domain: str, username: str,
                 "department":   _read_str(entry, "department"),
                 "title":        _read_str(entry, "title"),
 
+                "deleted": False,
+
                 "disabled":           uac_parsed["disabled"],
                 "locked_out":         is_locked_out,
                 "must_change_pwd":    must_change_pwd,
@@ -1096,8 +1689,10 @@ def get_domain_users(ip: str, domain: str, username: str,
                 "preauth_required":  not uac_parsed["dont_req_preauth"],
 
                 # ── Admin determination via admins_check ──────────────────────
-                "is_admin":        is_admin,
-                "potential_admin": "PAD" if is_potential_admin else "",
+                # is_direct_admin=True → ən azı bir absolute qayda var
+                # potential_admin="PAD" → yalnız tier1/2/3 var, absolute yoxdur
+                "is_admin":        is_direct_admin,
+                "potential_admin": admin_result.get("potential_admin", ""),
                 "is_direct_admin": is_direct_admin,
                 "is_nested_admin": is_nested_admin,
                 "admin_rules":     admin_result["matched_rules"],
@@ -1176,6 +1771,12 @@ def get_domain_users(ip: str, domain: str, username: str,
                 "home_drive":               home_drive,
             })
 
+        # ── AD Recycle Bin — bərpa oluna bilən silinmiş userləri əlavə et ─────
+        deleted_users_count = 0
+        for d in deleted_users_raw:
+            users.append(_build_deleted_user_record(d))
+            deleted_users_count += 1
+
         dcsync_users_count = sum(1 for u in users if u.get("dcsync"))
 
         result = {
@@ -1189,7 +1790,12 @@ def get_domain_users(ip: str, domain: str, username: str,
                     "principal_count":    len(principal_sid_map),
                     "dcsync_users_count": dcsync_users_count,
                     "error":              dcsync_error,
-                }
+                },
+                "recycle_bin": {
+                    "feature_enabled":    recycle_bin_enabled,
+                    "deleted_users_count": deleted_users_count,
+                    "error":              deleted_users_error,
+                },
             },
         }
 
@@ -1201,6 +1807,26 @@ def get_domain_users(ip: str, domain: str, username: str,
                 logger.info("Protobuf payload yazıldı: %s", proto_output_path)
             except Exception as exc:
                 logger.warning("Protobuf serialization uğursuz oldu: %s", exc)
+
+        # ── domain_users.jsonl-a yaz ──────────────────────────────────────────
+        try:
+            output_path = os.path.join(
+                str(config.DOMAIN_OBJECT_DIR), "domain_users.jsonl"
+            )
+            with open(output_path, "w", encoding="utf-8") as f:
+                # Meta sətir: success, count, dcsync meta
+                meta = {
+                    "success": result["success"],
+                    "count":   result["count"],
+                    "meta":    result["meta"],
+                }
+                f.write(json.dumps(meta, ensure_ascii=False, default=str) + "\n")
+                # Hər user ayrı sətirdə
+                for user in result["users"]:
+                    f.write(json.dumps(user, ensure_ascii=False, default=str) + "\n")
+        except Exception as write_exc:
+            result["json_export_error"] = str(write_exc)
+            logger.warning("JSONL export failed: %s", write_exc)
 
         return result
 

@@ -7,13 +7,9 @@
 #include <set>
 #include <unordered_map>
 
-// NDJSON writer — offline_processorp5.cpp. ZIP not applied here; all outputs are compressed together downstream.
 
 namespace fs = std::filesystem;
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  AdminRID  (same as user_enum.h — kept independent)
-// ─────────────────────────────────────────────────────────────────────────────
 namespace OfflineAdminRID {
     constexpr int DOMAIN_ADMINS                   = 512;
     constexpr int DOMAIN_USERS                    = 513;
@@ -40,11 +36,12 @@ namespace OfflineAdminRID {
     constexpr int REMOTE_MANAGEMENT_USERS         = 580;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  AceRight  (same as user_enum.h)
-// ─────────────────────────────────────────────────────────────────────────────
 namespace OfflineAceRight {
-    constexpr unsigned int ACE_GENERIC_ALL   = 0x000F01FF;
+    constexpr unsigned int ACE_GENERIC_ALL   = 0x000F01FF;  // AD-də expand edilmiş GenericAll (composed)
+    // FIX: Python constants.py-dakı GENERIC_ALL_RAW = 0x10000000 ilə ekvivalent.
+    // Windows-un xam Generic-All access mask biti; AD object ACE-lərində
+    // composed formdan (0x000F01FF) ASILI OLMAYARAQ tək başına gələ bilir.
+    constexpr unsigned int ACE_GENERIC_ALL_RAW = 0x10000000;
     constexpr unsigned int ACE_GA_BIT        = 0x00100000;
     constexpr unsigned int ACE_GENERIC_WRITE = 0x40000000;
     constexpr unsigned int ACE_WRITE_DACL    = 0x00040000;
@@ -58,9 +55,6 @@ namespace OfflineAceRight {
     constexpr unsigned int ACE_LIST_OBJECT   = 0x00000080;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Simple structs read from raw JSON
-// ─────────────────────────────────────────────────────────────────────────────
 struct RawAceEntry {
     std::string  trustee_sid;
     unsigned int mask                        = 0;
@@ -76,9 +70,6 @@ struct RawObjectAces {
     std::vector<RawAceEntry> aces;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Processed structs — for domain_users.ndjson / domain_groups.ndjson
-// ─────────────────────────────────────────────────────────────────────────────
 
 struct PAdminRuleDetail {
     std::vector<int>         matched_rids;
@@ -220,19 +211,7 @@ struct ProcessedGroup {
     int  member_computer_count = 0;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  ProcessedAce  — one ACE entry for domain_aces.ndjson
-//
-//  Enriched fields added to each raw ACE:
-//    - trustee_name   : SID → sAMAccountName  (from lookup table)
-//    - trustee_type   : "user" | "group" | "computer" | "well_known" | "unknown"
-//    - rights_labels  : human-readable right names from mask (["GenericAll", ...])
-//    - is_dangerous   : has write/owner/dacl/ga rights
-//    - danger_reason  : description of the first dangerous right found
-//    - guid_name      : known GUID name for object_type_guid (if available)
-// ─────────────────────────────────────────────────────────────────────────────
 struct ProcessedAce {
-    // Raw fields (from raw_aces.ndjson)
     std::string  trustee_sid;
     std::string  mask_hex;
     unsigned int mask            = 0;
@@ -241,7 +220,6 @@ struct ProcessedAce {
     std::string  object_type_guid;
     std::string  inherited_object_type_guid;
 
-    // Enriched fields
     std::string  trustee_name;          // SAM or well-known name
     std::string  trustee_display_name;  // displayName (if available)
     std::string  trustee_type;          // user | group | computer | well_known | unknown
@@ -253,9 +231,6 @@ struct ProcessedAce {
     std::string  inherited_guid_name;   // InheritedObjectType GUID → known name
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  ProcessedAceObject  — one domain object + its enriched ACEs
-// ─────────────────────────────────────────────────────────────────────────────
 struct ProcessedAceObject {
     std::string              dn;
     std::string              object_class;
@@ -270,19 +245,8 @@ struct ProcessedAceObject {
     bool has_dangerous_aces    = false;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  ProcessedComputer  — one computer object for domain_computers.ndjson
-//
-//  Extends the raw ComputerCollector output with:
-//    - delegation analysis      (unconstrained / constrained / RBCD /
-//                                protocol-transition + structured target list)
-//    - attack path flags        (kerberoastable, asrep, shadow_cred)
-//    - risk_score               (0-100 composite)
-//    - risk_factors             (human-readable list of contributing factors)
-//    - rbcd_principal_names     (SID → sAMAccountName resolved)
-// ─────────────────────────────────────────────────────────────────────────────
 struct ProcessedComputer {
-    // ── Identity ─────────────────────────────────────────────────────────────
+
     std::string computer_name;
     std::string dns_name;
     std::string dn;
@@ -291,31 +255,25 @@ struct ProcessedComputer {
     std::string domain_sid;
     std::string description;
 
-    // ── State ─────────────────────────────────────────────────────────────────
     bool disabled = false;
 
-    // ── OS ────────────────────────────────────────────────────────────────────
     std::string os;
     std::string os_version;
     std::string os_service_pack;
     std::string os_bucket;          // "server" | "workstation" | "dc" | "other"
 
-    // ── Type flags ────────────────────────────────────────────────────────────
     bool is_workstation        = false;
     bool is_server             = false;
     bool is_domain_controller  = false;
     bool potential_privileged  = false;
 
-    // ── Stale ─────────────────────────────────────────────────────────────────
     bool is_stale       = false;
     bool stale_by_pwd   = false;
     bool stale_by_logon = false;
 
-    // ── SPN / Kerberos ────────────────────────────────────────────────────────
     std::vector<std::string> spn;
     bool has_spn = false;
 
-    // ── Delegation ────────────────────────────────────────────────────────────
     bool trusted_for_delegation              = false;
     bool trusted_to_auth_for_delegation      = false;
     bool unconstrained_delegation            = false;
@@ -325,43 +283,34 @@ struct ProcessedComputer {
     std::vector<std::string>       allowed_to_delegate_to;
     std::vector<PDelegationTarget> allowed_to_delegate_to_structured;
 
-    // ── RBCD ──────────────────────────────────────────────────────────────────
     bool rbcd_enabled = false;
     std::string rbcd_sddl;                      // reconstructed SDDL string
     std::vector<std::string> rbcd_principals;       // raw SIDs from collector
     std::vector<std::string> rbcd_principal_names;  // enriched: SID → SAM name
 
-    // ── LAPS ──────────────────────────────────────────────────────────────────
     bool        has_laps        = false;
     bool        haslaps         = false;
     std::string laps_expiration;
     // Full per-attribute values forwarded from collector (key → raw values)
     std::map<std::string, std::vector<std::string>> laps_attributes;
 
-    // ── ACL ───────────────────────────────────────────────────────────────────
     bool isaclprotected = false;
 
-    // ── SID History ───────────────────────────────────────────────────────────
     std::vector<std::string> sid_history;
 
-    // ── Group membership (built from transitive table) ────────────────────────
     std::vector<std::string> token_group_sids;
     int         primary_group_id  = 0;
     std::string primary_group_sid;
 
-    // ── Attack paths ──────────────────────────────────────────────────────────
     bool kerberoastable        = false;  // has_spn && !disabled
     bool asrep                 = false;  // !preauth_required (rare for computers, still tracked)
     bool preauth_required      = true;
     bool has_shadow_credential = false;  // msDS-KeyCredentialLink present
 
-    // ── Risk ──────────────────────────────────────────────────────────────────
     int                      risk_score   = 0;
     std::vector<std::string> risk_factors;
     std::vector<std::string> risk_controls; // from collector (e.g. "Domain Controller", "LAPS")
 
-    // ── Network stubs (forwarded as-is from collector) ────────────────────────
-    // null = not yet probed
     bool        is_ip_only           = false;
     bool        smb_port_open        = false;
     bool        smb_signing_required = false;
@@ -370,7 +319,6 @@ struct ProcessedComputer {
     std::vector<std::string> ipv6_addresses;
     bool        net_probed = false; // true when SMB probe fields are present in collector output
 
-    // ── Timestamps ────────────────────────────────────────────────────────────
     std::string when_created;
     std::string when_changed;
     std::string last_logon;
@@ -381,15 +329,6 @@ struct ProcessedComputer {
     std::string domain_name;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  ProcessedOU  — one OU object for domain_ous.ndjson
-//
-//  Extends the raw OUCollector output with:
-//    - managed_by_name resolution
-//    - GPO array passthrough and counts
-//    - privileged object counts
-//    - depth-aware risk scoring
-// ─────────────────────────────────────────────────────────────────────────────
 struct ProcessedOU {
     std::string name;
     std::string dn;
@@ -435,18 +374,6 @@ struct ProcessedOU {
     std::string when_changed;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  ProcessedGPO  — one GPO object for domain_gpos.ndjson
-//
-//  Extends the raw GPOCollector output (raw_gpos.ndjson) with:
-//    - owner_name     resolved from owner_sid via sid_to_dn_ + dn_to_sam_
-//    - risk_score     (0-100) composite from highvalue / link / ACL / version
-//    - high_risk      flag  (risk_score >= 40)
-//    - orphaned       flag  (linked_count == 0 — unlinked GPO)
-//
-//  Extension arrays (user_extensions / machine_extensions) are forwarded
-//  as raw JSON strings because they are already serialized in the collector.
-// ─────────────────────────────────────────────────────────────────────────────
 struct ProcessedGPO {
     // ── Identity ──────────────────────────────────────────────────────────────
     std::string name;              // CN-level GUID, e.g. {31B2F340-...}
@@ -498,38 +425,15 @@ struct ProcessedGPO {
     bool                     orphaned     = false; // linked_count == 0
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  OfflineProcessorOptions
-// ─────────────────────────────────────────────────────────────────────────────
 struct OfflineProcessorOptions {
-    std::string raw_dir    = "raw_cache";   // raw_users.ndjson, raw_groups.ndjson, raw_aces.ndjson
+    std::string raw_dir    = "raw_cache";   // raw_users.jsonl, raw_groups.jsonl, raw_aces.jsonl
     std::string output_dir = "Domain Objects";
     std::string domain_name;               // optional — read from raw_users if empty
-    std::string output_ext = "ndjson";     // "ndjson" (default) or "json"
+    std::string output_ext = "jsonl";     // "jsonl" (default) or "json"
     std::string target_cidr;               // optional — scanned CIDR (e.g. "192.168.1.0/24")
                                            // used by NetworkProcessor for gateway detection
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  OfflineProcessor
-//
-//  No LDAP queries.
-//  Reads raw JSON files from raw_cache/,
-//  computes all analyses in RAM (admin rules, delegation, encryption,
-//  nested group membership, ACE-based rights),
-//  writes results under Domain Objects/.
-//
-//  Output files:
-//    domain_users.ndjson
-//    domain_groups.ndjson
-//    domain_aces.ndjson           ← flat NDJSON, one ACE per line
-//    domain_computers.ndjson      ← flat NDJSON, one computer per line
-//    domain_ous.ndjson
-//    domain_gpos.ndjson           ← flat NDJSON, one GPO per line
-//    domain_network.ndjson        ← flat NDJSON, one host per line
-//    domain_cert_templates.ndjson ← flat NDJSON, one template per line (ESC flags)
-//    domain_pki_objects.ndjson    ← flat NDJSON, one PKI object per line (ESC5)
-// ─────────────────────────────────────────────────────────────────────────────
 class OfflineProcessor {
 public:
     explicit OfflineProcessor() = default;
@@ -549,19 +453,6 @@ public:
     bool process_domaininfo   (const OfflineProcessorOptions& opts = {});
     bool process_trusts       (const OfflineProcessorOptions& opts = {});
 
-    // ── MAC vendor enrichment ─────────────────────────────────────────────────
-    //
-    //  Reads a network NDJSON file, resolves each host's MAC address against
-    //  oui_database.h and injects two new fields into every line:
-    //    "oui_vendor"      — vendor name  (e.g. "Cisco Systems", empty if not found)
-    //    "oui_device_type" — type string  (e.g. "Router", "Phone", "Unknown")
-    //
-    //  Overload (1): explicit paths — in_path and out_path may be the same file
-    //                (enrichment is done via an in-memory buffer, safe for in-place use)
-    //  Overload (2): opts — resolves paths the same way as process_network():
-    //                  in:  raw_dir  / raw_network.ndjson
-    //                  out: output_dir / domain_network.<ext>
-    //
     bool enrich_network_mac_vendors(const std::string& in_path,
                                     const std::string& out_path) const;
     bool enrich_network_mac_vendors(const OfflineProcessorOptions& opts = {}) const;
@@ -596,6 +487,8 @@ private:
     std::vector<RawAceEntry> domain_root_aces_;
     // AdminSDHolder ACEs
     std::vector<RawAceEntry> adminsdholder_aces_;
+    // Configuration NC ACEs — DCSync GUIDs can live here too (Rules 4 & 7)
+    std::vector<RawAceEntry> config_nc_aces_;
     // DC object ACEs  — DN (upper) → ACE list
     // Rule 9: for checking msDS-KeyCredentialLink write on DC objects
     std::unordered_map<std::string, std::vector<RawAceEntry>> dc_object_aces_;
@@ -636,30 +529,6 @@ private:
     void         analyze_gpo_risk     (ProcessedGPO& g) const;
     std::string  gpo_to_json          (const ProcessedGPO& g) const;
 
-    // ── Certificate template processing ──────────────────────────────────────
-    //
-    //  load_and_process_cert_templates:
-    //    Reads raw_cert_templates.ndjson (from CertificateCollector).
-    //    For each template:
-    //      - Decodes msPKI integer flags (enrollment, name, private key)
-    //      - Parses ACEs from nt_security_descriptor_hex
-    //      - Identifies enroll/write principals (non-admin SIDs)
-    //      - Computes ESC1/ESC2/ESC3/ESC4/ESC9/ESC15 flags
-    //      - Assigns risk_label: "CRITICAL" | "HIGH" | "MEDIUM" | "INFO" | ""
-    //    Writes domain_cert_templates.ndjson (one template per line).
-    //
-    //  load_and_process_pki_objects:
-    //    Reads raw_pki_objects.ndjson (from CertificateCollector).
-    //    For each PKI infrastructure object (Enrollment Services, NTAuthCertificates,
-    //    Certification Authorities, AIA, CDP):
-    //      - Parses ACEs from nt_security_descriptor_hex
-    //      - Identifies non-admin SIDs with write rights (ESC5 indicator)
-    //      - Appends: esc5_indicator, esc5_write_principals, enroll_principals
-    //    Writes domain_pki_objects.ndjson (one object per line).
-    //
-    //  ESC6/7/8/11 require RPC data (raw_ca_rpc.ndjson) — forwarded as-is
-    //  from the RPC collection stage when present.
-    //
     bool load_and_process_cert_templates(const std::string& raw_path,
                                          const std::string& out_path) const;
     bool load_and_process_pki_objects   (const std::string& raw_path,
@@ -700,6 +569,10 @@ private:
     // ACE helper
     static bool ace_has_dangerous_right(const RawAceEntry& ace,
                                         const std::set<std::string>& ids);
+    static bool is_dangerous_right   (const std::string& right);
+    static bool is_extended_right    (const std::string& right);
+    static bool ace_has_any_dangerous(const ProcessedAce& a);
+    static bool ace_has_any_extended (const ProcessedAce& a);
 
     // ── Group processing ──────────────────────────────────────────────────
     bool load_and_process_groups(const std::string& raw_path,
@@ -707,19 +580,6 @@ private:
     ProcessedGroup parse_raw_group(const std::string& json_obj) const;
     void           compute_group_stats(ProcessedGroup& g) const;
 
-    // ── ACE processing ────────────────────────────────────────────────────
-    //
-    //  load_and_process_aces:
-    //    Reads raw_aces.ndjson.
-    //    For each ACE:
-    //      - SID → name lookup (sid_to_dn_ + dn_to_sam_)
-    //      - trustee type determination
-    //      - mask → human-readable rights labels
-    //      - dangerous right detection
-    //      - GUID → known name (from well-known AD GUID table)
-    //    Writes result to domain_aces.ndjson (flat NDJSON, one ACE per line).
-    //    ZIP compression is not applied at this stage — all output files are compressed together downstream.
-    //
     bool load_and_process_aces(const std::string& raw_path,
                                const std::string& out_path);
 
@@ -756,7 +616,7 @@ private:
     // Well-known AD GUID table — static
     static const std::string& guid_to_name(const std::string& guid);
 
-    // Parses one "objects" array element from raw_aces.ndjson and returns a raw ACE list
+    // Parses one "objects" array element from raw_aces.jsonl and returns a raw ACE list
     // (different from load_raw_aces_lookup — works for ALL objects)
     static std::vector<RawAceEntry> parse_aces_block(const std::string& block);
 
@@ -770,17 +630,11 @@ private:
     //  Returns true if out_path ends with ".json" (exact JSON array output).
     static bool is_json_ext(const std::string& out_path);
 
-    //  Writes a vector of pre-serialized JSON object strings to out_path.
-    //  If out_path ends with ".json" → pretty-printed JSON array  [ {...},\n  {...} ]
-    //  Otherwise                     → NDJSON (one object per line, no wrapper)
     static bool write_objects(std::ofstream& out,
                               const std::vector<std::string>& rows,
                               const std::string& out_path,
                               const std::string& log_tag);
 
-    // ── NDJSON / Parquet serialization ────────────────────────────────────
-    bool write_aces_parquet(const std::vector<ProcessedAceObject>& objects,
-                            const std::string& out_path) const;
 
     static std::string json_admin_rules (const std::vector<PAdminRule>& rules);
     static std::string json_rule_detail (const PAdminRuleDetail& d);

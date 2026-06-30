@@ -1,14 +1,12 @@
 /* ============================================================
-   misc.css — animasiya, scrollbar, .toast, .spinner,
-              .locked-overlay, .loading-ring
+   misc.css — Gold Edition
    ============================================================ */
 
-/* Scrollbar */
 ::-webkit-scrollbar       { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
 
-/* Utility animations */
 .fade-in { animation: fade-in 0.2s ease; }
 
 @keyframes fade-in {
@@ -23,7 +21,6 @@
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Loading spinner */
 .spinner {
     width: 14px; height: 14px;
     border: 2px solid var(--border-hi);
@@ -33,7 +30,6 @@
     display: inline-block;
 }
 
-/* Shared loading ring (used in users/computers/etc.) */
 .loading-ring {
     width: 32px; height: 32px;
     border: 2px solid var(--border-hi);
@@ -42,7 +38,7 @@
     animation: spin 0.6s linear infinite;
 }
 
-/* Toast notifications */
+/* Toast */
 .toast-container {
     position: fixed;
     bottom: 24px;
@@ -67,8 +63,8 @@
     min-width: 260px;
 }
 
-.toast.success { border-left: 3px solid var(--green); }
-.toast.error   { border-left: 3px solid var(--red); }
+.toast.success { border-left: 3px solid var(--accent); }
+.toast.error   { border-left: 3px solid #c07820; }
 .toast.info    { border-left: 3px solid var(--accent); }
 
 @keyframes toast-in {
@@ -76,7 +72,6 @@
     to   { opacity: 1; transform: translateX(0); }
 }
 
-/* Locked overlay for disabled tabs */
 .locked-overlay {
     display: flex;
     flex-direction: column;

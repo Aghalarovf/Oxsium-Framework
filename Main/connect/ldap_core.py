@@ -32,12 +32,12 @@ def _normalize_ldap_target(value: str) -> str:
     return target
 
 SEARCH_QUERIES: dict[str, str] = {
-    "users":     "(&(objectClass=user)(objectCategory=person))",
-    "computers": "(objectClass=computer)",
     "groups":    "(objectClass=group)",
-    "ous":       "(objectClass=organizationalUnit)",
     "gpos":      "(objectClass=groupPolicyContainer)",
+    "ous":       "(objectClass=organizationalUnit)",
     "trusts":    "(objectClass=trustedDomain)",
+    "computers": "(objectClass=computer)",
+    "users":     "(&(objectClass=user)(objectCategory=person))",
 }
 
 
@@ -386,12 +386,12 @@ def _collect_counts_via_enumeration_fallback(req: dict) -> dict[str, int]:
 
     counts = {k: 0 for k in ("users", "computers", "groups", "ous", "gpos", "trusts")}
     mapping = [
-        ("users",     users_mod.get_domain_users),
-        ("computers", computers_mod.get_domain_computers),
         ("groups",    groups_mod.get_domain_groups),
         ("ous",       ou_mod.get_domain_ous),
         ("gpos",      gpo_mod.get_domain_gpos),
         ("trusts",    trust_mod.get_domain_trusts),
+        ("computers", computers_mod.get_domain_computers),
+        ("users",     users_mod.get_domain_users),
     ]
 
     for key, enum_fn in mapping:

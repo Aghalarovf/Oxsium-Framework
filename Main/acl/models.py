@@ -22,7 +22,7 @@ class AclFilterConfig:
     exclude_inherited:          bool      = False
     exclude_default:            bool      = False
     interesting_only:           bool      = False
-    exclude_inherited_defaults: bool      = True
+    exclude_inherited_defaults: bool      = False
     rights_filter:              list[str] = field(default_factory=list)
     principal_filter:           str       = ""
     target_filter:              str       = ""
@@ -47,7 +47,6 @@ class SecurityDescriptorParser(Protocol):
 
 
 class ObjectScope(str, Enum):
-    """ACL toplama zamanı hədəf obyektlər dəstini müəyyən edir."""
     SECURITY_PRINCIPALS = "security_principals"
     NAMED_CONTAINERS    = "named_containers"
     GPO                 = "gpo"

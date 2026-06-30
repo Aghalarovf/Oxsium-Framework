@@ -1,5 +1,5 @@
 /* ============================================================
-   acl.css — ACL tab specific styles
+   acl.css — Gold Edition
    ============================================================ */
 
 .acl-wrap    { display: flex; flex-direction: column; gap: 15px; height: 100%; }
@@ -72,8 +72,7 @@
     background: var(--bg-base);
     color: var(--text-dim);
     border-radius: 4px;
-    width: 18px;
-    height: 18px;
+    width: 18px; height: 18px;
     font-size: 11px;
     line-height: 1;
     cursor: pointer;
@@ -96,9 +95,7 @@
 .acl-cell-type      { flex: 0 0 110px; color: var(--text-dim); }
 
 .acl-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 40px; text-align: center; color: var(--text-dim); font-size: 12px; }
-
 .acl-detail { flex: 1; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-base); display: flex; flex-direction: column; overflow: hidden; }
-
 .acl-loading { position: absolute; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; gap: 12px; border-radius: 6px; }
 .acl-loading span { color: var(--text-sec); font-size: 11px; }
 
@@ -107,51 +104,51 @@
     .acl-object-filter-wrap { grid-column: 1 / -1; }
 }
 
-/* Dangerous rights — blood-red glow */
+/* Dangerous rights — qızıl xəbərdarlıq */
 .acl-row.dangerous {
-    border-left: 3px solid rgba(204, 26, 26, 0.9);
-    background: linear-gradient(90deg, rgba(180, 20, 20, 0.13), rgba(120, 10, 10, 0.10));
+    border-left: 3px solid rgba(192, 120, 20, 0.9);
+    background: linear-gradient(90deg, rgba(200,130,10,0.14), rgba(140,90,8,0.10));
     animation: acl-danger-pulse 1.7s ease-in-out infinite;
     position: relative;
 }
 
 .acl-row.dangerous:hover {
-    background: linear-gradient(90deg, rgba(204, 26, 26, 0.22), rgba(150, 15, 15, 0.18));
-    border-left-color: rgba(220, 30, 30, 1);
+    background: linear-gradient(90deg, rgba(240,192,48,0.20), rgba(175,115,12,0.16));
+    border-left-color: rgba(220,170,40,1);
 }
 
 .acl-row.dangerous.selected {
-    background: linear-gradient(90deg, rgba(204, 26, 26, 0.25), rgba(150, 15, 15, 0.20));
-    border-left-color: rgba(220, 50, 50, 1);
+    background: linear-gradient(90deg, rgba(240,192,48,0.22), rgba(175,115,12,0.18));
+    border-left-color: rgba(230,180,50,1);
 }
 
 .acl-row.dangerous .acl-cell-rights {
-    color: #e03030;
-    text-shadow: 0 0 8px rgba(204, 26, 26, 0.50);
+    color: #e0aa20;
+    text-shadow: 0 0 8px rgba(240,192,48,0.45);
 }
 
-/* Extended Critical — lighter red highlight */
+/* Extended Critical */
 .acl-row.extended-critical {
-    border-left: 3px solid rgba(180, 60, 60, 0.95);
-    background: linear-gradient(90deg, rgba(160, 40, 40, 0.16), rgba(120, 20, 20, 0.11));
-    box-shadow: inset 0 0 0 1px rgba(180, 60, 60, 0.12);
+    border-left: 3px solid rgba(210,150,20,0.95);
+    background: linear-gradient(90deg, rgba(185,130,15,0.16), rgba(100,70,10,0.11));
+    box-shadow: inset 0 0 0 1px rgba(210,150,20,0.10);
 }
 
 .acl-row.extended-critical:hover {
-    background: linear-gradient(90deg, rgba(180, 40, 40, 0.22), rgba(140, 20, 20, 0.15));
+    background: linear-gradient(90deg, rgba(210,150,20,0.22), rgba(160,105,12,0.15));
 }
 
 .acl-row.extended-critical.selected {
-    background: linear-gradient(90deg, rgba(180, 40, 40, 0.22), rgba(140, 20, 20, 0.16));
-    border-left-color: rgba(200, 80, 80, 1);
+    background: linear-gradient(90deg, rgba(210,150,20,0.22), rgba(160,105,12,0.16));
+    border-left-color: rgba(200,160,50,1);
 }
 
 .acl-row.extended-critical .acl-cell-rights {
-    color: #c85050;
-    text-shadow: 0 0 10px rgba(180, 40, 40, 0.40);
+    color: #c09030;
+    text-shadow: 0 0 10px rgba(210,150,20,0.38);
 }
 
 @keyframes acl-danger-pulse {
-    0%, 100% { box-shadow: inset 0 0 0 0 rgba(204, 26, 26, 0); }
-    50%       { box-shadow: inset 0 0 0 999px rgba(204, 26, 26, 0.07); }
+    0%, 100% { box-shadow: inset 0 0 0 0 rgba(240,192,48,0); }
+    50%       { box-shadow: inset 0 0 0 999px rgba(240,192,48,0.06); }
 }

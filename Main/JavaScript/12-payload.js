@@ -27,8 +27,12 @@ function switchPayloadTab(tab) {
   payloadState.activeTab = tab;
   document.getElementById('payload-agent').style.display  = tab === 'agent'  ? 'block' : 'none';
   document.getElementById('payload-beacon').style.display = tab === 'beacon' ? 'block' : 'none';
+  const serverPane = document.getElementById('payload-server');
+  if (serverPane) serverPane.style.display = tab === 'server' ? 'block' : 'none';
   document.getElementById('ptab-agent').className  = 'payload-tab-btn agent'  + (tab === 'agent'  ? ' active' : '');
   document.getElementById('ptab-beacon').className = 'payload-tab-btn beacon' + (tab === 'beacon' ? ' active' : '');
+  const serverBtn = document.getElementById('ptab-server');
+  if (serverBtn) serverBtn.className = 'payload-tab-btn server' + (tab === 'server' ? ' active' : '');
   addLog(`Payload tab switched → ${tab.toUpperCase()}`, 'info');
 }
 

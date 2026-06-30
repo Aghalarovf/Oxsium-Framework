@@ -21,12 +21,41 @@
 #define CLR_DIM     "\033[2m"
 
 // ─────────────────────────────────────────────
+//  Verbosity switch  (single source of truth)
+//
+//  TRUE  (default) — full mechanism trace: every collector / offline
+//                     processor step is printed, exactly like before.
+//  FALSE            — mechanism logs (log_info / log_ok) are suppressed.
+//                     Only warnings, errors, and explicit summary lines
+//                     (log_summary) are printed.
+//
+//  Toggle from the REPL with: set VERBOSE TRUE | FALSE
+// ─────────────────────────────────────────────
+inline bool& verbose_flag() {
+    static bool g_verbose = true;
+    return g_verbose;
+}
+inline void set_verbose(bool v) { verbose_flag() = v; }
+inline bool is_verbose()        { return verbose_flag(); }
+
+// ─────────────────────────────────────────────
 //  Log Helpers
+//
+//  log_info / log_ok   — mechanism / progress detail. Hidden when
+//                         verbose == false.
+//  log_warn / log_err  — always shown regardless of verbosity, since
+//                         problems should never be silently hidden.
+//  log_summary         — always shown regardless of verbosity. Used for
+//                         the short, human-readable one-line results
+//                         printed in non-verbose mode (e.g. "User module
+//                         completed — 55 users found").
 // ─────────────────────────────────────────────
 inline void log_info(const std::string& msg) {
+    if (!is_verbose()) return;
     std::cout << "\033[38;5;67m"  << "  [*] " << CLR_RESET << "\033[38;5;250m" << msg << CLR_RESET << "\n";
 }
 inline void log_ok(const std::string& msg) {
+    if (!is_verbose()) return;
     std::cout << "\033[38;5;28m"  << "  [+] " << CLR_RESET << "\033[38;5;250m" << msg << CLR_RESET << "\n";
 }
 inline void log_warn(const std::string& msg) {
@@ -34,6 +63,9 @@ inline void log_warn(const std::string& msg) {
 }
 inline void log_err(const std::string& msg) {
     std::cout << "\033[38;5;160m" << "  [-] " << CLR_RESET << "\033[38;5;250m" << msg << CLR_RESET << "\n";
+}
+inline void log_summary(const std::string& msg) {
+    std::cout << "\033[38;5;28m"  << "  [+] " << CLR_RESET << "\033[38;5;250m" << msg << CLR_RESET << "\n";
 }
 
 // ─────────────────────────────────────────────

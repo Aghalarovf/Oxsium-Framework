@@ -22,9 +22,9 @@ struct ComputerCollectorOptions {
 //  ComputerCollector  — Phase 1 / Extract
 //
 //  Single LDAP query: (&(objectClass=computer))
-//  Output: raw_computers.ndjson  — one computer object per line.
+//  Output: raw_computers.jsonl  — one computer object per line.
 //
-//  Output schema (raw_computers.ndjson):
+//  Output schema (raw_computers.jsonl):
 //
 //  {
 //    "computer_name"              : "DC01$",
@@ -95,8 +95,8 @@ private:
 
     std::vector<std::string> required_attrs() const;
 
-    // Converts one LDAP entry to an NDJSON line
-    std::string computer_to_ndjson(const LDAPEngine::AttrMap& entry,
+    // Converts one LDAP entry to a JSONL line
+    std::string computer_to_jsonl(const LDAPEngine::AttrMap& entry,
                                    const std::string& generated_at,
                                    int stale_days) const;
 

@@ -14,10 +14,12 @@ try:
 except ImportError:
     # Əgər connect config-inə çata bilmə, dəfault istifadə etməli
     class Config:
-        DOMAIN_OBJECT_DIR = Path(__file__).parent.parent.parent / "Main" / "Domain Object"
-        DOMAIN_ACES_PARQUET = DOMAIN_OBJECT_DIR / "domain_aces.parquet"
-        DOMAIN_EXTENDED_RIGHTS_JSON = DOMAIN_OBJECT_DIR / "domain_extended_rights.json"
-        DOMAIN_DANGEROUS_ACE_JSON = DOMAIN_OBJECT_DIR / "domain_dangerous_ace.json"
+        DOMAIN_OBJECT_DIR           = Path(__file__).parent.parent.parent / "Main" / "Domain Object"
+        DOMAIN_ACES_JSON            = DOMAIN_OBJECT_DIR / "domain_aces.jsonl"
+        DOMAIN_DEEP_SCAN_JSON       = DOMAIN_OBJECT_DIR / "domain_deep_scan.jsonl"
+        DOMAIN_TEMPLATE_ACLS_JSON   = DOMAIN_OBJECT_DIR / "domain_template_acls.jsonl"
+        DOMAIN_EXTENDED_RIGHTS_JSON = DOMAIN_OBJECT_DIR / "domain_extended_rights.jsonl"
+        DOMAIN_DANGEROUS_ACE_JSON   = DOMAIN_OBJECT_DIR / "domain_dangerous_ace.jsonl"
 
 from .constants import (
     DANGEROUS_RIGHTS,
@@ -39,31 +41,30 @@ from .collector import AclCollector
 
 
 
-def _write_acls_to_parquet(acl_result: dict, output_path: str) -> str:
-    try:
-        import pandas as pd
-    except ImportError as e:
-        raise ImportError(
+def _write_jsonl(records: list[dict], output_path: str) -> str:
+    """Hər record-u öz sətrində JSON obyekti kimi yazır (JSON Lines / .jsonl)."""
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as fh:
+        for record in records:
+            fh.write(json.dumps(record, ensure_ascii=False, default=str))
+            fh.write("\n")
+    return output_path
 
-        ) from e
 
+def _write_acls_to_jsonl(acl_result: dict, output_path: str) -> str:
     records = acl_result.get("acls")
     if records is None:
         raise ValueError("acl_result['acls'] is missing or None")
+    return _write_jsonl(records, output_path)
 
-    df = pd.DataFrame(records)
 
-    for col in df.columns:
-        if df[col].dtype == object:
-            sample = df[col].dropna()
-            if not sample.empty and isinstance(sample.iloc[0], list):
-                df[col] = df[col].apply(
-                    lambda v: json.dumps(v, ensure_ascii=False) if isinstance(v, list) else v
-                )
-
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    df.to_parquet(output_path, index=False, engine="pyarrow")
-    return output_path
+def _jsonl_name(config_attr: str, default_name: str) -> str:
+    """Config-də müvafiq atribut varsa onun fayl adını qaytarır;
+    yoxdursa default_name qaytarır. Bütün yollar artıq .jsonl-dir."""
+    _path = getattr(Config, config_attr, None)
+    if _path is None:
+        return default_name
+    return _path.name
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -77,7 +78,7 @@ def get_domain_acls(
     password: str,
     config,
     acl_filter: Optional[AclFilterConfig] = None,
-    scope: ObjectScope = ObjectScope.SECURITY_PRINCIPALS,
+    scope: ObjectScope = ObjectScope.DEEP_SCAN,
     custom_filter: str = "",
     resolve_guids: bool = False,
 ) -> dict:
@@ -138,7 +139,7 @@ def get_domain_acls(
                 pass
 
 
-def collect_all_aces_to_parquet(
+def collect_all_aces_to_json(
     ip: str,
     domain: str,
     username: str,
@@ -152,7 +153,7 @@ def collect_all_aces_to_parquet(
     if output_dir is None:
         output_dir = str(Config.DOMAIN_OBJECT_DIR)
     if filename is None:
-        filename = "domain_aces.parquet"
+        filename = _jsonl_name("DOMAIN_ACES_JSON", "domain_aces.jsonl")
 
 
     _no_filter = AclFilterConfig(
@@ -175,7 +176,7 @@ def collect_all_aces_to_parquet(
         password=password,
         config=config,
         acl_filter=_no_filter,
-        scope=ObjectScope.ALL_WITH_ACL, 
+        scope=ObjectScope.DEEP_SCAN,
     )
 
     if not result.get("success"):
@@ -185,17 +186,11 @@ def collect_all_aces_to_parquet(
     output_path = os.path.join(output_dir, filename)
 
     try:
-        _write_acls_to_parquet(result, output_path)
-    except ImportError as e:
-        return {
-            "success": False,
-            "error":   str(e),
-            "code":    500,
-        }
+        _write_acls_to_jsonl(result, output_path)
     except Exception as e:
         return {
             "success": False,
-            "error":   f"Error {e}",
+            "error":   f"JSONL yazma xətası: {e}",
             "code":    500,
         }
 
@@ -222,7 +217,7 @@ def check_sensitive_template_acls(
     if output_dir is None:
         output_dir = str(Config.DOMAIN_OBJECT_DIR)
     if filename is None:
-        filename = "domain_template_acls.json"
+        filename = _jsonl_name("DOMAIN_TEMPLATE_ACLS_JSON", "domain_template_acls.jsonl")
 
     
     try:
@@ -326,23 +321,34 @@ def check_sensitive_template_acls(
                 "aces":               critical_aces + normal_aces,
             })
 
+        # Hər ACE-ni template metadata ilə birlikdə ayrı sətir kimi yaz (JSONL)
+        flat_records: list[dict] = []
+        for r in results:
+            for ace in r.get("aces", []):
+                flat_records.append({
+                    "template":           r["template"],
+                    "template_dn":        r["dn"],
+                    "template_exists":    r["exists"],
+                    "is_template_critical": ace.get("is_template_critical", False),
+                    **{k: v for k, v in ace.items() if k != "is_template_critical"},
+                })
+
         output = {
             "success":        True,
             "checked":        len(selected),
             "found":          sum(1 for r in results if r["exists"]),
             "critical_count": critical_count,
-            "results":        results,
+            "ace_count":      len(flat_records),
         }
 
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, filename)
         try:
-            with open(output_path, "w", encoding="utf-8") as fh:
-                json.dump(output, fh, ensure_ascii=False, indent=2, default=str)
+            _write_jsonl(flat_records, output_path)
             output["output_file"] = output_path
         except Exception as write_exc:
-            output["output_file"]        = ""
-            output["json_export_error"]  = str(write_exc)
+            output["output_file"]       = ""
+            output["json_export_error"] = str(write_exc)
 
         return output
 
@@ -370,7 +376,7 @@ def deep_scan_domain_acls(
     if output_dir is None:
         output_dir = str(Config.DOMAIN_OBJECT_DIR)
     if filename is None:
-        filename = "domain_deep_scan.parquet"
+        filename = _jsonl_name("DOMAIN_DEEP_SCAN_JSON", "domain_deep_scan.jsonl")
 
     _no_filter = AclFilterConfig(
         exclude_inherited          = False,
@@ -402,11 +408,9 @@ def deep_scan_domain_acls(
     output_path = os.path.join(output_dir, filename)
 
     try:
-        _write_acls_to_parquet(result, output_path)
-    except ImportError as e:
-        return {"success": False, "error": str(e), "code": 500}
+        _write_acls_to_jsonl(result, output_path)
     except Exception as e:
-        return {"success": False, "error": f"Parquet yazma xətası: {e}", "code": 500}
+        return {"success": False, "error": f"JSONL yazma xətası: {e}", "code": 500}
 
     return {
         "success":     True,
@@ -426,9 +430,9 @@ def dangerous_ace(
     if output_dir is None:
         output_dir = str(Config.DOMAIN_OBJECT_DIR)
     if dangerous_filename is None:
-        dangerous_filename = "domain_dangerous_ace.json"
+        dangerous_filename = _jsonl_name("DOMAIN_DANGEROUS_ACE_JSON", "domain_dangerous_ace.jsonl")
     if extended_filename is None:
-        extended_filename = "domain_extended_rights.json"
+        extended_filename = _jsonl_name("DOMAIN_EXTENDED_RIGHTS_JSON", "domain_extended_rights.jsonl")
 
     
     if not acl_result.get("success"):
@@ -476,11 +480,8 @@ def dangerous_ace(
     dangerous_path = os.path.join(output_dir, dangerous_filename)
     extended_path  = os.path.join(output_dir, extended_filename)
 
-    with open(dangerous_path, "w", encoding="utf-8") as fh:
-        json.dump(dangerous_records, fh, ensure_ascii=False, indent=2)
-
-    with open(extended_path, "w", encoding="utf-8") as fh:
-        json.dump(extended_records, fh, ensure_ascii=False, indent=2)
+    _write_jsonl(dangerous_records, dangerous_path)
+    _write_jsonl(extended_records, extended_path)
 
     return {
         "dangerous_count": len(dangerous_records),

@@ -19,7 +19,7 @@ struct GroupCollectorOptions {
 // ─────────────────────────────────────────────────────────────────────────────
 //  GroupCollector  — Phase 1 / Extract
 //
-//  Output schema (raw_groups.ndjson) — hər sətir bir qrup:
+//  Output schema (raw_groups.jsonl) — hər sətir bir qrup:
 //
 //  {
 //    "name"                   : "Administrators",
@@ -46,7 +46,7 @@ struct GroupCollectorOptions {
 //    "generated_at"           : "2026-05-29T07:50:45Z"
 //  }
 //
-//  Bu schema domain_groups.ndjson ilə uyğundur.
+//  Bu schema domain_groups.jsonl ilə uyğundur.
 //  Tranzitiv üzvlük OfflineProcessor tərəfindən lokalda DFS ilə hesablanır.
 // ─────────────────────────────────────────────────────────────────────────────
 class GroupCollector {
@@ -70,8 +70,8 @@ private:
         std::vector<std::string> direct_member_dns;
     };
 
-    // Bir GroupRecord-u NDJSON sətrinə çevirir
-    std::string group_to_ndjson(const GroupRecord& g,
+    // Bir GroupRecord-u JSONL sətrinə çevirir
+    std::string group_to_jsonl(const GroupRecord& g,
                                 const std::string& generated_at) const;
 
     // groupType int → "Security / Domain Local" kimi string

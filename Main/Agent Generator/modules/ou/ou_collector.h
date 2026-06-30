@@ -22,9 +22,9 @@ struct OUCollectorOptions {
 //    1. SUBTREE  (&(objectClass=organizationalUnit))  — all OU objects
 //    2. Per-OU LEVEL queries for direct child OU DNs  (child_ous)
 //
-//  Output: raw_ous.ndjson  — one OU object per line.
+//  Output: raw_ous.jsonl  — one OU object per line.
 //
-//  Output schema (raw_ous.ndjson):
+//  Output schema (raw_ous.jsonl):
 //
 //  {
 //    "name"                   : "Sales",
@@ -81,8 +81,8 @@ private:
 
     std::vector<std::string> required_attrs() const;
 
-    // Converts one LDAP entry to an NDJSON line
-    std::string ou_to_ndjson(const LDAPEngine::AttrMap& entry,
+    // Converts one LDAP entry to an JSONL line
+    std::string ou_to_jsonl(const LDAPEngine::AttrMap& entry,
                               const std::string& domain_sid,
                               const std::string& generated_at) const;
 
