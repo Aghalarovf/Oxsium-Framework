@@ -1,4 +1,4 @@
-# & "c:\Users\senag\Desktop\Decision Engine\.venv\bin\python.exe" .\Helpers\root_principal.py server 5000
+# & "c:\Users\senag\Desktop\Decision Engine\.venv\bin\python.exe" .\Helpers\root_principal.py server 30101
 
 import json
 import platform
@@ -6,8 +6,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from setproctitle import setproctitle
+    setproctitle("Oxsium:Decision Engine")
+except ImportError:
+    pass
 
-PORT = 5100
+
+PORT = 30101
 
 
 def resolve_graph_engine_executable(base_dir) -> Path:
@@ -216,7 +222,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Root principal helper API")
     parser.add_argument("mode", nargs="?", choices=["server", "test"], default="server", help="Run mode: 'server' (default) or 'test'")
-    parser.add_argument("-p", "--port", type=int, default=PORT, help="Port to listen on (default: 5100)")
+    parser.add_argument("-p", "--port", type=int, default=PORT, help="Port to listen on (default: 30101)")
     parser.add_argument("-i", "--ip-address", dest="ip_address", default="127.0.0.1",
                         help="IP address/interface to bind to (default: 127.0.0.1). Use 0.0.0.0 to expose on all interfaces.")
     args = parser.parse_args()

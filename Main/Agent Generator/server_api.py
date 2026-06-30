@@ -28,6 +28,12 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
+try:
+    from setproctitle import setproctitle
+    setproctitle("Oxsium:Central Server")
+except ImportError:
+    pass
+
 from connect.config import Config
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -52,7 +58,7 @@ class ServerConfig:
     """
     # Listener
     host:             str  = os.getenv("SRV_HOST",     "0.0.0.0")
-    port:             int  = int(os.getenv("SRV_PORT",  "4444"))
+    port:             int  = int(os.getenv("SRV_PORT",  "30103"))
 
     # Auth
     auth_method:      str  = os.getenv("SRV_AUTH",     "token")   # token|mtls|psk|cert

@@ -11,6 +11,12 @@ from pathlib import Path
 
 from flask import Flask, g, jsonify, request
 
+try:
+    from setproctitle import setproctitle
+    setproctitle("Oxsium:DB Server")
+except ImportError:
+    pass
+
 PARENT_TABLES: dict[str, dict[str, str]] = {
     "users":     {"label": "Users",     "name_col": "username"},
     "computers": {"label": "Computers", "name_col": "computer_name"},
@@ -539,8 +545,8 @@ Endpoints:
     )
     parser.add_argument("db_path", help="Path to the .db file")
     parser.add_argument(
-        "--port", type=int, default=8800,
-        help="Bind port (default: 8800)",
+        "--port", type=int, default=30104,
+        help="Bind port (default: 30104)",
     )
 
     args = parser.parse_args(argv)

@@ -35,7 +35,7 @@ def _cmd_root(fp: Path):
                          "--port", str(p), "--ip-address", h]
 
 def _cmd_certificate(fp: Path):
-    return lambda h, p: [str(PYTHON), "-u", str(fp)]
+    return lambda h, p: [str(PYTHON), "-u", str(fp), "--host", h, "--port", str(p)]
 
 def _cmd_server_api(fp: Path):
     return lambda h, p: [str(PYTHON), "-u", str(fp), "--host", h, "--port", str(p)]

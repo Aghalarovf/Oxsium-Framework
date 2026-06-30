@@ -107,9 +107,9 @@ def _schedule_db_build() -> None:
 # HTTP üzərindən salt-oxuma rejimində serverə qoyur). Bu proses connection.py
 # tərəfindən AVTOMATİK başladılmır -- sqlite_reader.py manual olaraq əl ilə
 # (məs. ayrıca terminal/prosesdən) işə salınmalıdır:
-#   python sqlite_reader.py <domain_data.db yolu> --port 8800
+#   python sqlite_reader.py <domain_data.db yolu> --port 30104
 SQLITE_READER_HOST = "127.0.0.1"
-SQLITE_READER_PORT = int(os.getenv("SQLITE_READER_PORT", 8800))
+SQLITE_READER_PORT = int(os.getenv("SQLITE_READER_PORT", 30104))
 SQLITE_READER_BASE = f"http://{SQLITE_READER_HOST}:{SQLITE_READER_PORT}"
 
 
@@ -117,6 +117,12 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+
+try:
+    from setproctitle import setproctitle
+    setproctitle("Oxsium:LDAP Engine")
+except ImportError:
+    pass
 
 # ── Main package imports ──────────────────────────────────────────────────────────
 from user import users_dump as users
@@ -2292,7 +2298,7 @@ def build_sqlite_db():
 if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
-        port=int(os.getenv("PORT", 5000)),
+        port=int(os.getenv("PORT", 30100)),
         debug=False,
         use_reloader=False,
     )

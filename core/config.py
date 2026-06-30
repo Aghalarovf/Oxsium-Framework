@@ -29,12 +29,22 @@ FILES: dict[str, Path] = {
 }
 
 DEFAULT_PORTS: dict[str, int] = {
-    "connection":    5000,
-    "root":          5100,
-    "certificate":   5200,
-    "server_api":    5300,
-    "sqlite_reader": 8800,
-    "http":          8000,
+    "connection":    30100,
+    "root":          30101,
+    "certificate":   30102,
+    "server_api":    30103,
+    "sqlite_reader": 30104,
+    "http":          30200,
+}
+
+# setproctitle ilə hər servisin proses adı (bax: əlaqəli servis skriptləri)
+PROC_TITLES: dict[str, str] = {
+    "connection":    "Oxsium:LDAP Engine",
+    "root":          "Oxsium:Decision Engine",
+    "certificate":   "Oxsium:AD CS Enumeration",
+    "server_api":    "Oxsium:Central Server",
+    "sqlite_reader": "Oxsium:DB Server",
+    "web":           "Oxsium:Web Panel",
 }
 
 # sqlite_reader-in oxuyacağı domain_data.db faylının yolu.

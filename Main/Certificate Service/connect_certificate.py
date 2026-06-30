@@ -3,7 +3,7 @@
 Oxsium Certificate Service Flask API
 Receives user credentials from GUI, runs template_enumeration.py, and returns results.
 
-Port: 5005
+Port: 30102 (default; overridable with --port)
 Endpoints:
   - POST /api/certificate/enumerate
   - POST /api/certificate/saved-users
@@ -21,7 +21,15 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
+try:
+    from setproctitle import setproctitle
+    setproctitle("Oxsium:AD CS Enumeration")
+except ImportError:
+    pass
+
 # ── Configuration ──────────────────────────────────────────────────────────
+
+DEFAULT_PORT = int(os.getenv("PORT", "30102"))
 
 app = Flask(__name__)
 CORS(app)
@@ -335,7 +343,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'service': 'Oxsium Certificate API',
-        'port': 5005
+        'port': DEFAULT_PORT
     }), 200
 
 
@@ -360,7 +368,15 @@ def server_error(error):
 # ── Main ──────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    print(f"[*] Oxsium Certificate Service API starting on http://127.0.0.1:5005")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Oxsium Certificate Service API")
+    parser.add_argument('-p', '--port', type=int, default=DEFAULT_PORT,
+                         help=f"Bind port (default: {DEFAULT_PORT})")
+    parser.add_argument('--host', default='127.0.0.1', help="Bind host (default: 127.0.0.1)")
+    args = parser.parse_args()
+
+    print(f"[*] Oxsium Certificate Service API starting on http://{args.host}:{args.port}")
     print(f"[*] Modules directory: {CERT_SERVICE_MODULES_DIR}")
     print(f"[*] Saved users DB: {SAVED_USERS_DB}")
-    app.run(host='127.0.0.1', port=5005, debug=False, threaded=True)
+    app.run(host=args.host, port=args.port, debug=False, threaded=True)
