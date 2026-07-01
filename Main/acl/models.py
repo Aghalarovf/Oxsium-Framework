@@ -6,14 +6,14 @@ from typing import Protocol, runtime_checkable
 class LdapConfig:
     connect_timeout: int = 10
     receive_timeout: int = 30
-    page_size:       int = 200
+    page_size:       int = 1000
 
     @classmethod
     def from_app_config(cls, config) -> "LdapConfig":
         return cls(
             connect_timeout=getattr(config, "LDAP_CONNECT_TIMEOUT", 10),
             receive_timeout=getattr(config, "LDAP_RECEIVE_TIMEOUT", 30),
-            page_size=getattr(config, "LDAP_PAGE_SIZE", 200),
+            page_size=getattr(config, "LDAP_PAGE_SIZE", 1000),
         )
 
 

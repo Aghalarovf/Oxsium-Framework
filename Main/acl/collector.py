@@ -90,7 +90,7 @@ class AclCollector:
         conn: LdapBackend,
         base_dn: str,
         parser: SecurityDescriptorParser,
-        page_size: int = 200,
+        page_size: int = 1000,
         guid_map: dict[str, str] | None = None,
     ) -> None:
         self._conn         = conn
@@ -207,22 +207,24 @@ class AclCollector:
 
             seen_dns: set[str] = set()
 
+            # Tək mərhələli toplama: nTSecurityDescriptor və SD control-u birbaşa
+            # paged SUBTREE sorğusuna qatırıq (ldapsearch-in etdiyi kimi).
+            # Əvvəlki versiya hər DN üçün ayrıca BASE search açırdı (N+1
+            # problemi) — bu, min-lərlə obyektdə saniyələri dəqiqələrə çevirirdi.
             for base in effective_bases:
 
-                dn_entries = _paged_search(
+                sd_entries = _paged_search(
                     self._conn, base, ldap_filter,
-                    attributes=["distinguishedName", "objectClass",
-                                "name", "whenChanged"],
+                    attributes=["distinguishedName", "objectClass", "name",
+                                "whenChanged", "objectSid", "nTSecurityDescriptor"],
                     page_size=self._page_size,
                     search_scope="SUBTREE",
+                    extra_controls=[sd_ctrl],
                 )
-                # Mərhələ 2: Hər DN üçün ayrıca BASE sorğusu ilə SD oxu.
-                # Yalnız nTSecurityDescriptor raw_values mövcud olan obyektlər
-                # işlənir — atributu olmayan (məs. silinmiş, irsiyyət olmayan)
-                # obyektlər avtomatik keçilir.
-                for meta_entry in dn_entries:
+
+                for sd_entry in sd_entries:
                     dn = str(normalize_value(
-                        getattr(meta_entry, "distinguishedName", None)) or "")
+                        getattr(sd_entry, "distinguishedName", None)) or "")
                     if not dn:
                         continue
                     # DN deduplication — eyni obyekti bir neçə search bazasından gələndə
@@ -231,16 +233,6 @@ class AclCollector:
                         continue
                     seen_dns.add(dn)
 
-                    self._conn.search(
-                        dn, "(objectClass=*)",
-                        search_scope="BASE",
-                        attributes=["name", "distinguishedName", "objectClass",
-                                    "whenChanged", "objectSid", "nTSecurityDescriptor"],
-                        controls=sd_ctrl_norm,
-                    )
-                    if not self._conn.entries:
-                        continue
-                    sd_entry   = self._conn.entries[0]
                     raw_values = getattr(
                         getattr(sd_entry, "nTSecurityDescriptor", None),
                         "raw_values", None
