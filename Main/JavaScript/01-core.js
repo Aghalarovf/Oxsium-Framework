@@ -340,7 +340,7 @@ async function runDeepDiscoveryCounts() {
   await _sleep(3500); // debounced DB build (~3s) üçün gözləmə
   const dbReady = await _waitForDbReaderReady(60000, 1000);
   if (!dbReady) {
-    addLog('sqlite_reader.py (8800) gözlənilən müddətdə hazır olmadı — bəzi bölmələr köhnə/boş qala bilər', 'error');
+    addLog('sqlite_reader.py (30104) gözlənilən müddətdə hazır olmadı — bəzi bölmələr köhnə/boş qala bilər', 'error');
   }
 
   /* ── Mərhələ 3: RENDER — YALNIZ sqlite_reader.py-dən (DB_READER_BASE) ──

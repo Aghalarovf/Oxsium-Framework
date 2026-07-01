@@ -4,12 +4,14 @@
    Must be loaded FIRST before all other scripts.
    ═══════════════════════════════════════════════════ */
 
-const API_BASE = 'http://localhost:5000';
+/* Must match core/config.py DEFAULT_PORTS["connection"] (connection.py). */
+const API_BASE = 'http://localhost:30100';
 
-/* Base URL of the sqlite_reader.py (port 8800) REST API — the Users section
+/* Base URL of the sqlite_reader.py (port 30104, see core/config.py
+   DEFAULT_PORTS["sqlite_reader"]) REST API — the Users section
    (and gradually other sections) uses this to read domain_data.db directly,
    without loading large JSON/JSONL files into browser memory. */
-const DB_BASE = 'http://localhost:8800';
+const DB_BASE = 'http://localhost:30104';
 
 /* ── Session State ── */
 let state = {
@@ -258,7 +260,7 @@ function resetEnumCacheFlags() {
 
 /* db_reader (sqlite_reader.py) runs on its own port as an independent
    service (see core/config.py DEFAULT_PORTS["sqlite_reader"]). */
-const DB_READER_BASE = 'http://localhost:8800';
+const DB_READER_BASE = 'http://localhost:30104';
 
 /* section -> table name in domain_data.db */
 const DB_READER_TABLE = {
@@ -338,7 +340,7 @@ function pollForDbReady(onReady, { intervalMs = 2000, timeoutMs = 5 * 60 * 1000 
       stopDbReadyPolling();
       state.connecting = false;
       showToast('Database preparation timed out', 'error');
-      addLog('DB-reader (8800) did not come up within the expected time', 'error');
+      addLog('DB-reader (30104) did not come up within the expected time', 'error');
       return;
     }
     const alive = await isDbReaderAlive();
@@ -352,7 +354,7 @@ function pollForDbReady(onReady, { intervalMs = 2000, timeoutMs = 5 * 60 * 1000 
 /**
  * Once the DB is ready, re-calls all tab functions. These loaders
  * (loadUsers, loadComputers, etc.) will already read and render
- * domain_data.db from port 8800 internally via tryLoadSnapshotSection() —
+ * domain_data.db from port 30104 internally via tryLoadSnapshotSection() —
  * here we only reset the cache flags so they don't fall into the
  * "snapshot already loaded" state.
  *
@@ -437,7 +439,7 @@ function handleConnectResponse(data) {
       state.justConnectedUntil = Date.now() + 5000;
       state.sessionStart = state.sessionStart || Date.now();
       showToast('Connection complete', 'success');
-      addLog('sqlite_reader.py (8800) is ready — loading tables', 'success');
+      addLog('sqlite_reader.py (30104) is ready — loading tables', 'success');
       refreshAllSectionsAfterConnect();
     });
     return;

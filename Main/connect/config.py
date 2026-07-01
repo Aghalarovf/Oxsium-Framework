@@ -40,12 +40,6 @@ class Config:
         "beacon": 22,
     }
 
-    # ── Service portları (backend HTTP servisləri) ─────────────────────────
-    # api            -> connection.py (collector orchestration, Flask, port 5000)
-    # sqlite_reader  -> sqlite_reader.py (read-only DB render servisi, port 8800)
-    # Frontend (00-global.js) bu adlarla bu qovluqdan asılıdır:
-    #   API_BASE       = http://localhost:{DEFAULT_PORTS["api"]}
-    #   DB_READER_BASE = http://localhost:{DEFAULT_PORTS["sqlite_reader"]}
     DEFAULT_PORTS: dict[str, int] = {
         "api":           int(os.getenv("API_PORT", 5000)),
         "sqlite_reader": int(os.getenv("SQLITE_READER_PORT", 8800)),
