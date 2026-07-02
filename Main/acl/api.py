@@ -2,7 +2,9 @@ import json
 import os
 import sys
 import threading
+import traceback
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -70,6 +72,47 @@ def _jsonl_name(config_attr: str, default_name: str) -> str:
     return _path.name
 
 
+def _capture_error(stage: str, context: str, exc: BaseException) -> dict:
+    """SRP: istənilən yerdə (api.py səviyyəsində) tutulan xətanı collector.py-
+    dəki `_record_error` ilə EYNİ formata salır ki, bütün xəta mənbələri
+    (LDAP bağlantısı, guid_map qurulması, fayl I/O, gözlənilməz istisnalar)
+    domain_aces.jsonl-in son metadata sətrində vahid formatda görünsün."""
+    return {
+        "stage":         stage,
+        "context":       context,
+        "error_type":    type(exc).__name__,
+        "error_message": str(exc),
+        "traceback":     traceback.format_exc(limit=20),
+    }
+
+
+def _build_metadata_record(result: dict, extra_errors: list[dict] | None = None) -> dict:
+    """domain_aces.jsonl-in son sətri kimi yazılacaq metadata obyektini qurur.
+    `result["meta"]["errors"]` (collector daxilində toplanmış bütün xətalar)
+    + `extra_errors` (api.py səviyyəsində, collector çağırışından kənarda
+    tutulan xətalar — məs. fayl açıla bilməməsi, guid_map qurula bilməməsi,
+    tamamilə gözlənilməz istisnalar) burada birləşdirilir ki, HANSI mərhələdə
+    baş versə belə, hər xəta bu yekun sətirdə tam (stage/context/error_type/
+    error_message/traceback) əks olunsun."""
+    meta   = dict(result.get("meta") or {})
+    errors = list(meta.get("errors") or [])
+    if extra_errors:
+        errors.extend(extra_errors)
+
+    return {
+        "_metadata":        True,
+        "generated_at":     datetime.now(timezone.utc).isoformat(),
+        "success":          bool(result.get("success")) and not extra_errors,
+        "top_level_error":  None if result.get("success") else result.get("error"),
+        "objects_with_sd":  meta.get("objects_with_sd", 0),
+        "aces_seen":        meta.get("aces_seen", 0),
+        "aces_exported":    meta.get("aces_exported", 0),
+        "aces_filtered":    meta.get("aces_filtered", 0),
+        "error_count":      len(errors),
+        "errors":           errors,
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Public API
 # ══════════════════════════════════════════════════════════════════════════════
@@ -90,10 +133,18 @@ def get_domain_acls(
     flt      = acl_filter or AclFilterConfig()
     ldap_cfg = LdapConfig.from_app_config(config)
 
+    # DÜZƏLİŞ: bu funksiyanın hər erkən çıxış nöqtəsi (parser, domain/bind
+    # parse, LDAP bind) indi `meta.errors` daxilində eyni formatda (stage/
+    # context/error_type/error_message/traceback) tam xəta təfərrüatı
+    # qaytarır. Əvvəllər yalnız qısa `error` sətri var idi — indi çağıran
+    # (məs. collect_all_aces_to_json) bunu birbaşa domain_aces.jsonl-in
+    # metadata sətrinə əlavə edə bilir.
     try:
         parser = ImpacketParser()
     except ImportError as e:
-        return {"success": False, "error": str(e), "code": 500}
+        err = _capture_error("init_parser", "ImpacketParser", e)
+        return {"success": False, "error": str(e), "code": 500,
+                "meta": {"error_count": 1, "errors": [err]}}
 
     auth_type = "NTLM" if is_ntlm_hash(password) else "SIMPLE"
     if auth_type == "NTLM":
@@ -103,7 +154,9 @@ def get_domain_acls(
         base_dn   = domain_to_dn(domain)
         bind_user = get_bind_user(username, domain)
     except ValueError as e:
-        return {"success": False, "error": str(e), "code": 400}
+        err = _capture_error("parse_domain", domain, e)
+        return {"success": False, "error": str(e), "code": 400,
+                "meta": {"error_count": 1, "errors": [err]}}
 
     conn = None
     try:
@@ -112,20 +165,32 @@ def get_domain_acls(
             LDAPSocketOpenError,
         )
         conn = Ldap3Backend(ip, bind_user, password, auth_type, ldap_cfg)
-    except LDAPInvalidCredentialsResult:
-        return {"success": False, "error": "Authentication failed", "code": 401}
-    except LDAPSocketOpenError:
-        return {"success": False, "error": "Cannot connect to LDAP server", "code": 503}
+    except LDAPInvalidCredentialsResult as e:
+        err = _capture_error("ldap_bind", f"{ip} user={bind_user}", e)
+        return {"success": False, "error": "Authentication failed", "code": 401,
+                "meta": {"error_count": 1, "errors": [err]}}
+    except LDAPSocketOpenError as e:
+        err = _capture_error("ldap_connect", ip, e)
+        return {"success": False, "error": "Cannot connect to LDAP server", "code": 503,
+                "meta": {"error_count": 1, "errors": [err]}}
     except Exception as e:
-        return {"success": False, "error": str(e), "code": 500}
+        err = _capture_error("ldap_bind", f"{ip} user={bind_user}", e)
+        return {"success": False, "error": str(e), "code": 500,
+                "meta": {"error_count": 1, "errors": [err]}}
 
+    # Collector yaradılmazdan ƏVVƏL (məs. guid_map qurularkən) baş verə
+    # biləcək xətalar da bu siyahıya yığılır və collector-a ötürülür ki,
+    # nəticədəki `meta.errors`-da itməsin — əvvəllər bu xəta sadəcə udulub
+    # `_guid_map = None` edilirdi, heç yerdə görünmürdü.
+    pre_errors: list[dict] = []
     try:
         _guid_map = None
         if resolve_guids:
             try:
                 _guid_map = _build_guid_map(conn, base_dn, page_size=ldap_cfg.page_size)
-            except Exception:
+            except Exception as e:
                 _guid_map = None
+                pre_errors.append(_capture_error("build_guid_map", base_dn, e))
 
         # 4 NC-nin paralel skan olunması üçün hər thread özünə ayrıca
         # bağlantı aça bilsin deyə (ldap3 Connection thread-safe deyil).
@@ -136,12 +201,20 @@ def get_domain_acls(
             page_size=ldap_cfg.page_size,
             guid_map=_guid_map,
             conn_factory=conn_factory,
+            initial_errors=pre_errors,
         )
+        # `collector.collect(...)` artıq öz daxilində HƏR bir xətanı tutur
+        # və heç vaxt istisna atmır (bax: collector.py `collect()`), ona görə
+        # aşağıdakı `except Exception` yalnız tamamilə gözlənilməz (collector
+        # instansiyası qurularkən və s.) hallar üçün son mühafizə xəttidir.
         return collector.collect(
             flt, scope=scope, custom_filter=custom_filter, on_records=on_records,
         )
     except Exception as e:
-        return {"success": False, "error": f"Internal error: {e}", "code": 500}
+        err = _capture_error("get_domain_acls_internal", base_dn, e)
+        errors = pre_errors + [err]
+        return {"success": False, "error": f"Internal error: {e}", "code": 500,
+                "meta": {"error_count": len(errors), "errors": errors}}
     finally:
         if conn is not None:
             try:
@@ -194,15 +267,38 @@ def collect_all_aces_to_json(
     try:
         out_fh = open(output_path, "w", encoding="utf-8")
     except Exception as e:
-        return {"success": False, "error": f"Fayl açıla bilmədi: {e}", "code": 500}
+        # Fayl heç açıla bilməyibsə, içinə metadata da yaza bilmərik —
+        # bu, YEGANƏ hal ki, xəta yalnız qaytarılan dict-də qalır.
+        err = _capture_error("open_output_file", output_path, e)
+        return {"success": False, "error": f"Fayl açıla bilmədi: {e}", "code": 500,
+                "meta": {"error_count": 1, "errors": [err]}}
+
+    # DƏYİŞİKLİK: streaming yazısı zamanı baş verə biləcək xətalar (məs.
+    # JSON-a çevrilə bilməyən bir sahə, disk dolması, I/O xətası) əvvəllər
+    # `on_records` çağırışından collector-a sızıb bütün müvafiq NC-nin
+    # taranmasını dayandırırdı, amma HEÇ yerdə görünmürdü. İndi burada da
+    # tutulur, `stream_errors`-a yazılır və son metadata sətrinə əlavə edilir.
+    stream_errors: list[dict] = []
 
     def _stream_write(records: list[dict]) -> None:
-        with write_lock:
-            for record in records:
-                out_fh.write(json.dumps(record, ensure_ascii=False, default=str))
-                out_fh.write("\n")
-            out_fh.flush()
+        try:
+            with write_lock:
+                for record in records:
+                    out_fh.write(json.dumps(record, ensure_ascii=False, default=str))
+                    out_fh.write("\n")
+                out_fh.flush()
+        except Exception as e:
+            stream_errors.append(_capture_error(
+                "stream_write", f"batch_size={len(records)}", e,
+            ))
 
+    # DÜZƏLİŞ: `get_domain_acls(...)` özü artıq (collector.collect() daxilində)
+    # istisna atmır, amma burada YENƏ DƏ try/except qoyulur — bu, "istənilən
+    # hansı xəta olur olsun" tələbinə cavab verən son mühafizə xəttidir: hətta
+    # tamamilə gözlənilməyən (məs. kod dəyişikliyindən sonra yeni bir bug) bir
+    # istisna belə bura sızsa, proses çökmür, sadəcə metadata sətrinə yazılır.
+    result: dict = {}
+    top_level_error: dict | None = None
     try:
         result = get_domain_acls(
             ip=ip,
@@ -214,17 +310,62 @@ def collect_all_aces_to_json(
             scope=ObjectScope.DEEP_SCAN,
             on_records=_stream_write,
         )
+    except Exception as e:
+        top_level_error = _capture_error("collect_all_aces_to_json", domain, e)
+        result = {"success": False, "error": str(e), "code": 500}
     finally:
+        # Metadata sətri fayl bağlanmazdan ƏVVƏL, .jsonl-in DAXİLİNDƏ son
+        # sətir kimi yazılır — istənilən hansı xəta olursa olsun (collector
+        # daxili, api.py səviyyəsi, streaming yazısı, tamamilə gözlənilməz),
+        # hamısı burada bir yerə toplanıb faylın özündə görünür. Bu, "success"
+        # olsa belə həmişə yazılır ki, qismən uğur/qismən xəta halları da
+        # (məs. 4 NC-dən biri uğursuz olsa) izlənilə bilsin.
+        extra_errors = stream_errors + ([top_level_error] if top_level_error else [])
+        try:
+            meta_record = _build_metadata_record(result, extra_errors=extra_errors)
+            with write_lock:
+                out_fh.write(json.dumps(meta_record, ensure_ascii=False, default=str))
+                out_fh.write("\n")
+                out_fh.flush()
+        except Exception:
+            # Metadata yazısının özü belə uğursuz olsa (məs. disk dolub),
+            # faylın bağlanmasına mane olmamalıdır — məlumat itkisi minimal
+            # saxlanılır, yenə də çağırana xəta strukturu qaytarılır.
+            pass
         out_fh.close()
 
+    if top_level_error:
+        return {
+            "success":     False,
+            "error":       top_level_error["error_message"],
+            "error_type":  top_level_error["error_type"],
+            "code":        500,
+            "output_file": output_path,
+            "meta": {
+                "error_count": len(extra_errors),
+                "errors":      extra_errors,
+            },
+        }
+
     if not result.get("success"):
+        result["output_file"] = output_path
+        meta = dict(result.get("meta") or {})
+        if stream_errors:
+            meta["errors"] = list(meta.get("errors") or []) + stream_errors
+            meta["error_count"] = len(meta["errors"])
+        result["meta"] = meta
         return result
+
+    meta = dict(result.get("meta", {}))
+    if stream_errors:
+        meta["errors"] = list(meta.get("errors") or []) + stream_errors
+        meta["error_count"] = len(meta["errors"])
 
     return {
         "success":     True,
         "count":       result["count"],
         "output_file": output_path,
-        "meta":        result.get("meta", {}),
+        "meta":        meta,
     }
 
 

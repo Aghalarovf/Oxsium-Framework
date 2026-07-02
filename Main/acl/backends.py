@@ -148,7 +148,19 @@ class Ldap3Backend:
     def __init__(self, ip: str, bind_user: str, password: str,
                  auth_type: str, cfg: LdapConfig) -> None:
         from ldap3 import ALL, Server, Connection
+        from ldap3.core.exceptions import LDAPBindError
+
         server = Server(ip, get_info=ALL, connect_timeout=cfg.connect_timeout)
+        # DÜZƏLİŞ: `auto_bind=True` ilə ldap3-un DEFAULT davranışı
+        # `raise_exceptions=False`-dur — yəni bind (autentifikasiya)
+        # uğursuz olsa belə HEÇ BİR exception atılmır, `Connection`
+        # obyekti sadəcə `bound=False` vəziyyətində qalır. Bundan sonra
+        # aparılan `search()` çağırışları səssizcə boş nəticə qaytarır
+        # (heç bir xəta olmadan) — nəticədə collector "success": true,
+        # "count": 0 qaytarır, halbuki əsl problem uğursuz bind-dir.
+        # `raise_exceptions=True` bunu həqiqi bir exception-a çevirir ki,
+        # `api.py`-dakı `except LDAPInvalidCredentialsResult` bloku
+        # işə düşsün və problem gizlənmədən üzə çıxsın.
         self._conn = Connection(
             server,
             user=bind_user,
@@ -156,7 +168,17 @@ class Ldap3Backend:
             authentication=auth_type,
             auto_bind=True,
             receive_timeout=cfg.receive_timeout,
+            raise_exceptions=True,
         )
+        # Əlavə mühafizə: bəzi hallarda (məs. anonim bind icazə verilibsə)
+        # `auto_bind` yenə də exception atmadan "bağlı" görünə bilər, amma
+        # həqiqi istifadəçi kimi autentifikasiya olunmamış olar. `bound`
+        # statusunu əl ilə də təsdiqləyirik.
+        if not self._conn.bound:
+            raise LDAPBindError(
+                f"LDAP bind uğursuz oldu (bind_user={bind_user!r}): "
+                f"{self._conn.result}"
+            )
 
     def search(self, base: str, ldap_filter: str, **kwargs) -> None:
         self._conn.search(base, ldap_filter, **kwargs)
