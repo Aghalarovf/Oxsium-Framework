@@ -27,7 +27,7 @@ from .constants import (
     _DEFAULT_TRUSTEE_RIDS,
 )
 from .models import LdapBackend, SecurityDescriptorParser, AclFilterConfig
-from .backends import normalize_value, ldap_ts_to_iso
+from .backends import normalize_value, ldap_ts_to_iso, search_with_retry
 
 
 def classify_target(dn: str, classes: list) -> str:
@@ -137,7 +137,7 @@ def _normalize_controls(controls: list | None) -> list[tuple[str, bool, bytes | 
             continue
     return normalized
 
-def _paged_search(
+def _paged_search_iter(
     conn: LdapBackend,
     base_dn: str,
     ldap_filter: str,
@@ -145,23 +145,30 @@ def _paged_search(
     page_size: int = 500,
     extra_controls: list | None = None,
     search_scope: str = "SUBTREE",
-) -> list:
+    max_retries: int = 3,
+):
+    """Generator: hər LDAP səhifəsini bir-bir yield edir (yaddaş-effektiv —
+    bax problem #5). Hər səhifə sorğusu `search_with_retry` ilə keçici
+    şəbəkə xətalarına qarşı qorunur (bax problem #6): əvvəlki uğurlu
+    səhifələr artıq consumer-ə ötürülüb, bir səhifədəki keçici xəta bütün
+    scan-i sıfırlamır."""
 
     from ldap3.protocol.rfc2696 import paged_search_control
 
-    all_entries: list = []
+    extra  = extra_controls or []
     cookie: bytes = b""
-    extra = extra_controls or []
 
     while True:
         paged_ctrl = paged_search_control(size=page_size, cookie=cookie)
-        conn.search(
-            base_dn, ldap_filter,
+        search_with_retry(
+            conn, base_dn, ldap_filter,
+            max_retries=max_retries,
             search_scope=search_scope,
             attributes=attributes,
             controls=_normalize_controls(extra + [paged_ctrl]),
         )
-        all_entries.extend(conn.entries)
+        for entry in conn.entries:
+            yield entry
 
         result      = conn.result or {}
         result_code = result.get("result", 0)
@@ -173,7 +180,25 @@ def _paged_search(
         if result_code not in (0, 4, 11):
             break
 
-    return all_entries
+
+def _paged_search(
+    conn: LdapBackend,
+    base_dn: str,
+    ldap_filter: str,
+    attributes: list,
+    page_size: int = 500,
+    extra_controls: list | None = None,
+    search_scope: str = "SUBTREE",
+) -> list:
+    """Geriyə uyğunluq üçün saxlanılan siyahı-qaytaran versiya (kiçik,
+    bir dəfəlik sorğular — məs. `_build_sid_map`, `_build_guid_map` — üçün
+    əlverişlidir). Böyük/geniş scope taramaları `_paged_search_iter`-dən
+    istifadə etməlidir ki, bütün nəticə yaddaşda toplanmasın."""
+    return list(_paged_search_iter(
+        conn, base_dn, ldap_filter, attributes,
+        page_size=page_size, extra_controls=extra_controls,
+        search_scope=search_scope,
+    ))
 
 
 def _build_sid_map(
@@ -354,6 +379,179 @@ def _build_guid_map(conn: LdapBackend, base_dn: str, page_size: int = 1000) -> d
         pass
 
     return guid_map
+
+
+def _entry_to_sd_payload(entry, dn: str) -> dict:
+    """ldap3 Entry-dən yalnız process-lər arasında ötürülə bilən (picklable)
+    primitiv sahələri çıxarır. ProcessPoolExecutor-a ldap3 Entry obyektini
+    birbaşa ötürmək riskli olduğu üçün (connection-a bağlı state daşıya bilər),
+    əvvəlcə burada sadə dict-ə çeviririk."""
+    raw_values = getattr(
+        getattr(entry, "nTSecurityDescriptor", None), "raw_values", None
+    ) or []
+    classes = [
+        str(v)
+        for v in (getattr(getattr(entry, "objectClass", None), "values", []) or [])
+    ]
+    return {
+        "dn":         dn,
+        "raw_sd":     raw_values[0] if raw_values else None,
+        "name":       str(normalize_value(getattr(entry, "name", None)) or dn),
+        "classes":    classes,
+        "modified":   ldap_ts_to_iso(getattr(entry, "whenChanged", None)),
+        "target_sid": str(normalize_value(getattr(entry, "objectSid", None)) or ""),
+        "sam":        str(normalize_value(getattr(entry, "sAMAccountName", None)) or ""),
+        "uac":        int(normalize_value(getattr(entry, "userAccountControl", None)) or 0),
+    }
+
+
+def _dacl_records_from_fields(
+    dacl,
+    dn: str,
+    name: str,
+    classes: list,
+    modified,
+    target_sid: str,
+    sid_map: dict,
+    is_object_ace_fn,
+    disabled_sids=None,
+    skip_inherit_only: bool = False,
+    guid_map: dict | None = None,
+) -> list[dict]:
+    """`_parse_dacl_to_records`-un core ACE-dövrü ilə eynidir, sadəcə
+    conn_entry (ldap3 obyekt) əvəzinə artıq çıxarılmış primitiv sahələri
+    qəbul edir — həm sync, həm də process-pool worker-i tərəfindən
+    paylaşıla bilsin deyə."""
+
+    class _ParserAdapter:
+        @staticmethod
+        def is_object_ace(ace_data):
+            return is_object_ace_fn(ace_data)
+
+    parser = _ParserAdapter()
+    _mutable_disabled: set = set()
+    records: list[dict] = []
+
+    for ace in dacl.aces:
+        try:
+            ace_data = ace["Ace"]
+        except (KeyError, TypeError):
+            continue
+        try:
+            ace_type = int(ace["AceType"])
+        except (KeyError, TypeError):
+            continue
+
+        ace_fields = getattr(ace_data, "fields", {})
+        if "Mask" not in ace_fields or "Sid" not in ace_fields:
+            continue
+
+        obj_guid = _get_object_type_guid(ace_data, parser) or ""
+        rights   = _parse_rights(ace_data, parser)
+        if not rights:
+            continue
+
+        sid = _get_sid(ace_data)
+        if not sid:
+            continue
+
+        principal    = sid_map.get(sid, sid)
+        ace_flags    = _get_ace_flags(ace)
+        is_inherited = bool(ace_flags & ACE_FLAG_INHERITED)
+
+        ace_qualifier = "Deny" if ace_type in (ACE_TYPE_DENIED, ACE_TYPE_DENIED_OBJECT) else "Allow"
+
+        if skip_inherit_only and (ace_flags & ACE_FLAG_INHERIT_ONLY):
+            continue
+
+        is_disabled = sid in _mutable_disabled
+        if disabled_sids:
+            is_disabled = is_disabled or sid in disabled_sids
+
+        expanded_obj = guid_map.get(obj_guid) if (guid_map and obj_guid) else obj_guid
+
+        records.append({
+            "target_name":           name,
+            "target_dn":             dn,
+            "target_sid":            target_sid,
+            "target_type":           classify_target(dn, classes),
+            "principal":             principal,
+            "principal_sid":         sid,
+            "principal_scope":       classify_principal(sid, principal),
+            "principal_is_disabled": is_disabled,
+            "object_acetype":        expanded_obj,
+            "object_ace_type":       expanded_obj,
+            "ace_qualifier":         ace_qualifier,
+            "ace_type_raw":          ace_type,
+            "rights":                rights,
+            "rights_display":        ", ".join(rights),
+            "edge_rights":           [r for r in rights if r in INTERESTING_RIGHTS],
+            "is_edge":               bool(set(rights).intersection(INTERESTING_RIGHTS)),
+            "edge_kind":             "Edge" if set(rights).intersection(INTERESTING_RIGHTS) else "ACL",
+            "is_inherited":          is_inherited,
+            "ace_flags":             ace_flags,
+            "modified":              modified,
+        })
+
+    return records
+
+
+def _parse_dacl_payload(
+    payload: dict,
+    sid_map: dict,
+    disabled_sids,
+    guid_map: dict | None,
+    skip_inherit_only: bool = False,
+) -> list[dict]:
+    """ProcessPoolExecutor worker-i: yalnız primitiv/picklable arqumentlər
+    qəbul edir (raw bytes, dict, set) — ldap3 Entry və ya connection kimi
+    process-lər arasında ötürülə bilməyən obyektlər YOXDUR. impacket-i hər
+    prosesdə təzədən import edir, çünki modullar proseslər arasında paylaşılmır."""
+    raw_sd = payload.get("raw_sd")
+    if not raw_sd:
+        return []
+
+    from impacket.ldap.ldaptypes import (
+        SR_SECURITY_DESCRIPTOR,
+        ACCESS_ALLOWED_OBJECT_ACE,
+    )
+
+    try:
+        dacl = SR_SECURITY_DESCRIPTOR(data=raw_sd)["Dacl"]
+    except Exception:
+        return []
+    if not dacl:
+        return []
+
+    return _dacl_records_from_fields(
+        dacl,
+        payload["dn"], payload["name"], payload["classes"],
+        payload["modified"], payload["target_sid"],
+        sid_map,
+        lambda ace_data: isinstance(ace_data, ACCESS_ALLOWED_OBJECT_ACE),
+        disabled_sids=disabled_sids,
+        skip_inherit_only=skip_inherit_only,
+        guid_map=guid_map,
+    )
+
+
+def _parse_dacl_payloads_batch(
+    payloads: list,
+    sid_map: dict,
+    disabled_sids,
+    guid_map: dict | None,
+    skip_inherit_only: bool = False,
+) -> list[dict]:
+    """Bir neçə payload-u tək process-pool çağırışında toplu emal edir —
+    hər obyekt üçün ayrıca IPC (inter-process communication) xərcindən
+    qaçmaq üçün (batch-lama olmasa, min-lərlə kiçik submit process-lərarası
+    ötürmə xərcini faydadan çox edərdi)."""
+    records: list[dict] = []
+    for payload in payloads:
+        records.extend(_parse_dacl_payload(
+            payload, sid_map, disabled_sids, guid_map, skip_inherit_only,
+        ))
+    return records
 
 
 def _apply_filters(

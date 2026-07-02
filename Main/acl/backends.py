@@ -1,4 +1,6 @@
+import random
 import re
+import time
 from datetime import datetime, timezone
 
 from .models import LdapConfig, LdapBackend, SecurityDescriptorParser  # noqa: F401
@@ -50,6 +52,69 @@ def ldap_ts_to_iso(value) -> str | None:
         ).isoformat()
     except (OSError, OverflowError, ValueError):
         return str(v)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Retry/backoff: keçici şəbəkə xətalarına qarşı davamlılıq
+# ══════════════════════════════════════════════════════════════════════════════
+
+_RETRYABLE_EXCEPTIONS_CACHE: tuple[type[BaseException], ...] | None = None
+
+
+def _get_retryable_exceptions() -> tuple[type[BaseException], ...]:
+    """Yalnız KEÇİCİ (transient) xətaları retry edirik — autentifikasiya,
+    yanlış filter və s. LDAP-səviyyəli xətalar burada YOXDUR, çünki onlar
+    təkrar cəhdlə düzəlmir və dərhal yuxarı atılmalıdır."""
+    global _RETRYABLE_EXCEPTIONS_CACHE
+    if _RETRYABLE_EXCEPTIONS_CACHE is not None:
+        return _RETRYABLE_EXCEPTIONS_CACHE
+
+    exceptions: list[type[BaseException]] = [ConnectionError, TimeoutError, OSError]
+    try:
+        from ldap3.core.exceptions import (
+            LDAPSocketOpenError,
+            LDAPSocketSendError,
+            LDAPSocketReceiveError,
+            LDAPTimeoutError,
+        )
+        exceptions = [
+            LDAPSocketOpenError, LDAPSocketSendError,
+            LDAPSocketReceiveError, LDAPTimeoutError,
+            *exceptions,
+        ]
+    except ImportError:
+        pass
+
+    _RETRYABLE_EXCEPTIONS_CACHE = tuple(exceptions)
+    return _RETRYABLE_EXCEPTIONS_CACHE
+
+
+def search_with_retry(
+    conn: "LdapBackend",
+    base: str,
+    ldap_filter: str,
+    max_retries: int = 3,
+    base_delay: float = 0.5,
+    max_delay: float = 8.0,
+    **kwargs,
+) -> None:
+    """SRP: `conn.search(...)` çağırışını exponential backoff + jitter ilə
+    saran nazik qat. Bir səhifədə keçici timeout/socket xətası bütün
+    collection-u dayandırmasın deyə — bu, hər fərdi LDAP sorğusuna tətbiq
+    olunur, artıq toplanmış nəticələr itmir."""
+    retryable = _get_retryable_exceptions()
+    attempt = 0
+    while True:
+        try:
+            conn.search(base, ldap_filter, **kwargs)
+            return
+        except retryable:
+            attempt += 1
+            if attempt > max_retries:
+                raise
+            delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+            delay += random.uniform(0, delay * 0.25)
+            time.sleep(delay)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -106,3 +171,10 @@ class Ldap3Backend:
 
     def unbind(self) -> None:
         self._conn.unbind()
+
+
+def make_conn_factory(ip: str, bind_user: str, password: str,
+                       auth_type: str, cfg: LdapConfig):
+    def factory() -> Ldap3Backend:
+        return Ldap3Backend(ip, bind_user, password, auth_type, cfg)
+    return factory

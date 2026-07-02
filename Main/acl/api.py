@@ -1,6 +1,8 @@
 import json
 import os
 import sys
+import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
 
@@ -35,6 +37,7 @@ from .backends import (
     is_ntlm_hash,
     domain_to_dn,
     get_bind_user,
+    make_conn_factory,
 )
 from .parsers import _build_sid_map, _fetch_object_sd, _parse_dacl_to_records, _build_guid_map
 from .collector import AclCollector
@@ -81,6 +84,7 @@ def get_domain_acls(
     scope: ObjectScope = ObjectScope.DEEP_SCAN,
     custom_filter: str = "",
     resolve_guids: bool = False,
+    on_records: Optional[Callable[[list[dict]], None]] = None,
 ) -> dict:
 
     flt      = acl_filter or AclFilterConfig()
@@ -123,12 +127,19 @@ def get_domain_acls(
             except Exception:
                 _guid_map = None
 
+        # 4 NC-nin paralel skan olunması üçün hər thread özünə ayrıca
+        # bağlantı aça bilsin deyə (ldap3 Connection thread-safe deyil).
+        conn_factory = make_conn_factory(ip, bind_user, password, auth_type, ldap_cfg)
+
         collector = AclCollector(
             conn, base_dn, parser,
             page_size=ldap_cfg.page_size,
             guid_map=_guid_map,
+            conn_factory=conn_factory,
         )
-        return collector.collect(flt, scope=scope, custom_filter=custom_filter)
+        return collector.collect(
+            flt, scope=scope, custom_filter=custom_filter, on_records=on_records,
+        )
     except Exception as e:
         return {"success": False, "error": f"Internal error: {e}", "code": 500}
     finally:
@@ -169,30 +180,45 @@ def collect_all_aces_to_json(
         self_acl_only              = False,
     )
 
-    result = get_domain_acls(
-        ip=ip,
-        domain=domain,
-        username=username,
-        password=password,
-        config=config,
-        acl_filter=_no_filter,
-        scope=ObjectScope.DEEP_SCAN,
-    )
-
-    if not result.get("success"):
-        return result  
-
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, filename)
 
+    # DƏYİŞİKLİK: əvvəllər `get_domain_acls` bütün nəticəni yaddaşda
+    # topladıqdan SONRA `_write_acls_to_jsonl` bir dəfəyə bütöv faylı
+    # yazırdı. İndi hər batch (bax: collector._PARSE_BATCH_SIZE) hazır
+    # olan kimi, `on_records` callback-i ilə birbaşa fayla axın-axın
+    # yazılır — nəticə axırda gözlənilmir, mərhələ-mərhələ diskə düşür.
+    # (`_no_filter` istifadə olunduğu üçün bu funksiyada streaming zamanı
+    # heç bir record post-filter-də itmir — bütün filtrlər deaktivdir.)
+    write_lock = threading.Lock()
     try:
-        _write_acls_to_jsonl(result, output_path)
+        out_fh = open(output_path, "w", encoding="utf-8")
     except Exception as e:
-        return {
-            "success": False,
-            "error":   f"JSONL yazma xətası: {e}",
-            "code":    500,
-        }
+        return {"success": False, "error": f"Fayl açıla bilmədi: {e}", "code": 500}
+
+    def _stream_write(records: list[dict]) -> None:
+        with write_lock:
+            for record in records:
+                out_fh.write(json.dumps(record, ensure_ascii=False, default=str))
+                out_fh.write("\n")
+            out_fh.flush()
+
+    try:
+        result = get_domain_acls(
+            ip=ip,
+            domain=domain,
+            username=username,
+            password=password,
+            config=config,
+            acl_filter=_no_filter,
+            scope=ObjectScope.DEEP_SCAN,
+            on_records=_stream_write,
+        )
+    finally:
+        out_fh.close()
+
+    if not result.get("success"):
+        return result
 
     return {
         "success":     True,

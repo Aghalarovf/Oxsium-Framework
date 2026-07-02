@@ -18,17 +18,13 @@ _RID_SERVER_OPERATORS      = 549
 _RID_PRINT_OPERATORS       = 550
 _RID_BACKUP_OPERATORS      = 551
 _RID_GROUP_POLICY_CREATORS = 520
-_RID_CRYPTOGRAPHIC_OPERATORS = 569
 _RID_HYPERV_ADMINISTRATORS = 578
-_RID_STORAGE_REPLICA_ADMINISTRATORS = 582
 _RID_KEY_ADMINS = 526
 _RID_ENTERPRISE_KEY_ADMINS = 527
 _RID_DOMAIN_CONTROLLERS  = 516
 _RID_ENTERPRISE_READONLY_CONTROLLERS = 498
 _RID_ONLY_DOMAIN_CONTROLLERS = 521
-_RID_RAS_IAS_Servers = 553
-_RID_CERT_PUBLISHERS = 557
-_RID_REMOTE_MANAGEMENT_USERS   = 580
+_RID_INCOMING_FOREST_TRUST_BUILDERS = 557
 
 
 _RID_DNS_ADMINS_NAME = "dnsadmins"
@@ -68,14 +64,10 @@ _RULE2_RIDS = frozenset({
     _RID_BACKUP_OPERATORS,       # 551 — bypass NTFS ACLs for backup
     _RID_GROUP_POLICY_CREATORS,  # 520 — create & edit GPOs
     _RID_PRINT_OPERATORS,        # 550 — load drivers on DCs
-    _RID_CRYPTOGRAPHIC_OPERATORS,# 569 — cryptographic operators
-    _RID_HYPERV_ADMINISTRATORS,  # 578 — Hyper-V Administrators
-    _RID_STORAGE_REPLICA_ADMINISTRATORS, # 582 — Storage Replica Administrators
+    _RID_HYPERV_ADMINISTRATORS,  # 578 — Hyper-V Administrators (real risk only if a DC is virtualized on a Hyper-V host managed by this group)
     _RID_KEY_ADMINS, #526 - Key Admins - manage BitLocker keys and other KMS-related functions
     _RID_ENTERPRISE_KEY_ADMINS, #527 - Enterprise Key Admins - manage BitLocker keys and other KMS-related functions at the enterprise level
-    _RID_RAS_IAS_Servers, # 553 - RAS and IAS Servers - manage Remote Access and Internet Authentication Service servers
-    _RID_CERT_PUBLISHERS, # 557 - Cert Publishers - manage certificate templates and publish certificates to the domain
-    _RID_REMOTE_MANAGEMENT_USERS, # 580 - Remote Management Users - manage remote management of domain controllers
+    _RID_INCOMING_FOREST_TRUST_BUILDERS, # 557 - Incoming Forest Trust Builders - can create incoming one-way forest trusts (trust-abuse vector)
 })
 
 # Combined set kept for helpers that need to check either category.
@@ -110,17 +102,13 @@ _RID_LABEL: dict[int, str] = {
     _RID_BACKUP_OPERATORS:      "Backup Operators",
     _RID_GROUP_POLICY_CREATORS: "Group Policy Creator Owners",
     _RID_PRINT_OPERATORS:       "Print Operators",
-    _RID_CRYPTOGRAPHIC_OPERATORS: "Cryptographic Operators",
     _RID_HYPERV_ADMINISTRATORS: "Hyper-V Administrators",
-    _RID_STORAGE_REPLICA_ADMINISTRATORS: "Storage Replica Administrators",
     _RID_KEY_ADMINS: "Key Admins",
     _RID_ENTERPRISE_KEY_ADMINS: "Enterprise Key Admins",
     _RID_DOMAIN_CONTROLLERS: "Domain Controllers",
     _RID_ENTERPRISE_READONLY_CONTROLLERS: "Enterprise Read-Only Domain Controllers",
     _RID_ONLY_DOMAIN_CONTROLLERS: "Only Domain Controllers",
-    _RID_RAS_IAS_Servers: "RAS and IAS Servers",
-    _RID_CERT_PUBLISHERS: "Cert Publishers",
-    _RID_REMOTE_MANAGEMENT_USERS: "Remote Management Users",
+    _RID_INCOMING_FOREST_TRUST_BUILDERS: "Incoming Forest Trust Builders",
     # Rule 14 — əlavə RID labels
     517: "Cert Publishers (primaryGroup)",
     520: "Schema Admins (primaryGroup)",
@@ -783,7 +771,7 @@ def _rule_14_privileged_primary_group(ctx: dict) -> bool:
 
 _RULES = [
     (1,  "absolute", "Domain Admins / Enterprise Admins / Schema Admins / Builtin Admins", _rule_01_domain_admins),
-    (2,  "tier1", "Operator Groups (Account/Server/Backup/GPO/Print/Cryptographic/Hyper-V/Storage Replica Administrators)",        _rule_02_operator_groups),
+    (2,  "tier1", "Operator Groups (Account/Server/Backup/GPO/Print/Hyper-V Administrators/Incoming Forest Trust Builders)",        _rule_02_operator_groups),
     (3,  "tier1",    "GenericAll+WriteOwner @ Domain root",                                _rule_03_generic_all_domain_root),
     (4,  "tier1",    "DS-Replication-Get-Changes-All — DCSync",                            _rule_04_dcsync_get_changes_all),
     (6,  "tier1",    "AdminSDHolder — GA/WriteOwner/WriteDACL/GenericWrite/WriteProperty", _rule_06_adminsdholder_generic_all),

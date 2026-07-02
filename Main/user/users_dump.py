@@ -812,7 +812,7 @@ def _resolve_operator_membership(conn, base_dn: str, page_size: int) -> set[str]
     operator_groups = _paged_search(
         conn,
         base_dn,
-        "(|(objectSid=*-520)(objectSid=*-548)(objectSid=*-549)(objectSid=*-550)(objectSid=*-551)(objectSid=*-569)(objectSid=*-578)(objectSid=*-582))",
+        "(|(objectSid=*-520)(objectSid=*-526)(objectSid=*-527)(objectSid=*-548)(objectSid=*-549)(objectSid=*-550)(objectSid=*-551)(objectSid=*-557)(objectSid=*-578))",
         ["distinguishedName"],
         page_size,
     )
