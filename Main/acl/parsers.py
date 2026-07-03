@@ -175,10 +175,34 @@ def _paged_search_iter(
         ctrl_resp   = result.get("controls", {}).get(_PAGED_CTRL_OID, {})
         cookie      = ctrl_resp.get("value", {}).get("cookie", b"") or b""
 
+        # DÜZƏLİŞ: əvvəllər (0, 4, 11)-dən kənar HƏR bir LDAP nəticə kodu
+        # (məs. insufficientAccessRights=50, unavailableCriticalExtension=12,
+        # referral=10 və s.) sadəcə `break` ilə SƏSSİZCƏ udulurdu — heç bir
+        # exception atılmadığı üçün `_scan_base`-in `except` bloğu işə
+        # düşmürdü və bu, `meta.errors`-da HEÇ görünmürdü. Nəticə: "success":
+        # true, "count": 0 — səbəbsiz. İndi bu kod açıq şəkildə xəta kimi
+        # atılır ki, çağıran (`_scan_base`) bunu tutub tam kontekstlə
+        # (hansı baza, hansı filter, hansı LDAP description) `meta.errors`-a
+        # yazsın. Artıq YIĞILMIŞ səhifələr bu `raise`-dən ƏVVƏL `yield`
+        # edildiyi üçün itmir — sadəcə DAYANMA SƏBƏBİ artıq görünür.
         if not cookie:
+            if result_code not in (0, 4, 11):
+                raise RuntimeError(
+                    f"LDAP paged search gözlənilməz nəticə kodu ilə bitdi: "
+                    f"base={base_dn!r} filter={ldap_filter!r} "
+                    f"result_code={result_code} "
+                    f"description={result.get('description')!r} "
+                    f"message={result.get('message')!r}"
+                )
             break
         if result_code not in (0, 4, 11):
-            break
+            raise RuntimeError(
+                f"LDAP paged search səhifələmə zamanı gözlənilməz nəticə kodu: "
+                f"base={base_dn!r} filter={ldap_filter!r} "
+                f"result_code={result_code} "
+                f"description={result.get('description')!r} "
+                f"message={result.get('message')!r}"
+            )
 
 
 def _paged_search(

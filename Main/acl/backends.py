@@ -148,19 +148,29 @@ class Ldap3Backend:
     def __init__(self, ip: str, bind_user: str, password: str,
                  auth_type: str, cfg: LdapConfig) -> None:
         from ldap3 import ALL, Server, Connection
-        from ldap3.core.exceptions import LDAPBindError
+        from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
 
         server = Server(ip, get_info=ALL, connect_timeout=cfg.connect_timeout)
-        # DÜZƏLİŞ: `auto_bind=True` ilə ldap3-un DEFAULT davranışı
-        # `raise_exceptions=False`-dur — yəni bind (autentifikasiya)
-        # uğursuz olsa belə HEÇ BİR exception atılmır, `Connection`
-        # obyekti sadəcə `bound=False` vəziyyətində qalır. Bundan sonra
-        # aparılan `search()` çağırışları səssizcə boş nəticə qaytarır
-        # (heç bir xəta olmadan) — nəticədə collector "success": true,
-        # "count": 0 qaytarır, halbuki əsl problem uğursuz bind-dir.
-        # `raise_exceptions=True` bunu həqiqi bir exception-a çevirir ki,
-        # `api.py`-dakı `except LDAPInvalidCredentialsResult` bloku
-        # işə düşsün və problem gizlənmədən üzə çıxsın.
+        # DÜZƏLİŞ (yenilənib): `raise_exceptions=True` bind-in səssiz
+        # uğursuzluğunu düzəltmək üçün əlavə edilmişdi, AMMA bunun yan
+        # təsiri var idi — bu bayraq təkcə bind-ə deyil, connection-un
+        # BÜTÜN ömrü boyu hər sonrakı `search()` çağırışına da tətbiq
+        # olunur. Nəticədə DEEP_SCAN kimi geniş subtree axtarışlarında
+        # tamamilə normal/gözlənilən LDAP nəticə kodları (sizeLimitExceeded,
+        # adminLimitExceeded, referral və s.) da exception kimi atılmağa
+        # başladı. `parsers.py`-dəki `_paged_search_iter` isə məhz bu
+        # kodları (`result_code in (0, 4, 11)`) səssizcə idarə etmək üçün
+        # yazılıb — `raise_exceptions=True` bu məntiqi pozurdu: `search()`
+        # ilk çağırışda exception atır, `search_with_retry` bunu retry
+        # etmir (LDAP-səviyyəli xətalar qəsdən retry-ə salınmır), xəta
+        # `_scan_base`-in öz `except` bloğuna sızır və o baza üçün HEÇ
+        # bir record toplanmadan bitir — halbuki bind özü tam uğurlu idi.
+        #
+        # İndi `users_dump.py`-dəki (userləri çəkən modul) yanaşmaya
+        # uyğunlaşdırılıb: `raise_exceptions` defolt (`False`) saxlanılır,
+        # yəni `search()` bu cür kodlarda artıq exception atmır, sadəcə
+        # `conn.result`-da qaytarır ki, pagination məntiqi onu özü
+        # idarə etsin.
         self._conn = Connection(
             server,
             user=bind_user,
@@ -168,13 +178,37 @@ class Ldap3Backend:
             authentication=auth_type,
             auto_bind=True,
             receive_timeout=cfg.receive_timeout,
-            raise_exceptions=True,
         )
-        # Əlavə mühafizə: bəzi hallarda (məs. anonim bind icazə verilibsə)
-        # `auto_bind` yenə də exception atmadan "bağlı" görünə bilər, amma
-        # həqiqi istifadəçi kimi autentifikasiya olunmamış olar. `bound`
-        # statusunu əl ilə də təsdiqləyirik.
+        # Bind-in səssiz uğursuzluğu problemi isə BURADA, `raise_exceptions`-
+        # dan asılı olmadan, əl ilə həll olunur: `auto_bind=True` ilə
+        # `raise_exceptions=False` olduqda belə, bind uğursuz olsa
+        # `Connection` obyekti sadəcə `bound=False` vəziyyətində qalır və
+        # heç bir exception atılmır. Bu yoxlama olmasaydı, sonrakı
+        # `search()` çağırışları səssizcə boş nəticə qaytarardı və
+        # collector "success": true, "count": 0 göstərərdi, halbuki əsl
+        # səbəb uğursuz autentifikasiya olardı. Bu yoxlama HƏM bind
+        # xətasını üzə çıxarır (LDAPBindError ataraq `api.py`-dakı
+        # `except LDAPInvalidCredentialsResult`/generic except bloklarının
+        # işə düşməsini təmin edir), HƏM DƏ `search()`-ün normal limit/
+        # referral kodlarını sərbəst buraxmasına imkan verir.
         if not self._conn.bound:
+            # `raise_exceptions=False` olduğu üçün ldap3 artıq bind
+            # uğursuzluğunda ÖZÜ spesifik alt-sinif (məs.
+            # `LDAPInvalidCredentialsResult`) atmır — hamısı burada `bound`
+            # yoxlaması vasitəsilə üzə çıxır. Amma `api.py`-dakı
+            # `except LDAPInvalidCredentialsResult -> 401` blokunun
+            # işləməsi üçün (səhv şifrə/istifadəçi halında) LDAP nəticə
+            # kodunu (49 = invalidCredentials) yoxlayıb, uyğun olduqda
+            # məhz `LDAPInvalidCredentialsResult` atırıq. Digər bütün
+            # bind-uğursuzluğu halları (server əlçatmazlığı, timeout və s.)
+            # ümumi `LDAPBindError` kimi qalır.
+            result_code = (self._conn.result or {}).get("result")
+            description = (self._conn.result or {}).get("description", "")
+            if result_code == 49 or description == "invalidCredentials":
+                raise LDAPInvalidCredentialsResult(
+                    f"LDAP autentifikasiya uğursuz oldu (bind_user={bind_user!r}): "
+                    f"{self._conn.result}"
+                )
             raise LDAPBindError(
                 f"LDAP bind uğursuz oldu (bind_user={bind_user!r}): "
                 f"{self._conn.result}"
