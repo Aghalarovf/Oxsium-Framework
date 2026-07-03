@@ -287,6 +287,15 @@ _DEEP_SCAN_BASES: tuple[str, ...] = (
     "DC=ForestDnsZones,{base_dn}", # App partition — AD-integrated DNS (forest)
 )
 
+# HTB/VPN kimi darboğaz-bandwidth mühitləri üçün: yalnız 2 əsas NC (Domain +
+# Configuration). DNS zone partition-ları (ADIDNS) ayrıca tam subtree
+# round-trip-i tələb edir — VPN-də bahalı, nadir hallarda əsl maraqlı ACL
+# daşıyır. `deep_scan_minimal=True` ilə istifadə olunur (bax: collector.py).
+_DEEP_SCAN_BASES_MINIMAL: tuple[str, ...] = (
+    "{base_dn}",
+    "CN=Configuration,{base_dn}",
+)
+
 # İstifadəçi tərəfindən xüsusi qeyd edilən kritik alt-ağaclar.
 # ALL_WITH_ACL-dan fərqli olaraq, DEEP_SCAN bu path-ları metadata olaraq
 # izləyir və hər birinin SUBTREE-si ata-bazadan ayrı paged_search ilə

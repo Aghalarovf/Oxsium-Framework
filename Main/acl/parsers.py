@@ -145,7 +145,7 @@ def _paged_search_iter(
     page_size: int = 500,
     extra_controls: list | None = None,
     search_scope: str = "SUBTREE",
-    max_retries: int = 3,
+    max_retries: int = 1,
 ):
     """Generator: hər LDAP səhifəsini bir-bir yield edir (yaddaş-effektiv —
     bax problem #5). Hər səhifə sorğusu `search_with_retry` ilə keçici

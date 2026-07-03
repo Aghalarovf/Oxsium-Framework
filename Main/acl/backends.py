@@ -93,7 +93,7 @@ def search_with_retry(
     conn: "LdapBackend",
     base: str,
     ldap_filter: str,
-    max_retries: int = 3,
+    max_retries: int = 1,
     base_delay: float = 0.5,
     max_delay: float = 8.0,
     **kwargs,

@@ -128,6 +128,9 @@ def get_domain_acls(
     custom_filter: str = "",
     resolve_guids: bool = False,
     on_records: Optional[Callable[[list[dict]], None]] = None,
+    sequential: bool = False,
+    deep_scan_minimal: bool = False,
+    io_workers: Optional[int] = None,
 ) -> dict:
 
     flt      = acl_filter or AclFilterConfig()
@@ -194,7 +197,12 @@ def get_domain_acls(
 
         # 4 NC-nin paralel skan olunması üçün hər thread özünə ayrıca
         # bağlantı aça bilsin deyə (ldap3 Connection thread-safe deyil).
-        conn_factory = make_conn_factory(ip, bind_user, password, auth_type, ldap_cfg)
+        # `sequential=True` olduqda conn_factory ötürülmür — bütün bazalar
+        # TƏK bağlantı üzərində ardıcıl skan olunur (VPN-də daha stabil,
+        # amma daha yavaş; users/computers modulunun yanaşmasına ən yaxın).
+        conn_factory = None if sequential else make_conn_factory(
+            ip, bind_user, password, auth_type, ldap_cfg,
+        )
 
         collector = AclCollector(
             conn, base_dn, parser,
@@ -202,6 +210,8 @@ def get_domain_acls(
             guid_map=_guid_map,
             conn_factory=conn_factory,
             initial_errors=pre_errors,
+            io_workers=io_workers if io_workers is not None else 2,
+            deep_scan_minimal=deep_scan_minimal,
         )
         # `collector.collect(...)` artıq öz daxilində HƏR bir xətanı tutur
         # və heç vaxt istisna atmır (bax: collector.py `collect()`), ona görə
@@ -232,6 +242,9 @@ def collect_all_aces_to_json(
     acl_filter: Optional[AclFilterConfig] = None,
     output_dir: Optional[str] = None,
     filename: Optional[str] = None,
+    sequential: bool = False,
+    deep_scan_minimal: bool = False,
+    io_workers: Optional[int] = None,
 ) -> dict:
     # Config-dən default-ləri oxu
     if output_dir is None:
@@ -309,6 +322,9 @@ def collect_all_aces_to_json(
             acl_filter=_no_filter,
             scope=ObjectScope.DEEP_SCAN,
             on_records=_stream_write,
+            sequential=sequential,
+            deep_scan_minimal=deep_scan_minimal,
+            io_workers=io_workers,
         )
     except Exception as e:
         top_level_error = _capture_error("collect_all_aces_to_json", domain, e)

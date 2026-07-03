@@ -10,6 +10,7 @@ from .constants import (
     TARGET_FILTER,
     _AD_SENSITIVE_TEMPLATES,
     _DEEP_SCAN_BASES,
+    _DEEP_SCAN_BASES_MINIMAL,
     _DEEP_SCAN_CRITICAL_SUBTREES,
     WELL_KNOWN_SIDS,
     _SD_FLAGS_FULL,
@@ -28,7 +29,7 @@ from .parsers import (
 
 
 _PARSE_BATCH_SIZE = 200
-_DEFAULT_IO_WORKERS = 4
+_DEFAULT_IO_WORKERS = 2   # HTB/VPN: 4-dən 2-yə endirildi ki, bazalar bandwidth-i bölüşməsin
 
 
 @dataclass(slots=True)
@@ -52,13 +53,15 @@ class ScopeResolver:
         base_dn: str,
         custom_filter: str = "",
         extra_bases: list[str] | None = None,
+        deep_scan_minimal: bool = False,
     ) -> tuple[str, list[str]]:
         if scope == ObjectScope.SENSITIVE_TEMPLATES:
             bases = [template.format(base_dn=base_dn) for template, _ in _AD_SENSITIVE_TEMPLATES.values()]
             return "(objectClass=*)", self._merge_bases(bases, extra_bases)
 
         if scope == ObjectScope.DEEP_SCAN:
-            bases = [template.format(base_dn=base_dn) for template in _DEEP_SCAN_BASES]
+            source = _DEEP_SCAN_BASES_MINIMAL if deep_scan_minimal else _DEEP_SCAN_BASES
+            bases = [template.format(base_dn=base_dn) for template in source]
             return "(objectClass=*)", self._merge_bases(bases, extra_bases)
 
         if scope == ObjectScope.CUSTOM_FILTER:
@@ -85,6 +88,8 @@ class AclCollector:
         guid_map: dict[str, str] | None = None,
         conn_factory: Callable[[], LdapBackend] | None = None,
         initial_errors: list[dict] | None = None,
+        io_workers: int = _DEFAULT_IO_WORKERS,
+        deep_scan_minimal: bool = False,
     ) -> None:
         self._conn = conn
         self._base_dn = base_dn
@@ -93,6 +98,8 @@ class AclCollector:
         self._guid_map = guid_map
         self._resolver = ScopeResolver()
         self._conn_factory = conn_factory
+        self._io_workers = max(1, io_workers)
+        self._deep_scan_minimal = deep_scan_minimal
 
         self._errors: list[dict] = list(initial_errors) if initial_errors else []
         self._errors_lock = threading.Lock()
@@ -158,7 +165,10 @@ class AclCollector:
         from ldap3.protocol.microsoft import security_descriptor_control
 
         try:
-            ldap_filter, base_dns = self._resolver.resolve(scope, self._base_dn, custom_filter)
+            ldap_filter, base_dns = self._resolver.resolve(
+                scope, self._base_dn, custom_filter,
+                deep_scan_minimal=self._deep_scan_minimal,
+            )
         except ValueError as exc:
             return self._failure("resolve_scope", str(scope), exc, 400)
 
@@ -242,8 +252,9 @@ class AclCollector:
         ldap_filter: str,
         sd_ctrl,
         on_records: Callable[[list[dict]], None] | None = None,
-        max_workers: int = _DEFAULT_IO_WORKERS,
+        max_workers: int | None = None,
     ) -> tuple[list[dict], int]:
+        max_workers = self._io_workers if max_workers is None else max_workers
         all_records: list[dict] = []
         stats = _CollectionStats()
         seen_dns: set[str] = set()
@@ -398,7 +409,7 @@ class AclCollector:
                 ]
             )
 
-        if scope == ObjectScope.DEEP_SCAN:
+        if scope == ObjectScope.DEEP_SCAN and not self._deep_scan_minimal:
             bases.extend(template.format(base_dn=self._base_dn) for template, _ in _DEEP_SCAN_CRITICAL_SUBTREES)
 
         return list(dict.fromkeys(bases))
