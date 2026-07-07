@@ -13,7 +13,7 @@ from .constants import (
     _DEEP_SCAN_BASES_MINIMAL,
     _DEEP_SCAN_CRITICAL_SUBTREES,
     WELL_KNOWN_SIDS,
-    _SD_FLAGS_FULL,
+    _SD_FLAGS,
 )
 from .models import AclFilterConfig, LdapBackend, ObjectScope, SecurityDescriptorParser
 from .parsers import (
@@ -29,7 +29,7 @@ from .parsers import (
 
 
 _PARSE_BATCH_SIZE = 200
-_DEFAULT_IO_WORKERS = 2   # HTB/VPN: 4-dən 2-yə endirildi ki, bazalar bandwidth-i bölüşməsin
+_DEFAULT_IO_WORKERS = 2
 
 
 @dataclass(slots=True)
@@ -84,7 +84,7 @@ class AclCollector:
         conn: LdapBackend,
         base_dn: str,
         parser: SecurityDescriptorParser,
-        page_size: int = 1000,
+        page_size: int = 200,
         guid_map: dict[str, str] | None = None,
         conn_factory: Callable[[], LdapBackend] | None = None,
         initial_errors: list[dict] | None = None,
@@ -133,7 +133,7 @@ class AclCollector:
                     404,
                 )
 
-            raw_sd, entry = _fetch_object_sd(self._conn, self_dn, sdflags=_SD_FLAGS_FULL)
+            raw_sd, entry = _fetch_object_sd(self._conn, self_dn, sdflags=_SD_FLAGS)
             if not raw_sd or entry is None:
                 return self._failure(
                     "fetch_self_sd",
@@ -172,7 +172,7 @@ class AclCollector:
         except ValueError as exc:
             return self._failure("resolve_scope", str(scope), exc, 400)
 
-        sd_ctrl = security_descriptor_control(sdflags=0x07, criticality=False)
+        sd_ctrl = security_descriptor_control(sdflags=_SD_FLAGS, criticality=False)[0]
         sd_ctrl_norm = _normalize_controls([sd_ctrl])
 
         if scope == ObjectScope.SENSITIVE_TEMPLATES:

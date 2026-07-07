@@ -191,6 +191,55 @@ def api_health():
         return jsonify({"status": "error", "detail": str(exc)}), 500
 
 
+@app.route("/api/domain-info")
+def api_domain_info():
+    """Serves the latest domain_info.jsonl record (converted to SQLite by
+    sqlite_engine.py), together with its domain_controllers and
+    risk_findings child rows.
+
+    This backs the right-hand "Environment Status" panel in the UI
+    (see 01-core.js -> loadDomainInfoFromDb / applyDomainInfoStats).
+    """
+    conn = get_db()
+    if "domain_info" not in list_tables(conn):
+        return jsonify({"success": False, "error": "domain_info table not found"}), 404
+
+    row = conn.execute(
+        'SELECT *, rowid AS id FROM "domain_info" ORDER BY rowid DESC LIMIT 1'
+    ).fetchone()
+    if row is None:
+        return jsonify({"success": False, "error": "No domain_info records"}), 404
+
+    info = row_to_dict(row)
+    domain_info_rowid = info.get("id")
+
+    dc_rows = []
+    try:
+        dc_rows = conn.execute(
+            'SELECT * FROM "domain_controllers" WHERE "domain_info_rowid" = ? ORDER BY id',
+            (domain_info_rowid,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        pass
+    info["domain_controllers"] = [row_to_dict(r) for r in dc_rows]
+
+    risk_rows = []
+    try:
+        risk_rows = conn.execute(
+            'SELECT * FROM "domain_info_risk_findings" WHERE "domain_info_rowid" = ? ORDER BY id',
+            (domain_info_rowid,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        pass
+    info["risk_findings"] = [row_to_dict(r) for r in risk_rows]
+
+    return jsonify({
+        "success": True,
+        "domain_info": info,
+        "meta": {"source": "sqlite", "db_path": str(DB_PATH)},
+    })
+
+
 @app.route("/api/tables")
 def api_tables():
     conn = get_db()

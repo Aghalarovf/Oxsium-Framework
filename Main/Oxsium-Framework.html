@@ -1532,6 +1532,25 @@
           </svg>
           <input class="search-input" id="users-search" placeholder="Search users..." oninput="filterUsers()">
         </div>
+        <div class="domains-select-wrap" id="domains-select-wrap">
+          <button class="btn-secondary domains-select-btn" id="domains-select-btn" type="button" onclick="toggleDomainsDropdown(event)">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <circle cx="6.5" cy="6.5" r="5.2" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M1.3 6.5h10.4M6.5 1.3c1.7 1.4 2.7 3.3 2.7 5.2s-1 3.8-2.7 5.2c-1.7-1.4-2.7-3.3-2.7-5.2S4.8 2.7 6.5 1.3Z" stroke="currentColor" stroke-width="1.1"/>
+            </svg>
+            Select Domains
+            <span class="domains-select-count" id="domains-select-count" style="display:none;">0</span>
+          </button>
+          <div class="domains-dropdown" id="domains-dropdown">
+            <div class="domains-dropdown-head">
+              <span>Domains</span>
+              <button class="domains-dropdown-clear" type="button" onclick="resetDomainsSelection()">Select All</button>
+            </div>
+            <div class="domains-dropdown-list" id="domains-dropdown-list">
+              <div class="domains-dropdown-loading">Loading domains…</div>
+            </div>
+          </div>
+        </div>
         <div class="filter-chips" id="filter-chips">
           <button class="chip active" data-filter="all"     onclick="setFilter('all',this)">All</button>
           <button class="chip"        data-filter="admin"   onclick="setFilter('admin',this)">
@@ -1775,6 +1794,25 @@
           </svg>
           <input class="search-input" id="computers-search" placeholder="Search computers..." oninput="filterComputers()">
         </div>
+        <div class="domains-select-wrap" id="comp-domains-select-wrap">
+          <button class="btn-secondary domains-select-btn" id="comp-domains-select-btn" type="button" onclick="toggleComputersDomainsDropdown(event)">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <circle cx="6.5" cy="6.5" r="5.2" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M1.3 6.5h10.4M6.5 1.3c1.7 1.4 2.7 3.3 2.7 5.2s-1 3.8-2.7 5.2c-1.7-1.4-2.7-3.3-2.7-5.2S4.8 2.7 6.5 1.3Z" stroke="currentColor" stroke-width="1.1"/>
+            </svg>
+            Select Domains
+            <span class="domains-select-count" id="comp-domains-select-count" style="display:none;">0</span>
+          </button>
+          <div class="domains-dropdown" id="comp-domains-dropdown">
+            <div class="domains-dropdown-head">
+              <span>Domains</span>
+              <button class="domains-dropdown-clear" type="button" onclick="resetComputersDomainsSelection()">Select All</button>
+            </div>
+            <div class="domains-dropdown-list" id="comp-domains-dropdown-list">
+              <div class="domains-dropdown-loading">Loading domains…</div>
+            </div>
+          </div>
+        </div>
         <div class="filter-chips" id="comp-filter-chips">
           <button class="chip active" data-filter="all" onclick="setComputerFilter('all',this)">All</button>
           <button class="chip" data-filter="delegation" onclick="setComputerFilter('delegation',this)">
@@ -1869,6 +1907,25 @@
             <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
           </svg>
           <input class="search-input" id="ous-search" placeholder="Search OUs..." oninput="filterOUs()">
+        </div>
+        <div class="domains-select-wrap" id="ou-domains-select-wrap">
+          <button class="btn-secondary domains-select-btn" id="ou-domains-select-btn" type="button" onclick="toggleOUsDomainsDropdown(event)">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <circle cx="6.5" cy="6.5" r="5.2" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M1.3 6.5h10.4M6.5 1.3c1.7 1.4 2.7 3.3 2.7 5.2s-1 3.8-2.7 5.2c-1.7-1.4-2.7-3.3-2.7-5.2S4.8 2.7 6.5 1.3Z" stroke="currentColor" stroke-width="1.1"/>
+            </svg>
+            Select Domains
+            <span class="domains-select-count" id="ou-domains-select-count" style="display:none;">0</span>
+          </button>
+          <div class="domains-dropdown" id="ou-domains-dropdown">
+            <div class="domains-dropdown-head">
+              <span>Domains</span>
+              <button class="domains-dropdown-clear" type="button" onclick="resetOUsDomainsSelection()">Select All</button>
+            </div>
+            <div class="domains-dropdown-list" id="ou-domains-dropdown-list">
+              <div class="domains-dropdown-loading">Loading domains…</div>
+            </div>
+          </div>
         </div>
         <div class="filter-chips" id="ou-filter-chips">
           <button class="chip active" data-filter="all" onclick="setOUFilter('all',this)">All</button>
@@ -1989,6 +2046,25 @@
           </svg>
           <input class="search-input" id="gpo-search" placeholder="Search GPOs..." oninput="filterGPOs()">
         </div>
+        <div class="domains-select-wrap" id="gpo-domains-select-wrap">
+          <button class="btn-secondary domains-select-btn" id="gpo-domains-select-btn" type="button" onclick="toggleGPOsDomainsDropdown(event)">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <circle cx="6.5" cy="6.5" r="5.2" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M1.3 6.5h10.4M6.5 1.3c1.7 1.4 2.7 3.3 2.7 5.2s-1 3.8-2.7 5.2c-1.7-1.4-2.7-3.3-2.7-5.2S4.8 2.7 6.5 1.3Z" stroke="currentColor" stroke-width="1.1"/>
+            </svg>
+            Select Domains
+            <span class="domains-select-count" id="gpo-domains-select-count" style="display:none;">0</span>
+          </button>
+          <div class="domains-dropdown" id="gpo-domains-dropdown">
+            <div class="domains-dropdown-head">
+              <span>Domains</span>
+              <button class="domains-dropdown-clear" type="button" onclick="resetGPOsDomainsSelection()">Select All</button>
+            </div>
+            <div class="domains-dropdown-list" id="gpo-domains-dropdown-list">
+              <div class="domains-dropdown-loading">Loading domains…</div>
+            </div>
+          </div>
+        </div>
         <div class="filter-chips" id="gpo-filter-chips">
           <button class="chip active" data-filter="all" onclick="setGPOFilter('all',this)">All</button>
           <button class="chip" data-filter="vulnerable" onclick="setGPOFilter('vulnerable',this)">
@@ -2074,6 +2150,25 @@
             <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
           </svg>
           <input class="search-input" id="groups-search" placeholder="Search groups..." oninput="filterGroups()">
+        </div>
+        <div class="domains-select-wrap" id="groups-domains-select-wrap">
+          <button class="btn-secondary domains-select-btn" id="groups-domains-select-btn" type="button" onclick="toggleGroupsDomainsDropdown(event)">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <circle cx="6.5" cy="6.5" r="5.2" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M1.3 6.5h10.4M6.5 1.3c1.7 1.4 2.7 3.3 2.7 5.2s-1 3.8-2.7 5.2c-1.7-1.4-2.7-3.3-2.7-5.2S4.8 2.7 6.5 1.3Z" stroke="currentColor" stroke-width="1.1"/>
+            </svg>
+            Select Domains
+            <span class="domains-select-count" id="groups-domains-select-count" style="display:none;">0</span>
+          </button>
+          <div class="domains-dropdown" id="groups-domains-dropdown">
+            <div class="domains-dropdown-head">
+              <span>Domains</span>
+              <button class="domains-dropdown-clear" type="button" onclick="resetGroupsDomainsSelection()">Select All</button>
+            </div>
+            <div class="domains-dropdown-list" id="groups-domains-dropdown-list">
+              <div class="domains-dropdown-loading">Loading domains…</div>
+            </div>
+          </div>
         </div>
         <div class="filter-chips" id="groups-filter-chips">
           <button class="chip active" onclick="setGroupFilter('all', this)">All</button>
@@ -2208,6 +2303,25 @@
             <path d="M9 9l2.5 2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
           </svg>
           <input class="search-input" id="acl-search" placeholder="Search ACLs..." oninput="filterACLs()">
+        </div>
+        <div class="domains-select-wrap" id="acl-domains-select-wrap">
+          <button class="btn-secondary domains-select-btn" id="acl-domains-select-btn" type="button" onclick="toggleACLDomainsDropdown(event)">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <circle cx="6.5" cy="6.5" r="5.2" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M1.3 6.5h10.4M6.5 1.3c1.7 1.4 2.7 3.3 2.7 5.2s-1 3.8-2.7 5.2c-1.7-1.4-2.7-3.3-2.7-5.2S4.8 2.7 6.5 1.3Z" stroke="currentColor" stroke-width="1.1"/>
+            </svg>
+            Select Domains
+            <span class="domains-select-count" id="acl-domains-select-count" style="display:none;">0</span>
+          </button>
+          <div class="domains-dropdown" id="acl-domains-dropdown">
+            <div class="domains-dropdown-head">
+              <span>Domains</span>
+              <button class="domains-dropdown-clear" type="button" onclick="resetACLDomainsSelection()">Select All</button>
+            </div>
+            <div class="domains-dropdown-list" id="acl-domains-dropdown-list">
+              <div class="domains-dropdown-loading">Loading domains…</div>
+            </div>
+          </div>
         </div>
         <div class="filter-chips" id="acl-filter-chips">
           <button class="chip active" data-filter="all" onclick="setACLFilter('all', this)">All</button>
@@ -2388,8 +2502,13 @@
     </div>
 
     <div class="stat-block">
-      <div class="stat-label">Domain Level</div>
-      <div class="stat-value dim" id="stat-level">—</div>
+      <div class="stat-label">SMB Signing</div>
+      <div class="stat-value dim" id="stat-smb-signing">—</div>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-label">NTLM Support</div>
+      <div class="stat-value dim" id="stat-ntlm-support">—</div>
     </div>
 
     <div class="panel-header" style="margin-top: 4px;">Object Counts</div>

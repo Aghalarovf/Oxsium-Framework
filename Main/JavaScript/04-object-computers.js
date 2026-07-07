@@ -7,10 +7,183 @@
 let computersFilter = 'all';
 let computersSearch = '';
 
+/* ── Select Domains (Computers tab) ──
+   Users tabındakı eyni konsepsiya: domain_data.db-dəki "trusts" cədvəlinin
+   "name" sahəsini + cari domenin adını göstərir və seçilmiş domenlərin
+   SID-inə (computers.domainsid) görə cədvəli filtrləyir.
+   SID decode helper-ləri (parsePythonBytesLiteralToArray, sidBytesToString,
+   normalizeTrustSid, domainNameToDcSuffix) 03-objects-users.js-də təyin
+   olunub və bu fayldan əvvəl yüklənir — burada təkrar yazılmır. */
+let computersDomainsListCache    = null;   // [{ name, isCurrent, sid }]
+let computersDomainsSelected     = null;   // Set<string> (lowercased domain names)
+let computersDomainsDropdownOpen = false;
+
+function guessCurrentDomainSidFromComputers() {
+  if (!Array.isArray(computersData) || computersData.length === 0) return null;
+  const counts = new Map();
+  computersData.forEach(c => {
+    const sid = (c.domainsid || '').trim();
+    if (!sid) return;
+    counts.set(sid, (counts.get(sid) || 0) + 1);
+  });
+  let best = null, bestCount = 0;
+  counts.forEach((count, sid) => { if (count > bestCount) { best = sid; bestCount = count; } });
+  return best;
+}
+
+function computerBelongsToDomain(c, domain) {
+  if (domain.sid) {
+    return (c.domainsid || '').trim().toUpperCase() === domain.sid.toUpperCase();
+  }
+  const suffix = domainNameToDcSuffix(domain.name);
+  if (!suffix) return false;
+  return (c.dn || '').toLowerCase().endsWith(suffix);
+}
+
+async function ensureComputersDomainsListLoaded() {
+  if (computersDomainsListCache) return computersDomainsListCache;
+
+  const currentDomain = (state.domain || '').trim();
+  const currentDomainSid = guessCurrentDomainSidFromComputers();
+  let trusts = [];
+  try {
+    trusts = await fetchTrustsForDomainsDropdown();
+  } catch (err) {
+    addLog(`Select Domains: ${err.message}`, 'err');
+  }
+
+  const seen = new Set();
+  const list = [];
+  if (currentDomain) {
+    list.push({ name: currentDomain, isCurrent: true, sid: currentDomainSid });
+    seen.add(currentDomain.toLowerCase());
+  }
+  trusts.forEach(t => {
+    const key = (t.name || '').toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    list.push({ name: t.name, isCurrent: false, sid: t.sid });
+  });
+
+  computersDomainsListCache = list;
+  if (!computersDomainsSelected) {
+    computersDomainsSelected = new Set(list.map(d => d.name.toLowerCase()));
+  }
+  return list;
+}
+
+function renderComputersDomainsDropdownList() {
+  const listEl = document.getElementById('comp-domains-dropdown-list');
+  if (!listEl) return;
+
+  if (!computersDomainsListCache || computersDomainsListCache.length === 0) {
+    listEl.innerHTML = '<div class="domains-dropdown-empty">No domains found</div>';
+    return;
+  }
+
+  listEl.innerHTML = computersDomainsListCache.map(d => {
+    const key = d.name.toLowerCase();
+    const checked = computersDomainsSelected.has(key);
+    const sidLine = d.sid
+      ? `<div class="domains-dropdown-item-sid">${escapeHtml(d.sid)}</div>`
+      : `<div class="domains-dropdown-item-sid dim">SID unresolved · filtering by DN</div>`;
+    return `
+      <label class="domains-dropdown-item${d.isCurrent ? ' current' : ''}" data-domain="${escapeHtml(key)}">
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleComputersDomainSelected('${key.replace(/'/g, "\\'")}', this.checked)">
+        <div class="domains-dropdown-item-main">
+          <div class="domains-dropdown-item-top">
+            <span class="domains-dropdown-item-name">${escapeHtml(d.name)}</span>
+            ${d.isCurrent ? '<span class="domains-dropdown-badge">Current</span>' : '<span class="domains-dropdown-badge trust">Trust</span>'}
+          </div>
+          ${sidLine}
+        </div>
+      </label>`;
+  }).join('');
+
+  updateComputersDomainsSelectCount();
+}
+
+function updateComputersDomainsSelectCount() {
+  const countEl = document.getElementById('comp-domains-select-count');
+  if (!countEl || !computersDomainsListCache) return;
+  const total = computersDomainsListCache.length;
+  const selected = computersDomainsSelected ? computersDomainsSelected.size : total;
+  if (selected >= total) {
+    countEl.style.display = 'none';
+  } else {
+    countEl.style.display = 'inline-flex';
+    countEl.textContent = `${selected}/${total}`;
+  }
+}
+
+async function toggleComputersDomainsDropdown(e) {
+  e && e.stopPropagation();
+  const dd = document.getElementById('comp-domains-dropdown');
+  if (!dd) return;
+
+  if (computersDomainsDropdownOpen) {
+    closeComputersDomainsDropdown();
+    return;
+  }
+
+  computersDomainsDropdownOpen = true;
+  dd.classList.add('show');
+
+  const listEl = document.getElementById('comp-domains-dropdown-list');
+  if (listEl) listEl.innerHTML = '<div class="domains-dropdown-loading">Loading domains…</div>';
+
+  try {
+    await ensureComputersDomainsListLoaded();
+    renderComputersDomainsDropdownList();
+  } catch (err) {
+    if (listEl) listEl.innerHTML = `<div class="domains-dropdown-empty">${escapeHtml(err.message)}</div>`;
+  }
+
+  document.addEventListener('click', handleComputersDomainsDropdownOutsideClick);
+  document.addEventListener('keydown', handleComputersDomainsDropdownEscape);
+}
+
+function closeComputersDomainsDropdown() {
+  computersDomainsDropdownOpen = false;
+  const dd = document.getElementById('comp-domains-dropdown');
+  if (dd) dd.classList.remove('show');
+  document.removeEventListener('click', handleComputersDomainsDropdownOutsideClick);
+  document.removeEventListener('keydown', handleComputersDomainsDropdownEscape);
+}
+
+function handleComputersDomainsDropdownOutsideClick(e) {
+  const wrap = document.getElementById('comp-domains-select-wrap');
+  if (wrap && !wrap.contains(e.target)) closeComputersDomainsDropdown();
+}
+
+function handleComputersDomainsDropdownEscape(e) {
+  if (e.key === 'Escape') closeComputersDomainsDropdown();
+}
+
+function toggleComputersDomainSelected(domainKey, checked) {
+  if (!computersDomainsSelected) computersDomainsSelected = new Set();
+  if (checked) computersDomainsSelected.add(domainKey);
+  else computersDomainsSelected.delete(domainKey);
+  updateComputersDomainsSelectCount();
+  renderComputers();
+}
+
+function resetComputersDomainsSelection() {
+  if (!computersDomainsListCache) return;
+  computersDomainsSelected = new Set(computersDomainsListCache.map(d => d.name.toLowerCase()));
+  renderComputersDomainsDropdownList();
+  renderComputers();
+}
+
 async function loadComputers() {
   document.getElementById('computers-loading').style.display = 'flex';
   document.getElementById('c-table-body').innerHTML = '';
   closeComputerDetail();
+
+  // Domen siyahısı (cari domen + trusts) yenidən yüklənsin — reconnect
+  // zamanı state.domain və ya connected domenin SID-i dəyişmiş ola bilər.
+  computersDomainsListCache = null;
+  computersDomainsSelected  = null;
 
   try {
     let url = `${DB_BASE}/api/list/computers?limit=500`;
@@ -66,6 +239,10 @@ function renderComputers() {
   body.innerHTML = '';
 
   let list = computersData;
+  if (computersDomainsListCache && computersDomainsSelected && computersDomainsSelected.size < computersDomainsListCache.length) {
+    const activeDomains = computersDomainsListCache.filter(d => computersDomainsSelected.has(d.name.toLowerCase()));
+    list = list.filter(c => activeDomains.some(d => computerBelongsToDomain(c, d)));
+  }
   if (computersSearch) {
     list = list.filter(c =>
       (c.computer_name || '').toLowerCase().includes(computersSearch) ||

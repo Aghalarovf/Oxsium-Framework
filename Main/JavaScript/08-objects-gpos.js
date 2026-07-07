@@ -7,10 +7,141 @@
 let gposFilter = 'all';
 let gposSearch = '';
 
+/* ── Select Domains (GPOs tab) ──
+   Users tabındakı domen siyahısı (cari domen + trusts) paylaşılan
+   domainsListCache/ensureDomainsListLoaded() (03-objects-users.js) üzərindən
+   gəlir — yalnız GPOs tabına aid seçim state-i (gposDomainsSelected) və
+   dropdown UI-si burada saxlanılır. GPO qeydlərində domain_sid sütunu
+   olmadığından uyğunluq DN son hissəsinə (dc=...) görə yoxlanılır. */
+let gposDomainsSelected     = null;   // Set<string> (lowercased domain names) — null = hamısı seçili
+let gposDomainsDropdownOpen = false;
+
+function gpoBelongsToDomain(gpo, domain) {
+  const dn = gpo.path || gpo.dn || '';
+  if (domain.sid && gpo.sid) {
+    const s  = String(gpo.sid).trim().toUpperCase();
+    const ds = domain.sid.toUpperCase();
+    if (s === ds || s.startsWith(ds + '-')) return true;
+  }
+  const suffix = domainNameToDcSuffix(domain.name);
+  if (!suffix) return false;
+  return dn.toLowerCase().endsWith(suffix);
+}
+
+async function toggleGPOsDomainsDropdown(e) {
+  e && e.stopPropagation();
+  const dd = document.getElementById('gpo-domains-dropdown');
+  if (!dd) return;
+
+  if (gposDomainsDropdownOpen) {
+    closeGPOsDomainsDropdown();
+    return;
+  }
+
+  gposDomainsDropdownOpen = true;
+  dd.classList.add('show');
+
+  const listEl = document.getElementById('gpo-domains-dropdown-list');
+  if (listEl) listEl.innerHTML = '<div class="domains-dropdown-loading">Loading domains…</div>';
+
+  try {
+    await ensureDomainsListLoaded();
+    if (!gposDomainsSelected) {
+      gposDomainsSelected = new Set(domainsListCache.map(d => d.name.toLowerCase()));
+    }
+    renderGPOsDomainsDropdownList();
+  } catch (err) {
+    if (listEl) listEl.innerHTML = `<div class="domains-dropdown-empty">${escapeHtml(err.message)}</div>`;
+  }
+
+  document.addEventListener('click', handleGPOsDomainsDropdownOutsideClick);
+  document.addEventListener('keydown', handleGPOsDomainsDropdownEscape);
+}
+
+function closeGPOsDomainsDropdown() {
+  gposDomainsDropdownOpen = false;
+  const dd = document.getElementById('gpo-domains-dropdown');
+  if (dd) dd.classList.remove('show');
+  document.removeEventListener('click', handleGPOsDomainsDropdownOutsideClick);
+  document.removeEventListener('keydown', handleGPOsDomainsDropdownEscape);
+}
+
+function handleGPOsDomainsDropdownOutsideClick(e) {
+  const wrap = document.getElementById('gpo-domains-select-wrap');
+  if (wrap && !wrap.contains(e.target)) closeGPOsDomainsDropdown();
+}
+
+function handleGPOsDomainsDropdownEscape(e) {
+  if (e.key === 'Escape') closeGPOsDomainsDropdown();
+}
+
+function renderGPOsDomainsDropdownList() {
+  const listEl = document.getElementById('gpo-domains-dropdown-list');
+  if (!listEl) return;
+
+  if (!domainsListCache || domainsListCache.length === 0) {
+    listEl.innerHTML = '<div class="domains-dropdown-empty">No domains found</div>';
+    return;
+  }
+
+  listEl.innerHTML = domainsListCache.map(d => {
+    const key = d.name.toLowerCase();
+    const checked = gposDomainsSelected.has(key);
+    const sidLine = d.sid
+      ? `<div class="domains-dropdown-item-sid">${escapeHtml(d.sid)}</div>`
+      : `<div class="domains-dropdown-item-sid dim">SID unresolved · filtering by DN</div>`;
+    return `
+      <label class="domains-dropdown-item${d.isCurrent ? ' current' : ''}" data-domain="${escapeHtml(key)}">
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleGPODomainSelected('${key.replace(/'/g, "\\'")}', this.checked)">
+        <div class="domains-dropdown-item-main">
+          <div class="domains-dropdown-item-top">
+            <span class="domains-dropdown-item-name">${escapeHtml(d.name)}</span>
+            ${d.isCurrent ? '<span class="domains-dropdown-badge">Current</span>' : '<span class="domains-dropdown-badge trust">Trust</span>'}
+          </div>
+          ${sidLine}
+        </div>
+      </label>`;
+  }).join('');
+
+  updateGPOsDomainsSelectCount();
+}
+
+function updateGPOsDomainsSelectCount() {
+  const countEl = document.getElementById('gpo-domains-select-count');
+  if (!countEl || !domainsListCache) return;
+  const total = domainsListCache.length;
+  const selected = gposDomainsSelected ? gposDomainsSelected.size : total;
+  if (selected >= total) {
+    countEl.style.display = 'none';
+  } else {
+    countEl.style.display = 'inline-flex';
+    countEl.textContent = `${selected}/${total}`;
+  }
+}
+
+function toggleGPODomainSelected(domainKey, checked) {
+  if (!gposDomainsSelected) gposDomainsSelected = new Set();
+  if (checked) gposDomainsSelected.add(domainKey);
+  else gposDomainsSelected.delete(domainKey);
+  updateGPOsDomainsSelectCount();
+  renderGPOs();
+}
+
+function resetGPOsDomainsSelection() {
+  if (!domainsListCache) return;
+  gposDomainsSelected = new Set(domainsListCache.map(d => d.name.toLowerCase()));
+  renderGPOsDomainsDropdownList();
+  renderGPOs();
+}
+
 async function loadGPOs() {
   document.getElementById('gpos-loading').style.display = 'flex';
   document.getElementById('g-table-body').innerHTML = '';
   closeGPODetail();
+
+  // Domen seçimi reconnect zamanı yenidən qiymətləndirilsin (domainsListCache
+  // özü Users tabı tərəfindən paylaşılır və artıq null-a sıfırlanıb olacaq).
+  gposDomainsSelected = null;
 
   try {
     let url = `${DB_BASE}/api/list/gpos?limit=500`;
@@ -83,6 +214,10 @@ async function loadGPOs() {
 function renderGPOs() {
   const body = document.getElementById('g-table-body');
   let list = gposData;
+  if (domainsListCache && gposDomainsSelected && gposDomainsSelected.size < domainsListCache.length) {
+    const activeDomains = domainsListCache.filter(d => gposDomainsSelected.has(d.name.toLowerCase()));
+    list = list.filter(gpo => activeDomains.some(d => gpoBelongsToDomain(gpo, d)));
+  }
   if (gposSearch) list = list.filter(gpo =>
     (gpo.name || '').toLowerCase().includes(gposSearch) ||
     (gpo.display_name || '').toLowerCase().includes(gposSearch)

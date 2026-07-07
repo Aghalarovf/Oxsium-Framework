@@ -147,11 +147,6 @@ def _paged_search_iter(
     search_scope: str = "SUBTREE",
     max_retries: int = 1,
 ):
-    """Generator: hər LDAP səhifəsini bir-bir yield edir (yaddaş-effektiv —
-    bax problem #5). Hər səhifə sorğusu `search_with_retry` ilə keçici
-    şəbəkə xətalarına qarşı qorunur (bax problem #6): əvvəlki uğurlu
-    səhifələr artıq consumer-ə ötürülüb, bir səhifədəki keçici xəta bütün
-    scan-i sıfırlamır."""
 
     from ldap3.protocol.rfc2696 import paged_search_control
 
@@ -175,20 +170,10 @@ def _paged_search_iter(
         ctrl_resp   = result.get("controls", {}).get(_PAGED_CTRL_OID, {})
         cookie      = ctrl_resp.get("value", {}).get("cookie", b"") or b""
 
-        # DÜZƏLİŞ: əvvəllər (0, 4, 11)-dən kənar HƏR bir LDAP nəticə kodu
-        # (məs. insufficientAccessRights=50, unavailableCriticalExtension=12,
-        # referral=10 və s.) sadəcə `break` ilə SƏSSİZCƏ udulurdu — heç bir
-        # exception atılmadığı üçün `_scan_base`-in `except` bloğu işə
-        # düşmürdü və bu, `meta.errors`-da HEÇ görünmürdü. Nəticə: "success":
-        # true, "count": 0 — səbəbsiz. İndi bu kod açıq şəkildə xəta kimi
-        # atılır ki, çağıran (`_scan_base`) bunu tutub tam kontekstlə
-        # (hansı baza, hansı filter, hansı LDAP description) `meta.errors`-a
-        # yazsın. Artıq YIĞILMIŞ səhifələr bu `raise`-dən ƏVVƏL `yield`
-        # edildiyi üçün itmir — sadəcə DAYANMA SƏBƏBİ artıq görünür.
         if not cookie:
             if result_code not in (0, 4, 11):
                 raise RuntimeError(
-                    f"LDAP paged search gözlənilməz nəticə kodu ilə bitdi: "
+                    f"LDAP paged search ended with an unexpected result code: "
                     f"base={base_dn!r} filter={ldap_filter!r} "
                     f"result_code={result_code} "
                     f"description={result.get('description')!r} "
@@ -197,7 +182,7 @@ def _paged_search_iter(
             break
         if result_code not in (0, 4, 11):
             raise RuntimeError(
-                f"LDAP paged search səhifələmə zamanı gözlənilməz nəticə kodu: "
+                f"Unexpected result code during LDAP paged search pagination: "
                 f"base={base_dn!r} filter={ldap_filter!r} "
                 f"result_code={result_code} "
                 f"description={result.get('description')!r} "
@@ -214,10 +199,6 @@ def _paged_search(
     extra_controls: list | None = None,
     search_scope: str = "SUBTREE",
 ) -> list:
-    """Geriyə uyğunluq üçün saxlanılan siyahı-qaytaran versiya (kiçik,
-    bir dəfəlik sorğular — məs. `_build_sid_map`, `_build_guid_map` — üçün
-    əlverişlidir). Böyük/geniş scope taramaları `_paged_search_iter`-dən
-    istifadə etməlidir ki, bütün nəticə yaddaşda toplanmasın."""
     return list(_paged_search_iter(
         conn, base_dn, ldap_filter, attributes,
         page_size=page_size, extra_controls=extra_controls,
@@ -406,10 +387,6 @@ def _build_guid_map(conn: LdapBackend, base_dn: str, page_size: int = 1000) -> d
 
 
 def _entry_to_sd_payload(entry, dn: str) -> dict:
-    """ldap3 Entry-dən yalnız process-lər arasında ötürülə bilən (picklable)
-    primitiv sahələri çıxarır. ProcessPoolExecutor-a ldap3 Entry obyektini
-    birbaşa ötürmək riskli olduğu üçün (connection-a bağlı state daşıya bilər),
-    əvvəlcə burada sadə dict-ə çeviririk."""
     raw_values = getattr(
         getattr(entry, "nTSecurityDescriptor", None), "raw_values", None
     ) or []
@@ -442,10 +419,6 @@ def _dacl_records_from_fields(
     skip_inherit_only: bool = False,
     guid_map: dict | None = None,
 ) -> list[dict]:
-    """`_parse_dacl_to_records`-un core ACE-dövrü ilə eynidir, sadəcə
-    conn_entry (ldap3 obyekt) əvəzinə artıq çıxarılmış primitiv sahələri
-    qəbul edir — həm sync, həm də process-pool worker-i tərəfindən
-    paylaşıla bilsin deyə."""
 
     class _ParserAdapter:
         @staticmethod
@@ -527,10 +500,6 @@ def _parse_dacl_payload(
     guid_map: dict | None,
     skip_inherit_only: bool = False,
 ) -> list[dict]:
-    """ProcessPoolExecutor worker-i: yalnız primitiv/picklable arqumentlər
-    qəbul edir (raw bytes, dict, set) — ldap3 Entry və ya connection kimi
-    process-lər arasında ötürülə bilməyən obyektlər YOXDUR. impacket-i hər
-    prosesdə təzədən import edir, çünki modullar proseslər arasında paylaşılmır."""
     raw_sd = payload.get("raw_sd")
     if not raw_sd:
         return []
@@ -566,10 +535,6 @@ def _parse_dacl_payloads_batch(
     guid_map: dict | None,
     skip_inherit_only: bool = False,
 ) -> list[dict]:
-    """Bir neçə payload-u tək process-pool çağırışında toplu emal edir —
-    hər obyekt üçün ayrıca IPC (inter-process communication) xərcindən
-    qaçmaq üçün (batch-lama olmasa, min-lərlə kiçik submit process-lərarası
-    ötürmə xərcini faydadan çox edərdi)."""
     records: list[dict] = []
     for payload in payloads:
         records.extend(_parse_dacl_payload(

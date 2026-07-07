@@ -49,6 +49,136 @@ let _aclPrincipalDebounceTimer = null;
 let aclKnownPrincipalSIDs       = new Set();
 let aclKnownPrincipalSIDsLoaded = false;
 
+/* ── Select Domains (ACEs tab) ──
+   Users tabındakı paylaşılan domainsListCache/ensureDomainsListLoaded()
+   (03-objects-users.js) istifadə olunur; ACEs tabına aid yalnız seçim
+   state-i (aclDomainsSelected) və dropdown UI-si burada saxlanılır.
+   Uyğunluq ACE-nin target obyektinin domenini müəyyən edir: əvvəlcə
+   principal_sid domain SID prefiksinə görə (əgər hədəf sistemi principal
+   kimi eyni domendədirsə), sonra isə target_dn son hissəsinə (dc=...)
+   görə yoxlanılır. */
+let aclDomainsSelected     = null;   // Set<string> (lowercased domain names) — null = hamısı seçili
+let aclDomainsDropdownOpen = false;
+
+function aclItemBelongsToDomain(item, domain) {
+  const dn  = item.target_dn || '';
+  const sid = item.principal_sid || '';
+  if (domain.sid && sid) {
+    const s  = String(sid).trim().toUpperCase();
+    const ds = domain.sid.toUpperCase();
+    if (s === ds || s.startsWith(ds + '-')) return true;
+  }
+  const suffix = domainNameToDcSuffix(domain.name);
+  if (!suffix) return false;
+  return dn.toLowerCase().endsWith(suffix);
+}
+
+async function toggleACLDomainsDropdown(e) {
+  e && e.stopPropagation();
+  const dd = document.getElementById('acl-domains-dropdown');
+  if (!dd) return;
+
+  if (aclDomainsDropdownOpen) {
+    closeACLDomainsDropdown();
+    return;
+  }
+
+  aclDomainsDropdownOpen = true;
+  dd.classList.add('show');
+
+  const listEl = document.getElementById('acl-domains-dropdown-list');
+  if (listEl) listEl.innerHTML = '<div class="domains-dropdown-loading">Loading domains…</div>';
+
+  try {
+    await ensureDomainsListLoaded();
+    if (!aclDomainsSelected) {
+      aclDomainsSelected = new Set(domainsListCache.map(d => d.name.toLowerCase()));
+    }
+    renderACLDomainsDropdownList();
+  } catch (err) {
+    if (listEl) listEl.innerHTML = `<div class="domains-dropdown-empty">${escapeHtml(err.message)}</div>`;
+  }
+
+  document.addEventListener('click', handleACLDomainsDropdownOutsideClick);
+  document.addEventListener('keydown', handleACLDomainsDropdownEscape);
+}
+
+function closeACLDomainsDropdown() {
+  aclDomainsDropdownOpen = false;
+  const dd = document.getElementById('acl-domains-dropdown');
+  if (dd) dd.classList.remove('show');
+  document.removeEventListener('click', handleACLDomainsDropdownOutsideClick);
+  document.removeEventListener('keydown', handleACLDomainsDropdownEscape);
+}
+
+function handleACLDomainsDropdownOutsideClick(e) {
+  const wrap = document.getElementById('acl-domains-select-wrap');
+  if (wrap && !wrap.contains(e.target)) closeACLDomainsDropdown();
+}
+
+function handleACLDomainsDropdownEscape(e) {
+  if (e.key === 'Escape') closeACLDomainsDropdown();
+}
+
+function renderACLDomainsDropdownList() {
+  const listEl = document.getElementById('acl-domains-dropdown-list');
+  if (!listEl) return;
+
+  if (!domainsListCache || domainsListCache.length === 0) {
+    listEl.innerHTML = '<div class="domains-dropdown-empty">No domains found</div>';
+    return;
+  }
+
+  listEl.innerHTML = domainsListCache.map(d => {
+    const key = d.name.toLowerCase();
+    const checked = aclDomainsSelected.has(key);
+    const sidLine = d.sid
+      ? `<div class="domains-dropdown-item-sid">${escapeHtml(d.sid)}</div>`
+      : `<div class="domains-dropdown-item-sid dim">SID unresolved · filtering by DN</div>`;
+    return `
+      <label class="domains-dropdown-item${d.isCurrent ? ' current' : ''}" data-domain="${escapeHtml(key)}">
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleACLDomainSelected('${key.replace(/'/g, "\\'")}', this.checked)">
+        <div class="domains-dropdown-item-main">
+          <div class="domains-dropdown-item-top">
+            <span class="domains-dropdown-item-name">${escapeHtml(d.name)}</span>
+            ${d.isCurrent ? '<span class="domains-dropdown-badge">Current</span>' : '<span class="domains-dropdown-badge trust">Trust</span>'}
+          </div>
+          ${sidLine}
+        </div>
+      </label>`;
+  }).join('');
+
+  updateACLDomainsSelectCount();
+}
+
+function updateACLDomainsSelectCount() {
+  const countEl = document.getElementById('acl-domains-select-count');
+  if (!countEl || !domainsListCache) return;
+  const total = domainsListCache.length;
+  const selected = aclDomainsSelected ? aclDomainsSelected.size : total;
+  if (selected >= total) {
+    countEl.style.display = 'none';
+  } else {
+    countEl.style.display = 'inline-flex';
+    countEl.textContent = `${selected}/${total}`;
+  }
+}
+
+function toggleACLDomainSelected(domainKey, checked) {
+  if (!aclDomainsSelected) aclDomainsSelected = new Set();
+  if (checked) aclDomainsSelected.add(domainKey);
+  else aclDomainsSelected.delete(domainKey);
+  updateACLDomainsSelectCount();
+  renderACLs();
+}
+
+function resetACLDomainsSelection() {
+  if (!domainsListCache) return;
+  aclDomainsSelected = new Set(domainsListCache.map(d => d.name.toLowerCase()));
+  renderACLDomainsDropdownList();
+  renderACLs();
+}
+
 /* ─── SID utility ────────────────────────────────────────────────────────── */
 function _normSid(value) {
   return String(value || '').trim().toUpperCase();
@@ -107,37 +237,126 @@ const ACE_FLAG_NO_PROPAGATE      = 0x04;
 const _PV_INTERESTING_SID_RE = /^S-1-5-.*-[1-9]\d{3,}$/;
 function _pvSidIsInteresting(sid) { return _PV_INTERESTING_SID_RE.test(sid || ''); }
 
-const _DANGEROUS_EXCL_SIDS = new Set(['S-1-5-18', 'S-1-5-19', 'S-1-5-32-544']);
-const _DANGEROUS_EXCL_RIDS = new Set([500, 502, 512, 516, 519, 520, 526, 527]);
-const _DOMAIN_RID_RE        = /^S-1-5-21(?:-\d+){3}-(\d+)$/;
+/* ═══════════════════════════════════════════════════════════════════════
+   ACL_EXCLUDED_DEFAULT_PRINCIPALS — TƏK massiv (single source of truth).
 
-function isDangerousExcludedPrincipal(item) {
-  const sid = (item.principal_sid || '').trim();
-  if (_DANGEROUS_EXCL_SIDS.has(sid)) return true;
-  const m = sid.match(_DOMAIN_RID_RE);
-  if (m && _DANGEROUS_EXCL_RIDS.has(parseInt(m[1], 10))) return true;
-  if (sid === 'S-1-5-32-548' && item.is_inherited === true) return true;
+   Dangerous ACEs və Extended Rights filterlərinin HƏR İKİSİ məhz bu
+   massivi istifadə edir. Massivdəki hər giriş bir built-in/default AD
+   trustee-ni təmsil edir və 3 açarla uyğunlaşdırılır (hamısı optional,
+   ən azı biri doldurulur):
+     sid  — tam SID uyğunluğu (well-known/BUILTIN SID-lər)
+     rid  — SID sonluğu (domen fərqli olsa belə, unresolved SID-lərdə də tutur)
+     name — principal adında substring axtarışı (case-insensitive)
+
+   Bu obyektlərdən biri uyğun gələrsə, həmin ACE nə Dangerous ACEs, nə də
+   Extended Rights nəticələrində Principal olaraq göstərilmir — çünki
+   bunlar hər domendə default olaraq mövcud olan, gözlənilən ACE-lərdir
+   (əsl privilege-escalation yolu deyil, "noise").
+
+   Mənbə: constants.py (_DEFAULT_TRUSTEE_SIDS, _DEFAULT_TRUSTEE_RIDS,
+   _PRIVILEGED_RIDS, _DANGEROUS_ACE_NOISY_*, _EXTENDED_RIGHTS_NOISY_*) və
+   əvvəlki frontend-only istisnalar.
+   ═══════════════════════════════════════════════════════════════════════ */
+const ACL_EXCLUDED_DEFAULT_PRINCIPALS = [
+  /* ── Well-known / BUILTIN SID-lər ── */
+  { name: 'NT AUTHORITY\\SYSTEM',                        sid: 'S-1-5-18' },
+  { name: 'NT AUTHORITY\\Local Service',                 sid: 'S-1-5-19' },
+  { name: 'BUILTIN\\Administrators',                     sid: 'S-1-5-32-544', rid: '-544' },
+  { name: 'BUILTIN\\Account Operators',                  sid: 'S-1-5-32-548', rid: '-548' },
+  { name: 'Enterprise Domain Controllers',               sid: 'S-1-5-9' },
+  { name: 'Principal Self',                              sid: 'S-1-5-10' },
+  { name: 'Everyone',                                    sid: 'S-1-1-0' },
+  { name: 'Authenticated Users',                         sid: 'S-1-5-11' },
+  { name: 'BUILTIN\\Pre-Windows 2000 Compatible Access',  sid: 'S-1-5-32-554' },
+  { name: 'BUILTIN\\Windows Authorization Access Group',  sid: 'S-1-5-32-560' },
+  { name: 'BUILTIN\\Terminal Server License Servers',     sid: 'S-1-5-32-561' },
+  { name: 'Creator Owner',                               sid: 'S-1-3-0' },
+
+  /* ── Domain-relative well-known RID-lər ── */
+  { name: 'Administrator',                    rid: '-500' },
+  { name: 'krbtgt',                           rid: '-502' },
+  { name: 'Domain Admins',                    rid: '-512' },
+  { name: 'Domain Controllers',               rid: '-516' },
+  { name: 'Cert Publishers',                  rid: '-517' },
+  { name: 'Schema Admins',                    rid: '-518' },
+  { name: 'Enterprise Admins',                rid: '-519' },
+  { name: 'Group Policy Creator Owners',      rid: '-520' },
+  { name: 'Key Admins',                       rid: '-526' },
+  { name: 'Enterprise Key Admins',            rid: '-527' },
+  { name: 'DnsAdmins',                        rid: '-1101' },
+  { name: 'RAS and IAS Servers',              rid: '-553' },
+  { name: 'Enterprise Read-Only Domain Controllers', rid: '-498' },
+
+  /* ── Yalnız ad-əsaslı (RID/SID sabit deyil və ya BUILTIN-də göstərilmir) ── */
+  { name: 'Administrators' },
+  { name: 'Hyper-V Administrators' },
+  { name: 'Storage Replica Administrators' },
+  { name: 'Print Operators' },
+  { name: 'Server Operators' },
+  { name: 'Backup Operators' },
+  { name: 'Cryptographic Operators' },
+  { name: 'Remote Management Users' },
+  { name: 'Only Domain Controllers' },
+  { name: 'Read-only Domain Controllers' },
+  { name: 'Protected Users' },
+  { name: 'Cert Admins' },
+  { name: 'Enterprise Cert Admins' },
+  { name: 'Allowed RODC Password Replication Group' },
+  { name: 'Denied RODC Password Replication Group' },
+  { name: 'Cloneable Domain Controllers' },
+  { name: 'Incoming Forest Trust Builders' },
+  { name: 'Network Configuration Operators' },
+  { name: 'Performance Log Users' },
+  { name: 'Performance Monitor Users' },
+];
+
+/* Massivdən sürətli axtarış üçün 3 lookup dəsti qurulur (bir dəfə, modul
+   yüklənəndə). Yeni bir default trustee əlavə etmək üçün YALNIZ yuxarıdakı
+   ACL_EXCLUDED_DEFAULT_PRINCIPALS massivinə sətir əlavə etmək kifayətdir —
+   bu 3 dəst və aşağıdakı isExcludedDefaultPrincipal() avtomatik yenilənir. */
+const _ACL_EXCL_SIDS  = new Set(
+  ACL_EXCLUDED_DEFAULT_PRINCIPALS.map(p => p.sid).filter(Boolean)
+);
+const _ACL_EXCL_RIDS  = new Set(
+  ACL_EXCLUDED_DEFAULT_PRINCIPALS.map(p => p.rid).filter(Boolean)
+);
+const _ACL_EXCL_NAMES = new Set(
+  ACL_EXCLUDED_DEFAULT_PRINCIPALS.map(p => p.name).filter(Boolean).map(n => n.toLowerCase())
+);
+
+function _matchesRidSuffix(sid, ridSet) {
+  if (!sid) return false;
+  for (const rid of ridSet) {
+    if (sid.endsWith(rid)) return true;
+  }
   return false;
 }
 
-const _EXTENDED_RIGHTS_EXCLUDED_PRINCIPALS = [
-  'RAS and IAS Servers', 'Pre-Windows 2000 Compatible Access', 'Cert Publishers',
-  'Windows Authorization Access Group', 'Terminal Server License Servers',
-  'Domain Admins', 'Administrators', 'Domain Controllers', 'Enterprise Admins',
-  'Schema Admins', 'Key Admins', 'Enterprise Key Admins', 'Hyper-V Administrators',
-  'Storage Replica Administrators', 'Print Operators', 'Server Operators',
-  'Backup Operators', 'Group Policy Creator Owners', 'Cryptographic Operators',
-  'DnsAdmins', 'Remote Management Users', 'Enterprise Read-Only Domain Controllers',
-  'Only Domain Controllers', 'Read-only Domain Controllers', 'Protected Users',
-  'Cert Admins', 'Enterprise Cert Admins',
-  'Allowed RODC Password Replication Group', 'Denied RODC Password Replication Group',
-  'Cloneable Domain Controllers',
-].map(v => String(v || '').toLowerCase());
+/* Bir ACE-nin principal-ının ACL_EXCLUDED_DEFAULT_PRINCIPALS massivində
+   olub-olmadığını yoxlayır. Həm Dangerous ACEs, həm də Extended Rights
+   filteri bu TƏK funksiyanı çağırır. */
+function isExcludedDefaultPrincipal(item) {
+  const sid = (item?.principal_sid || '').trim();
+  if (sid && _ACL_EXCL_SIDS.has(sid)) return true;
+  if (_matchesRidSuffix(sid, _ACL_EXCL_RIDS)) return true;
+  const principal = String(item?.principal || '').trim().toLowerCase();
+  if (principal) {
+    for (const name of _ACL_EXCL_NAMES) {
+      if (principal.includes(name)) return true;
+    }
+  }
+  return false;
+}
+
+/* Geriyə uyğunluq üçün nazik wrapper-lər — matchesACLFilter() və digər
+   render funksiyaları bu adları çağırır, hər ikisi eyni tək mənbəyə
+   (isExcludedDefaultPrincipal) yönləndirilir. */
+function isDangerousExcludedPrincipal(item) {
+  return isExcludedDefaultPrincipal(item);
+}
 
 function isExtendedRightsExcludedPrincipal(item) {
-  const principal = String(item?.principal || '').trim().toLowerCase();
-  if (!principal) return false;
-  return _EXTENDED_RIGHTS_EXCLUDED_PRINCIPALS.some(name => principal.includes(name));
+  return isExcludedDefaultPrincipal(item);
 }
 
 function canonicalRightName(name) {
@@ -489,6 +708,7 @@ async function loadACLs() {
   aclData    = [];
   _aclOffset = 0;
   _aclTotalInDB = 0;
+  aclDomainsSelected = null;
   _updateLoadMoreBtn();
 
   /* sqlite_reader sağlamlıq yoxlaması */
@@ -687,14 +907,27 @@ function renderACLs() {
   body.innerHTML = '';
 
   /* Dangerous ACEs / Extended Rights aktivdirsə, mənbə aclData yox,
-     limitsiz çəkilmiş _aclFullFetchData-dır — orada artıq bütün sətirlər
-     uyğun cədvəldən (dangerous_ace / extended_rights) gəldiyi üçün
-     matchesACLFilter-in əlavə süzgəcinə ehtiyac yoxdur. */
+     limitsiz çəkilmiş _aclFullFetchData-dır. Bu sətirlər artıq uyğun
+     SQLite cədvəlindən (dangerous_ace / extended_rights) gəlir, lakin
+     həmin cədvəllər RAW ACL nəticələridir — default/built-in trustee
+     istisnası (ACL_EXCLUDED_DEFAULT_PRINCIPALS) server tərəfində
+     TƏTBİQ OLUNMUR (bax api.py: dangerous_ace() funksiyası mövcuddur,
+     amma heç bir yerdən çağırılmır — collector.py bunu wire etməyib).
+     Ona görə matchesACLFilter() burda ÇAĞIRILMASA da (o, 'aces' bazasına
+     aid digər şərtləri ehtiva edir və full-fetch üçün uyğun deyil),
+     isExcludedDefaultPrincipal() mütləq tətbiq olunmalıdır — əks halda
+     Dangerous ACEs / Extended Rights nəticələrində SYSTEM, Domain Admins,
+     DnsAdmins və digər default trustee-lər görünməyə davam edər. */
   let list;
   if (_aclFullFetchActive) {
-    list = _aclFullFetchData.slice();
+    list = _aclFullFetchData.filter(item => !isExcludedDefaultPrincipal(item));
   } else {
     list = aclData.filter(matchesACLFilter);
+  }
+
+  if (domainsListCache && aclDomainsSelected && aclDomainsSelected.size < domainsListCache.length) {
+    const activeDomains = domainsListCache.filter(d => aclDomainsSelected.has(d.name.toLowerCase()));
+    list = list.filter(i => activeDomains.some(d => aclItemBelongsToDomain(i, d)));
   }
 
   if (aclSearch) {
@@ -829,8 +1062,9 @@ async function _runACLServerSideFilter(myToken) {
     if (ACL_FILTER_TABLE_MAP[aclFilter]) {
       _aclFullFetchActive = true;
       _aclFullFetchData   = rows;
+      const visibleCount = rows.filter(item => !isExcludedDefaultPrincipal(item)).length;
       document.getElementById('acl-meta').textContent =
-        `${rows.length.toLocaleString()} / ${(data.total ?? rows.length).toLocaleString()} (filtrlənmiş, source: ${baseTable}) · domain_data.db`;
+        `${visibleCount.toLocaleString()} / ${(data.total ?? rows.length).toLocaleString()} (filtrlənmiş, default trustee-lər çıxarılıb, source: ${baseTable}) · domain_data.db`;
     } else {
       aclData       = rows;
       _aclOffset    = rows.length;
@@ -933,8 +1167,12 @@ async function loadACLFullFilterTable(filterKey) {
     const rows = Array.isArray(data.rows) ? data.rows : [];
     _aclFullFetchData = rows;
 
+    /* Meta yazısı raw (DB-dəki) say deyil, default trustee-lər çıxarıldıqdan
+       sonra faktiki görünəcək say ilə göstərilsin — əks halda "459 / 459"
+       yazıb cədvəldə 62 sətir göstərmək çaşdırıcı olardı. */
+    const visibleCount = rows.filter(item => !isExcludedDefaultPrincipal(item)).length;
     document.getElementById('acl-meta').textContent =
-      `${rows.length.toLocaleString()} / ${rows.length.toLocaleString()} ${filterKey === 'dangerous' ? 'Dangerous ACE' : 'Extended Right'} (limitsiz, source: ${table}) · domain_data.db`;
+      `${visibleCount.toLocaleString()} / ${rows.length.toLocaleString()} ${filterKey === 'dangerous' ? 'Dangerous ACE' : 'Extended Right'} (default trustee-lər çıxarılıb, source: ${table}) · domain_data.db`;
 
     renderACLObjectFilters();
     renderACLs();

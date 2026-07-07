@@ -90,6 +90,134 @@ function isPrivilegedGroup(sid, name) {
 let groupsFilter = 'all';
 let groupsSearch = '';
 
+/* ── Select Domains (Groups tab) ──
+   Users tabındakı paylaşılan domainsListCache/ensureDomainsListLoaded()
+   (03-objects-users.js) istifadə olunur; Groups tabına aid yalnız seçim
+   state-i (groupsDomainsSelected) və dropdown UI-si burada saxlanılır.
+   Uyğunluq group_sid (domain SID prefiksi) və ya group_dn son hissəsinə
+   (dc=...) görə yoxlanılır. */
+let groupsDomainsSelected     = null;   // Set<string> (lowercased domain names) — null = hamısı seçili
+let groupsDomainsDropdownOpen = false;
+
+function groupBelongsToDomain(group, domain) {
+  const dn = group.dn || group.group_dn || '';
+  const sid = group.sid || group.group_sid || '';
+  if (domain.sid && sid) {
+    const s  = String(sid).trim().toUpperCase();
+    const ds = domain.sid.toUpperCase();
+    if (s === ds || s.startsWith(ds + '-')) return true;
+  }
+  const suffix = domainNameToDcSuffix(domain.name);
+  if (!suffix) return false;
+  return dn.toLowerCase().endsWith(suffix);
+}
+
+async function toggleGroupsDomainsDropdown(e) {
+  e && e.stopPropagation();
+  const dd = document.getElementById('groups-domains-dropdown');
+  if (!dd) return;
+
+  if (groupsDomainsDropdownOpen) {
+    closeGroupsDomainsDropdown();
+    return;
+  }
+
+  groupsDomainsDropdownOpen = true;
+  dd.classList.add('show');
+
+  const listEl = document.getElementById('groups-domains-dropdown-list');
+  if (listEl) listEl.innerHTML = '<div class="domains-dropdown-loading">Loading domains…</div>';
+
+  try {
+    await ensureDomainsListLoaded();
+    if (!groupsDomainsSelected) {
+      groupsDomainsSelected = new Set(domainsListCache.map(d => d.name.toLowerCase()));
+    }
+    renderGroupsDomainsDropdownList();
+  } catch (err) {
+    if (listEl) listEl.innerHTML = `<div class="domains-dropdown-empty">${escapeHtml(err.message)}</div>`;
+  }
+
+  document.addEventListener('click', handleGroupsDomainsDropdownOutsideClick);
+  document.addEventListener('keydown', handleGroupsDomainsDropdownEscape);
+}
+
+function closeGroupsDomainsDropdown() {
+  groupsDomainsDropdownOpen = false;
+  const dd = document.getElementById('groups-domains-dropdown');
+  if (dd) dd.classList.remove('show');
+  document.removeEventListener('click', handleGroupsDomainsDropdownOutsideClick);
+  document.removeEventListener('keydown', handleGroupsDomainsDropdownEscape);
+}
+
+function handleGroupsDomainsDropdownOutsideClick(e) {
+  const wrap = document.getElementById('groups-domains-select-wrap');
+  if (wrap && !wrap.contains(e.target)) closeGroupsDomainsDropdown();
+}
+
+function handleGroupsDomainsDropdownEscape(e) {
+  if (e.key === 'Escape') closeGroupsDomainsDropdown();
+}
+
+function renderGroupsDomainsDropdownList() {
+  const listEl = document.getElementById('groups-domains-dropdown-list');
+  if (!listEl) return;
+
+  if (!domainsListCache || domainsListCache.length === 0) {
+    listEl.innerHTML = '<div class="domains-dropdown-empty">No domains found</div>';
+    return;
+  }
+
+  listEl.innerHTML = domainsListCache.map(d => {
+    const key = d.name.toLowerCase();
+    const checked = groupsDomainsSelected.has(key);
+    const sidLine = d.sid
+      ? `<div class="domains-dropdown-item-sid">${escapeHtml(d.sid)}</div>`
+      : `<div class="domains-dropdown-item-sid dim">SID unresolved · filtering by DN</div>`;
+    return `
+      <label class="domains-dropdown-item${d.isCurrent ? ' current' : ''}" data-domain="${escapeHtml(key)}">
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleGroupDomainSelected('${key.replace(/'/g, "\\'")}', this.checked)">
+        <div class="domains-dropdown-item-main">
+          <div class="domains-dropdown-item-top">
+            <span class="domains-dropdown-item-name">${escapeHtml(d.name)}</span>
+            ${d.isCurrent ? '<span class="domains-dropdown-badge">Current</span>' : '<span class="domains-dropdown-badge trust">Trust</span>'}
+          </div>
+          ${sidLine}
+        </div>
+      </label>`;
+  }).join('');
+
+  updateGroupsDomainsSelectCount();
+}
+
+function updateGroupsDomainsSelectCount() {
+  const countEl = document.getElementById('groups-domains-select-count');
+  if (!countEl || !domainsListCache) return;
+  const total = domainsListCache.length;
+  const selected = groupsDomainsSelected ? groupsDomainsSelected.size : total;
+  if (selected >= total) {
+    countEl.style.display = 'none';
+  } else {
+    countEl.style.display = 'inline-flex';
+    countEl.textContent = `${selected}/${total}`;
+  }
+}
+
+function toggleGroupDomainSelected(domainKey, checked) {
+  if (!groupsDomainsSelected) groupsDomainsSelected = new Set();
+  if (checked) groupsDomainsSelected.add(domainKey);
+  else groupsDomainsSelected.delete(domainKey);
+  updateGroupsDomainsSelectCount();
+  renderGroups();
+}
+
+function resetGroupsDomainsSelection() {
+  if (!domainsListCache) return;
+  groupsDomainsSelected = new Set(domainsListCache.map(d => d.name.toLowerCase()));
+  renderGroupsDomainsDropdownList();
+  renderGroups();
+}
+
 /* ────────────────────────────────────────────────────
    LOAD  (yalnız DB_BASE — JSONL/snapshot yoxdur)
    ──────────────────────────────────────────────────── */
@@ -97,6 +225,9 @@ async function loadGroups() {
   setGroupsLoading(true, 'Loading groups from DB...');
   document.getElementById('gr-table-body').innerHTML = '';
   closeGroupDetail();
+
+  // Domen seçimi reconnect zamanı yenidən qiymətləndirilsin.
+  groupsDomainsSelected = null;
 
   try {
     const url = `${DB_BASE}/api/list/groups?limit=2000`;
@@ -358,6 +489,11 @@ function renderGroups() {
   body.innerHTML = '';
   let list = groupsData;
 
+  if (domainsListCache && groupsDomainsSelected && groupsDomainsSelected.size < domainsListCache.length) {
+    const activeDomains = domainsListCache.filter(d => groupsDomainsSelected.has(d.name.toLowerCase()));
+    list = list.filter(g => activeDomains.some(d => groupBelongsToDomain(g, d)));
+  }
+
   if (groupsSearch) list = list.filter(g =>
     (g.name     || '').toLowerCase().includes(groupsSearch) ||
     (g.sid      || '').toLowerCase().includes(groupsSearch) ||
@@ -380,7 +516,7 @@ function renderGroups() {
 
   list.forEach(group => {
     const row = document.createElement('div');
-    row.className = 'gr-row';
+    row.className = 'gr-row' + (group.is_privileged ? ' privileged' : '');
 
     const membersCount = Number.isFinite(group.member_count) ? group.member_count : '—';
     const membersRowId = `gr-members-${Math.random().toString(36).slice(2)}`;

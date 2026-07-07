@@ -5,15 +5,15 @@ from typing import Protocol, runtime_checkable
 @dataclass
 class LdapConfig:
     connect_timeout: int = 10
-    receive_timeout: int = 120   # hər sorğu (search) üçün cavab gözləmə limiti — 2 dəqiqə
-    page_size:       int = 1000
+    receive_timeout: int = 120
+    page_size:       int = 200
 
     @classmethod
     def from_app_config(cls, config) -> "LdapConfig":
         return cls(
             connect_timeout=getattr(config, "LDAP_CONNECT_TIMEOUT", 10),
             receive_timeout=getattr(config, "LDAP_RECEIVE_TIMEOUT", 120),
-            page_size=getattr(config, "LDAP_PAGE_SIZE", 1000),
+            page_size=getattr(config, "LDAP_PAGE_SIZE", 200),
         )
 
 

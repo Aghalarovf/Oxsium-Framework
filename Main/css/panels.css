@@ -97,7 +97,7 @@
 
 .stat-value {
     font-family: var(--head);
-    font-size: 20px;
+    font-size: 15px;
     font-weight: 700;
     color: var(--text-hi);
     word-break: break-all;
@@ -108,7 +108,7 @@
 .stat-value.green  { color: var(--green);  text-shadow: 0 0 6px rgba(200,170,60,0.40); }
 .stat-value.amber  { color: var(--amber);  text-shadow: 0 0 6px rgba(240,192,48,0.45); }
 .stat-value.red    { color: var(--red);    text-shadow: 0 0 6px rgba(220,140,20,0.40); }
-.stat-value.dim    { color: var(--text-dim); font-size: 13px; }
+.stat-value.dim    { color: var(--text-dim); font-size: 11px; }
 
 .stat-sub {
     font-size: 10px;

@@ -12,6 +12,261 @@ let usersContextMenuEl      = null;
 let usersContextTarget      = null;
 let usersAttackHintModalEl  = null;
 
+/* ── Select Domains ──
+   Toolbar üzərindəki "Select Domains" düyməsi açılanda domain_data.db-dəki
+   "trusts" cədvəlindən "name" atributunu (etibar münasibəti olan domenlər) +
+   cari qoşulmuş domenin adını (state.domain) göstərir. Seçim edildikdə
+   Users cədvəli seçilmiş domenin "domain_sid" atributuna uyğun hesabları
+   göstərəcək şəkildə filtrlənir (DN son hissəsi ilə deyil, birbaşa SID
+   müqayisəsi ilə — çünki bir domenin adı ilə SID-i həmişə DN-dən çıxarıla
+   bilmir, məs. forest daxilində uşaq/valideyn domenlər). */
+let domainsListCache   = null;   // [{ name, isCurrent, sid }]
+let domainsSelected    = null;   // Set<string> (lowercased domain names) — null = hələ yüklənməyib / hamısı seçili
+let domainsDropdownOpen = false;
+
+/* trusts.sid sütunu backend tərəfindən Python bytes obyektinin str() forması
+   kimi saxlanılıb (məs. "b'\\x01\\x04\\x00...\\xe0#'"), əsl binary SID deyil.
+   Bunu Windows SID formatına (S-1-5-21-...) çevirmək üçün əvvəlcə python
+   bytes literalını bayt massivinə, sonra SID sətrinə çeviririk. */
+function parsePythonBytesLiteralToArray(str) {
+  if (typeof str !== 'string') return null;
+  const s = str.trim();
+  const m = s.match(/^b(['"])([\s\S]*)\1$/);
+  if (!m) return null;
+  const body = m[2];
+  const bytes = [];
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === '\\' && i + 1 < body.length) {
+      const next = body[i + 1];
+      if (next === 'x' && i + 3 < body.length) {
+        bytes.push(parseInt(body.substr(i + 2, 2), 16));
+        i += 3;
+      } else {
+        const map = { n: 0x0a, r: 0x0d, t: 0x09, '\\': 0x5c, "'": 0x27, '"': 0x22, '0': 0x00, a: 0x07, b: 0x08, f: 0x0c, v: 0x0b };
+        bytes.push(map[next] !== undefined ? map[next] : (next.charCodeAt(0) & 0xff));
+        i += 1;
+      }
+    } else {
+      bytes.push(ch.charCodeAt(0) & 0xff);
+    }
+  }
+  return bytes;
+}
+
+function sidBytesToString(bytes) {
+  if (!Array.isArray(bytes) || bytes.length < 8) return null;
+  const revision = bytes[0];
+  const subCount = bytes[1];
+  let idAuth = 0n;
+  for (let i = 2; i < 8; i++) idAuth = (idAuth << 8n) | BigInt(bytes[i]);
+  const subs = [];
+  for (let i = 0; i < subCount; i++) {
+    const off = 8 + i * 4;
+    if (off + 4 > bytes.length) break;
+    const sub = (bytes[off] | (bytes[off + 1] << 8) | (bytes[off + 2] << 16) | (bytes[off + 3] * 0x1000000)) >>> 0;
+    subs.push(sub);
+  }
+  if (subs.length === 0) return null;
+  return `S-${revision}-${idAuth.toString()}-${subs.join('-')}`;
+}
+
+/* trust.sid dəyərini normallaşdırır: artıq "S-1-5-..." formatındadırsa
+   olduğu kimi qaytarır, python bytes-repr formatındadırsa çevirir. */
+function normalizeTrustSid(rawSid) {
+  if (!rawSid) return null;
+  const s = String(rawSid).trim();
+  if (/^S-\d/i.test(s)) return s.toUpperCase();
+  const bytes = parsePythonBytesLiteralToArray(s);
+  if (!bytes) return null;
+  return sidBytesToString(bytes);
+}
+
+/* Cari domenin SID-i heç yerdə ayrıca saxlanılmır — lakin bütün user
+   qeydlərinin domain_sid sahəsi eyni domenə aid olduğundan, yüklənmiş
+   usersData içindəki ən çox rast gəlinən domain_sid dəyəri cari domenin
+   SID-i kimi qəbul edilir. */
+function guessCurrentDomainSid() {
+  if (!Array.isArray(usersData) || usersData.length === 0) return null;
+  const counts = new Map();
+  usersData.forEach(u => {
+    const sid = (u.domain_sid || '').trim();
+    if (!sid) return;
+    counts.set(sid, (counts.get(sid) || 0) + 1);
+  });
+  let best = null, bestCount = 0;
+  counts.forEach((count, sid) => { if (count > bestCount) { best = sid; bestCount = count; } });
+  return best;
+}
+
+function domainNameToDcSuffix(name) {
+  return (name || '')
+    .toLowerCase()
+    .split('.')
+    .filter(Boolean)
+    .map(p => `dc=${p}`)
+    .join(',');
+}
+
+function userBelongsToDomain(u, domain) {
+  // Üstünlük SID müqayisəsindədir — domain_sid dəqiq və etibarlıdır.
+  if (domain.sid) {
+    return (u.domain_sid || '').trim().toUpperCase() === domain.sid.toUpperCase();
+  }
+  // SID tapılmadıqda (məs. trust.sid dekodlanmadısa) DN son hissəsinə görə fallback.
+  const suffix = domainNameToDcSuffix(domain.name);
+  if (!suffix) return false;
+  return (u.dn || '').toLowerCase().endsWith(suffix);
+}
+
+async function fetchTrustsForDomainsDropdown() {
+  const url = `${DB_BASE}/api/list/trusts?limit=500`;
+  const resp = await fetch(url, { method: 'GET' });
+  const data = await resp.json().catch(() => null);
+  if (!resp.ok || !data) {
+    throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine xətası (HTTP ${resp.status})`);
+  }
+  const raw = Array.isArray(data.records) ? data.records : (Array.isArray(data.rows) ? data.rows : []);
+  return raw
+    .map(t => ({ name: t.name, sid: normalizeTrustSid(t.sid) }))
+    .filter(t => !!t.name);
+}
+
+async function ensureDomainsListLoaded() {
+  if (domainsListCache) return domainsListCache;
+
+  const currentDomain = (state.domain || '').trim();
+  const currentDomainSid = guessCurrentDomainSid();
+  let trusts = [];
+  try {
+    trusts = await fetchTrustsForDomainsDropdown();
+  } catch (err) {
+    addLog(`Select Domains: ${err.message}`, 'err');
+  }
+
+  const seen = new Set();
+  const list = [];
+  if (currentDomain) {
+    list.push({ name: currentDomain, isCurrent: true, sid: currentDomainSid });
+    seen.add(currentDomain.toLowerCase());
+  }
+  trusts.forEach(t => {
+    const key = (t.name || '').toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    list.push({ name: t.name, isCurrent: false, sid: t.sid });
+  });
+
+  domainsListCache = list;
+  if (!domainsSelected) {
+    domainsSelected = new Set(list.map(d => d.name.toLowerCase()));
+  }
+  return list;
+}
+
+function renderDomainsDropdownList() {
+  const listEl = document.getElementById('domains-dropdown-list');
+  if (!listEl) return;
+
+  if (!domainsListCache || domainsListCache.length === 0) {
+    listEl.innerHTML = '<div class="domains-dropdown-empty">No domains found</div>';
+    return;
+  }
+
+  listEl.innerHTML = domainsListCache.map(d => {
+    const key = d.name.toLowerCase();
+    const checked = domainsSelected.has(key);
+    const sidLine = d.sid
+      ? `<div class="domains-dropdown-item-sid">${escapeHtml(d.sid)}</div>`
+      : `<div class="domains-dropdown-item-sid dim">SID unresolved · filtering by DN</div>`;
+    return `
+      <label class="domains-dropdown-item${d.isCurrent ? ' current' : ''}" data-domain="${escapeHtml(key)}">
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleDomainSelected('${key.replace(/'/g, "\\'")}', this.checked)">
+        <div class="domains-dropdown-item-main">
+          <div class="domains-dropdown-item-top">
+            <span class="domains-dropdown-item-name">${escapeHtml(d.name)}</span>
+            ${d.isCurrent ? '<span class="domains-dropdown-badge">Current</span>' : '<span class="domains-dropdown-badge trust">Trust</span>'}
+          </div>
+          ${sidLine}
+        </div>
+      </label>`;
+  }).join('');
+
+  updateDomainsSelectCount();
+}
+
+function updateDomainsSelectCount() {
+  const countEl = document.getElementById('domains-select-count');
+  if (!countEl || !domainsListCache) return;
+  const total = domainsListCache.length;
+  const selected = domainsSelected ? domainsSelected.size : total;
+  if (selected >= total) {
+    countEl.style.display = 'none';
+  } else {
+    countEl.style.display = 'inline-flex';
+    countEl.textContent = `${selected}/${total}`;
+  }
+}
+
+async function toggleDomainsDropdown(e) {
+  e && e.stopPropagation();
+  const dd = document.getElementById('domains-dropdown');
+  if (!dd) return;
+
+  if (domainsDropdownOpen) {
+    closeDomainsDropdown();
+    return;
+  }
+
+  domainsDropdownOpen = true;
+  dd.classList.add('show');
+
+  const listEl = document.getElementById('domains-dropdown-list');
+  if (listEl) listEl.innerHTML = '<div class="domains-dropdown-loading">Loading domains…</div>';
+
+  try {
+    await ensureDomainsListLoaded();
+    renderDomainsDropdownList();
+  } catch (err) {
+    if (listEl) listEl.innerHTML = `<div class="domains-dropdown-empty">${escapeHtml(err.message)}</div>`;
+  }
+
+  document.addEventListener('click', handleDomainsDropdownOutsideClick);
+  document.addEventListener('keydown', handleDomainsDropdownEscape);
+}
+
+function closeDomainsDropdown() {
+  domainsDropdownOpen = false;
+  const dd = document.getElementById('domains-dropdown');
+  if (dd) dd.classList.remove('show');
+  document.removeEventListener('click', handleDomainsDropdownOutsideClick);
+  document.removeEventListener('keydown', handleDomainsDropdownEscape);
+}
+
+function handleDomainsDropdownOutsideClick(e) {
+  const wrap = document.getElementById('domains-select-wrap');
+  if (wrap && !wrap.contains(e.target)) closeDomainsDropdown();
+}
+
+function handleDomainsDropdownEscape(e) {
+  if (e.key === 'Escape') closeDomainsDropdown();
+}
+
+function toggleDomainSelected(domainKey, checked) {
+  if (!domainsSelected) domainsSelected = new Set();
+  if (checked) domainsSelected.add(domainKey);
+  else domainsSelected.delete(domainKey);
+  updateDomainsSelectCount();
+  renderUsers();
+}
+
+function resetDomainsSelection() {
+  if (!domainsListCache) return;
+  domainsSelected = new Set(domainsListCache.map(d => d.name.toLowerCase()));
+  renderDomainsDropdownList();
+  renderUsers();
+}
+
 /* ── Helpers ── */
 function decodeEncryptionTypes(val) {
   if (typeof val === 'undefined' || val === null) return [];
@@ -60,6 +315,11 @@ async function loadUsers() {
   document.getElementById('users-loading').style.display = 'flex';
   document.getElementById('u-table-body').innerHTML = '';
   closeDetail();
+
+  // Domen siyahısı (cari domen + trusts) yenidən yüklənsin, çünki
+  // reconnect zamanı state.domain dəyişmiş ola bilər.
+  domainsListCache = null;
+  domainsSelected  = null;
 
   try {
     // limit yüksək saxlanılır ki, "Users" statistikası (silinməmiş say) və
@@ -112,6 +372,10 @@ function renderUsers() {
   body.innerHTML = '';
 
   let list = usersData;
+  if (domainsListCache && domainsSelected && domainsSelected.size < domainsListCache.length) {
+    const activeDomains = domainsListCache.filter(d => domainsSelected.has(d.name.toLowerCase()));
+    list = list.filter(u => activeDomains.some(d => userBelongsToDomain(u, d)));
+  }
   if (usersSearch) {
     list = list.filter(u =>
       u.username.toLowerCase().includes(usersSearch) ||

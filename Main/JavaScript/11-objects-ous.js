@@ -8,6 +8,134 @@
 let ousFilter = 'all';
 let ousSearch = '';
 
+/* ── Select Domains (OUs tab) ──
+   Users tabındakı paylaşılan domainsListCache/ensureDomainsListLoaded()
+   (03-objects-users.js) istifadə olunur; OUs tabına aid yalnız seçim
+   state-i (ousDomainsSelected) və dropdown UI-si burada saxlanılır.
+   Uyğunluq OU-nun sid (varsa) və ya dn/path son hissəsinə (dc=...) görə
+   yoxlanılır. */
+let ousDomainsSelected     = null;   // Set<string> (lowercased domain names) — null = hamısı seçili
+let ousDomainsDropdownOpen = false;
+
+function ouBelongsToDomain(ou, domain) {
+  const dn  = ou.dn || ou.path || '';
+  const sid = ou.sid || '';
+  if (domain.sid && sid) {
+    const s  = String(sid).trim().toUpperCase();
+    const ds = domain.sid.toUpperCase();
+    if (s === ds || s.startsWith(ds + '-')) return true;
+  }
+  const suffix = domainNameToDcSuffix(domain.name);
+  if (!suffix) return false;
+  return dn.toLowerCase().endsWith(suffix);
+}
+
+async function toggleOUsDomainsDropdown(e) {
+  e && e.stopPropagation();
+  const dd = document.getElementById('ou-domains-dropdown');
+  if (!dd) return;
+
+  if (ousDomainsDropdownOpen) {
+    closeOUsDomainsDropdown();
+    return;
+  }
+
+  ousDomainsDropdownOpen = true;
+  dd.classList.add('show');
+
+  const listEl = document.getElementById('ou-domains-dropdown-list');
+  if (listEl) listEl.innerHTML = '<div class="domains-dropdown-loading">Loading domains…</div>';
+
+  try {
+    await ensureDomainsListLoaded();
+    if (!ousDomainsSelected) {
+      ousDomainsSelected = new Set(domainsListCache.map(d => d.name.toLowerCase()));
+    }
+    renderOUsDomainsDropdownList();
+  } catch (err) {
+    if (listEl) listEl.innerHTML = `<div class="domains-dropdown-empty">${escapeHtml(err.message)}</div>`;
+  }
+
+  document.addEventListener('click', handleOUsDomainsDropdownOutsideClick);
+  document.addEventListener('keydown', handleOUsDomainsDropdownEscape);
+}
+
+function closeOUsDomainsDropdown() {
+  ousDomainsDropdownOpen = false;
+  const dd = document.getElementById('ou-domains-dropdown');
+  if (dd) dd.classList.remove('show');
+  document.removeEventListener('click', handleOUsDomainsDropdownOutsideClick);
+  document.removeEventListener('keydown', handleOUsDomainsDropdownEscape);
+}
+
+function handleOUsDomainsDropdownOutsideClick(e) {
+  const wrap = document.getElementById('ou-domains-select-wrap');
+  if (wrap && !wrap.contains(e.target)) closeOUsDomainsDropdown();
+}
+
+function handleOUsDomainsDropdownEscape(e) {
+  if (e.key === 'Escape') closeOUsDomainsDropdown();
+}
+
+function renderOUsDomainsDropdownList() {
+  const listEl = document.getElementById('ou-domains-dropdown-list');
+  if (!listEl) return;
+
+  if (!domainsListCache || domainsListCache.length === 0) {
+    listEl.innerHTML = '<div class="domains-dropdown-empty">No domains found</div>';
+    return;
+  }
+
+  listEl.innerHTML = domainsListCache.map(d => {
+    const key = d.name.toLowerCase();
+    const checked = ousDomainsSelected.has(key);
+    const sidLine = d.sid
+      ? `<div class="domains-dropdown-item-sid">${escapeHtml(d.sid)}</div>`
+      : `<div class="domains-dropdown-item-sid dim">SID unresolved · filtering by DN</div>`;
+    return `
+      <label class="domains-dropdown-item${d.isCurrent ? ' current' : ''}" data-domain="${escapeHtml(key)}">
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleOUDomainSelected('${key.replace(/'/g, "\\'")}', this.checked)">
+        <div class="domains-dropdown-item-main">
+          <div class="domains-dropdown-item-top">
+            <span class="domains-dropdown-item-name">${escapeHtml(d.name)}</span>
+            ${d.isCurrent ? '<span class="domains-dropdown-badge">Current</span>' : '<span class="domains-dropdown-badge trust">Trust</span>'}
+          </div>
+          ${sidLine}
+        </div>
+      </label>`;
+  }).join('');
+
+  updateOUsDomainsSelectCount();
+}
+
+function updateOUsDomainsSelectCount() {
+  const countEl = document.getElementById('ou-domains-select-count');
+  if (!countEl || !domainsListCache) return;
+  const total = domainsListCache.length;
+  const selected = ousDomainsSelected ? ousDomainsSelected.size : total;
+  if (selected >= total) {
+    countEl.style.display = 'none';
+  } else {
+    countEl.style.display = 'inline-flex';
+    countEl.textContent = `${selected}/${total}`;
+  }
+}
+
+function toggleOUDomainSelected(domainKey, checked) {
+  if (!ousDomainsSelected) ousDomainsSelected = new Set();
+  if (checked) ousDomainsSelected.add(domainKey);
+  else ousDomainsSelected.delete(domainKey);
+  updateOUsDomainsSelectCount();
+  renderOUs();
+}
+
+function resetOUsDomainsSelection() {
+  if (!domainsListCache) return;
+  ousDomainsSelected = new Set(domainsListCache.map(d => d.name.toLowerCase()));
+  renderOUsDomainsDropdownList();
+  renderOUs();
+}
+
 /* OU objects toggle cache */
 const ouObjectsCache   = new Map(); /* key: ou rowid/id → { users:[], computers:[], loaded: bool } */
 const ouObjectsLoading = new Set(); /* loading lock */
@@ -194,6 +322,9 @@ async function loadOUs() {
   document.getElementById('o-table-body').innerHTML = '';
   closeOUDetail();
 
+  // Domen seçimi reconnect zamanı yenidən qiymətləndirilsin.
+  ousDomainsSelected = null;
+
   /* 1) Domain Object qovluğunda snapshot varsa, connect tələb etmədən oxu */
   const snap = await tryLoadSnapshotSection('ous');
   if (snap) {
@@ -242,6 +373,10 @@ async function loadOUs() {
 function renderOUs() {
   const body = document.getElementById('o-table-body');
   let list = ousData;
+  if (domainsListCache && ousDomainsSelected && ousDomainsSelected.size < domainsListCache.length) {
+    const activeDomains = domainsListCache.filter(d => ousDomainsSelected.has(d.name.toLowerCase()));
+    list = list.filter(ou => activeDomains.some(d => ouBelongsToDomain(ou, d)));
+  }
   if (ousSearch) list = list.filter(ou =>
     (ou.name || '').toLowerCase().includes(ousSearch) ||
     (ou.path || '').toLowerCase().includes(ousSearch) ||

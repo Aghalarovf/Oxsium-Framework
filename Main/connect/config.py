@@ -45,10 +45,19 @@ class Config:
         "sqlite_reader": int(os.getenv("SQLITE_READER_PORT", 8800)),
     }
 
-    LDAP_CONNECT_TIMEOUT: int = int(os.getenv("LDAP_CONNECT_TIMEOUT", 5))
-    LDAP_RECEIVE_TIMEOUT: int = int(os.getenv("LDAP_RECEIVE_TIMEOUT", 10))
+    # DÜZƏLİŞ: bu default-lar əvvəllər `acl/models.py`-dəki LdapConfig-in
+    # VPN-üçün tənzimlənmiş default-larını (receive_timeout=120,
+    # page_size=200) SƏSSİZCƏ üstələyirdi — `LdapConfig.from_app_config`
+    # `getattr(config, "LDAP_RECEIVE_TIMEOUT", 120)` çağırsa da, bu `Config`
+    # sinfi HƏMİŞƏ öz atributuna malik olduğu üçün `getattr`-ın 120 fallback-i
+    # heç vaxt işə düşmürdü — əsl runtime dəyəri 10 saniyə idi, 120 yox.
+    # İndi hər iki qat (Config + LdapConfig) eyni VPN-dözümlü dəyərləri
+    # paylaşır. `connect_timeout` da 5-dən 15-ə qaldırıldı — VPN-də ilkin
+    # TCP/TLS handshake 5 saniyəyə həmişə çatmaya bilər.
+    LDAP_CONNECT_TIMEOUT: int = int(os.getenv("LDAP_CONNECT_TIMEOUT", 15))
+    LDAP_RECEIVE_TIMEOUT: int = int(os.getenv("LDAP_RECEIVE_TIMEOUT", 120))
     PORT_CHECK_TIMEOUT:   int = int(os.getenv("PORT_CHECK_TIMEOUT",   2))
-    LDAP_PAGE_SIZE:       int = int(os.getenv("LDAP_PAGE_SIZE",       500))
+    LDAP_PAGE_SIZE:       int = int(os.getenv("LDAP_PAGE_SIZE",       200))
     DOMAIN_LEVEL_MAP: dict[str, str] = {
         "0": "2000", "2": "2003", "3": "2008",
         "4": "2008 R2", "5": "2012", "6": "2012 R2", "7": "2016+",

@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-# Config import etmə
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -16,7 +15,6 @@ if str(_PROJECT_ROOT) not in sys.path:
 try:
     from connect.config import Config
 except ImportError:
-    # Əgər connect config-inə çata bilmə, dəfault istifadə etməli
     class Config:
         DOMAIN_OBJECT_DIR           = Path(__file__).parent.parent.parent / "Main" / "Domain Object"
         DOMAIN_ACES_JSON            = DOMAIN_OBJECT_DIR / "domain_aces.jsonl"
@@ -31,6 +29,10 @@ from .constants import (
     _AD_SENSITIVE_TEMPLATES,
     _TEMPLATE_CRITICAL_RIGHTS,
     _SD_FLAGS_FULL,
+    _DANGEROUS_ACE_NOISY_NAMES,
+    _DANGEROUS_ACE_NOISY_RIDS,
+    _EXTENDED_RIGHTS_NOISY_NAMES,
+    _EXTENDED_RIGHTS_NOISY_RIDS,
 )
 from .models import LdapConfig, AclFilterConfig, ObjectScope
 from .backends import (
@@ -45,9 +47,7 @@ from .parsers import _build_sid_map, _fetch_object_sd, _parse_dacl_to_records, _
 from .collector import AclCollector
 
 
-
 def _write_jsonl(records: list[dict], output_path: str) -> str:
-    """Hər record-u öz sətrində JSON obyekti kimi yazır (JSON Lines / .jsonl)."""
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as fh:
         for record in records:
@@ -64,8 +64,6 @@ def _write_acls_to_jsonl(acl_result: dict, output_path: str) -> str:
 
 
 def _jsonl_name(config_attr: str, default_name: str) -> str:
-    """Config-də müvafiq atribut varsa onun fayl adını qaytarır;
-    yoxdursa default_name qaytarır. Bütün yollar artıq .jsonl-dir."""
     _path = getattr(Config, config_attr, None)
     if _path is None:
         return default_name
@@ -73,10 +71,6 @@ def _jsonl_name(config_attr: str, default_name: str) -> str:
 
 
 def _capture_error(stage: str, context: str, exc: BaseException) -> dict:
-    """SRP: istənilən yerdə (api.py səviyyəsində) tutulan xətanı collector.py-
-    dəki `_record_error` ilə EYNİ formata salır ki, bütün xəta mənbələri
-    (LDAP bağlantısı, guid_map qurulması, fayl I/O, gözlənilməz istisnalar)
-    domain_aces.jsonl-in son metadata sətrində vahid formatda görünsün."""
     return {
         "stage":         stage,
         "context":       context,
@@ -87,13 +81,6 @@ def _capture_error(stage: str, context: str, exc: BaseException) -> dict:
 
 
 def _build_metadata_record(result: dict, extra_errors: list[dict] | None = None) -> dict:
-    """domain_aces.jsonl-in son sətri kimi yazılacaq metadata obyektini qurur.
-    `result["meta"]["errors"]` (collector daxilində toplanmış bütün xətalar)
-    + `extra_errors` (api.py səviyyəsində, collector çağırışından kənarda
-    tutulan xətalar — məs. fayl açıla bilməməsi, guid_map qurula bilməməsi,
-    tamamilə gözlənilməz istisnalar) burada birləşdirilir ki, HANSI mərhələdə
-    baş versə belə, hər xəta bu yekun sətirdə tam (stage/context/error_type/
-    error_message/traceback) əks olunsun."""
     meta   = dict(result.get("meta") or {})
     errors = list(meta.get("errors") or [])
     if extra_errors:
@@ -112,10 +99,6 @@ def _build_metadata_record(result: dict, extra_errors: list[dict] | None = None)
         "errors":           errors,
     }
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Public API
-# ══════════════════════════════════════════════════════════════════════════════
 
 def get_domain_acls(
     ip: str,
@@ -136,12 +119,6 @@ def get_domain_acls(
     flt      = acl_filter or AclFilterConfig()
     ldap_cfg = LdapConfig.from_app_config(config)
 
-    # DÜZƏLİŞ: bu funksiyanın hər erkən çıxış nöqtəsi (parser, domain/bind
-    # parse, LDAP bind) indi `meta.errors` daxilində eyni formatda (stage/
-    # context/error_type/error_message/traceback) tam xəta təfərrüatı
-    # qaytarır. Əvvəllər yalnız qısa `error` sətri var idi — indi çağıran
-    # (məs. collect_all_aces_to_json) bunu birbaşa domain_aces.jsonl-in
-    # metadata sətrinə əlavə edə bilir.
     try:
         parser = ImpacketParser()
     except ImportError as e:
@@ -181,10 +158,6 @@ def get_domain_acls(
         return {"success": False, "error": str(e), "code": 500,
                 "meta": {"error_count": 1, "errors": [err]}}
 
-    # Collector yaradılmazdan ƏVVƏL (məs. guid_map qurularkən) baş verə
-    # biləcək xətalar da bu siyahıya yığılır və collector-a ötürülür ki,
-    # nəticədəki `meta.errors`-da itməsin — əvvəllər bu xəta sadəcə udulub
-    # `_guid_map = None` edilirdi, heç yerdə görünmürdü.
     pre_errors: list[dict] = []
     try:
         _guid_map = None
@@ -195,11 +168,6 @@ def get_domain_acls(
                 _guid_map = None
                 pre_errors.append(_capture_error("build_guid_map", base_dn, e))
 
-        # 4 NC-nin paralel skan olunması üçün hər thread özünə ayrıca
-        # bağlantı aça bilsin deyə (ldap3 Connection thread-safe deyil).
-        # `sequential=True` olduqda conn_factory ötürülmür — bütün bazalar
-        # TƏK bağlantı üzərində ardıcıl skan olunur (VPN-də daha stabil,
-        # amma daha yavaş; users/computers modulunun yanaşmasına ən yaxın).
         conn_factory = None if sequential else make_conn_factory(
             ip, bind_user, password, auth_type, ldap_cfg,
         )
@@ -213,10 +181,6 @@ def get_domain_acls(
             io_workers=io_workers if io_workers is not None else 2,
             deep_scan_minimal=deep_scan_minimal,
         )
-        # `collector.collect(...)` artıq öz daxilində HƏR bir xətanı tutur
-        # və heç vaxt istisna atmır (bax: collector.py `collect()`), ona görə
-        # aşağıdakı `except Exception` yalnız tamamilə gözlənilməz (collector
-        # instansiyası qurularkən və s.) hallar üçün son mühafizə xəttidir.
         return collector.collect(
             flt, scope=scope, custom_filter=custom_filter, on_records=on_records,
         )
@@ -246,7 +210,6 @@ def collect_all_aces_to_json(
     deep_scan_minimal: bool = False,
     io_workers: Optional[int] = None,
 ) -> dict:
-    # Config-dən default-ləri oxu
     if output_dir is None:
         output_dir = str(Config.DOMAIN_OBJECT_DIR)
     if filename is None:
@@ -269,28 +232,14 @@ def collect_all_aces_to_json(
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, filename)
 
-    # DƏYİŞİKLİK: əvvəllər `get_domain_acls` bütün nəticəni yaddaşda
-    # topladıqdan SONRA `_write_acls_to_jsonl` bir dəfəyə bütöv faylı
-    # yazırdı. İndi hər batch (bax: collector._PARSE_BATCH_SIZE) hazır
-    # olan kimi, `on_records` callback-i ilə birbaşa fayla axın-axın
-    # yazılır — nəticə axırda gözlənilmir, mərhələ-mərhələ diskə düşür.
-    # (`_no_filter` istifadə olunduğu üçün bu funksiyada streaming zamanı
-    # heç bir record post-filter-də itmir — bütün filtrlər deaktivdir.)
     write_lock = threading.Lock()
     try:
         out_fh = open(output_path, "w", encoding="utf-8")
     except Exception as e:
-        # Fayl heç açıla bilməyibsə, içinə metadata da yaza bilmərik —
-        # bu, YEGANƏ hal ki, xəta yalnız qaytarılan dict-də qalır.
         err = _capture_error("open_output_file", output_path, e)
-        return {"success": False, "error": f"Fayl açıla bilmədi: {e}", "code": 500,
+        return {"success": False, "error": f"Could not open file: {e}", "code": 500,
                 "meta": {"error_count": 1, "errors": [err]}}
 
-    # DƏYİŞİKLİK: streaming yazısı zamanı baş verə biləcək xətalar (məs.
-    # JSON-a çevrilə bilməyən bir sahə, disk dolması, I/O xətası) əvvəllər
-    # `on_records` çağırışından collector-a sızıb bütün müvafiq NC-nin
-    # taranmasını dayandırırdı, amma HEÇ yerdə görünmürdü. İndi burada da
-    # tutulur, `stream_errors`-a yazılır və son metadata sətrinə əlavə edilir.
     stream_errors: list[dict] = []
 
     def _stream_write(records: list[dict]) -> None:
@@ -305,11 +254,6 @@ def collect_all_aces_to_json(
                 "stream_write", f"batch_size={len(records)}", e,
             ))
 
-    # DÜZƏLİŞ: `get_domain_acls(...)` özü artıq (collector.collect() daxilində)
-    # istisna atmır, amma burada YENƏ DƏ try/except qoyulur — bu, "istənilən
-    # hansı xəta olur olsun" tələbinə cavab verən son mühafizə xəttidir: hətta
-    # tamamilə gözlənilməyən (məs. kod dəyişikliyindən sonra yeni bir bug) bir
-    # istisna belə bura sızsa, proses çökmür, sadəcə metadata sətrinə yazılır.
     result: dict = {}
     top_level_error: dict | None = None
     try:
@@ -330,12 +274,6 @@ def collect_all_aces_to_json(
         top_level_error = _capture_error("collect_all_aces_to_json", domain, e)
         result = {"success": False, "error": str(e), "code": 500}
     finally:
-        # Metadata sətri fayl bağlanmazdan ƏVVƏL, .jsonl-in DAXİLİNDƏ son
-        # sətir kimi yazılır — istənilən hansı xəta olursa olsun (collector
-        # daxili, api.py səviyyəsi, streaming yazısı, tamamilə gözlənilməz),
-        # hamısı burada bir yerə toplanıb faylın özündə görünür. Bu, "success"
-        # olsa belə həmişə yazılır ki, qismən uğur/qismən xəta halları da
-        # (məs. 4 NC-dən biri uğursuz olsa) izlənilə bilsin.
         extra_errors = stream_errors + ([top_level_error] if top_level_error else [])
         try:
             meta_record = _build_metadata_record(result, extra_errors=extra_errors)
@@ -344,9 +282,6 @@ def collect_all_aces_to_json(
                 out_fh.write("\n")
                 out_fh.flush()
         except Exception:
-            # Metadata yazısının özü belə uğursuz olsa (məs. disk dolub),
-            # faylın bağlanmasına mane olmamalıdır — məlumat itkisi minimal
-            # saxlanılır, yenə də çağırana xəta strukturu qaytarılır.
             pass
         out_fh.close()
 
@@ -396,7 +331,6 @@ def check_sensitive_template_acls(
     filename: Optional[str] = None,
     resolve_guids: bool = False,
 ) -> dict:
-    # Config-dən default-ləri oxu
     if output_dir is None:
         output_dir = str(Config.DOMAIN_OBJECT_DIR)
     if filename is None:
@@ -504,7 +438,6 @@ def check_sensitive_template_acls(
                 "aces":               critical_aces + normal_aces,
             })
 
-        # Hər ACE-ni template metadata ilə birlikdə ayrı sətir kimi yaz (JSONL)
         flat_records: list[dict] = []
         for r in results:
             for ace in r.get("aces", []):
@@ -555,7 +488,6 @@ def deep_scan_domain_acls(
     output_dir: Optional[str] = None,
     filename: Optional[str] = None,
 ) -> dict:
-    # Config-dən default-ləri oxu
     if output_dir is None:
         output_dir = str(Config.DOMAIN_OBJECT_DIR)
     if filename is None:
@@ -593,7 +525,7 @@ def deep_scan_domain_acls(
     try:
         _write_acls_to_jsonl(result, output_path)
     except Exception as e:
-        return {"success": False, "error": f"JSONL yazma xətası: {e}", "code": 500}
+        return {"success": False, "error": f"JSONL write error: {e}", "code": 500}
 
     return {
         "success":     True,
@@ -603,13 +535,25 @@ def deep_scan_domain_acls(
     }
 
 
+def _is_noisy_trustee(
+    principal_name: str,
+    principal_sid: str,
+    noisy_names: frozenset[str],
+    noisy_rids: frozenset[str],
+) -> bool:
+    name = (principal_name or "").strip().upper()
+    if name in noisy_names:
+        return True
+    sid = principal_sid or ""
+    return any(sid.endswith(rid) for rid in noisy_rids)
+
+
 def dangerous_ace(
     acl_result: dict,
     output_dir: Optional[str] = None,
     dangerous_filename: Optional[str] = None,
     extended_filename: Optional[str] = None,
 ) -> dict:
-    # Config-dən default-ləri oxu
     if output_dir is None:
         output_dir = str(Config.DOMAIN_OBJECT_DIR)
     if dangerous_filename is None:
@@ -637,6 +581,22 @@ def dangerous_ace(
             continue
 
         is_extended = bool(dangerous_matched & EXTENDED_RIGHT_NAMES)
+
+        principal_name = record.get("principal", "")
+        principal_sid  = record.get("principal_sid", "")
+
+        if is_extended:
+            if _is_noisy_trustee(
+                principal_name, principal_sid,
+                _EXTENDED_RIGHTS_NOISY_NAMES, _EXTENDED_RIGHTS_NOISY_RIDS,
+            ):
+                continue
+        else:
+            if _is_noisy_trustee(
+                principal_name, principal_sid,
+                _DANGEROUS_ACE_NOISY_NAMES, _DANGEROUS_ACE_NOISY_RIDS,
+            ):
+                continue
 
         entry = {
             "target_name":           record.get("target_name"),

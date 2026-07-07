@@ -6,17 +6,13 @@ from datetime import datetime, timezone
 from .models import LdapConfig, LdapBackend, SecurityDescriptorParser  # noqa: F401
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SRP: Köməkçi funksiyalar
-# ══════════════════════════════════════════════════════════════════════════════
-
 def is_ntlm_hash(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Fa-f0-9]{32}", value or ""))
 
 
 def domain_to_dn(domain: str) -> str:
     if not domain or not domain.strip():
-        raise ValueError(f"Yanlış domain dəyəri: {domain!r}")
+        raise ValueError(f"Invalid domain value: {domain!r}")
     return ",".join(f"DC={p}" for p in domain.strip().split("."))
 
 
@@ -54,17 +50,10 @@ def ldap_ts_to_iso(value) -> str | None:
         return str(v)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Retry/backoff: keçici şəbəkə xətalarına qarşı davamlılıq
-# ══════════════════════════════════════════════════════════════════════════════
-
 _RETRYABLE_EXCEPTIONS_CACHE: tuple[type[BaseException], ...] | None = None
 
 
 def _get_retryable_exceptions() -> tuple[type[BaseException], ...]:
-    """Yalnız KEÇİCİ (transient) xətaları retry edirik — autentifikasiya,
-    yanlış filter və s. LDAP-səviyyəli xətalar burada YOXDUR, çünki onlar
-    təkrar cəhdlə düzəlmir və dərhal yuxarı atılmalıdır."""
     global _RETRYABLE_EXCEPTIONS_CACHE
     if _RETRYABLE_EXCEPTIONS_CACHE is not None:
         return _RETRYABLE_EXCEPTIONS_CACHE
@@ -98,10 +87,6 @@ def search_with_retry(
     max_delay: float = 8.0,
     **kwargs,
 ) -> None:
-    """SRP: `conn.search(...)` çağırışını exponential backoff + jitter ilə
-    saran nazik qat. Bir səhifədə keçici timeout/socket xətası bütün
-    collection-u dayandırmasın deyə — bu, hər fərdi LDAP sorğusuna tətbiq
-    olunur, artıq toplanmış nəticələr itmir."""
     retryable = _get_retryable_exceptions()
     attempt = 0
     while True:
@@ -117,13 +102,7 @@ def search_with_retry(
             time.sleep(delay)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DIP: Konkret tətbiqlər — yalnız burada xarici asılılıqlar var
-# ══════════════════════════════════════════════════════════════════════════════
-
 class ImpacketParser:
-    """SRP + DIP: impacket DACL parse məsuliyyəti burada cəmləşib."""
-
     def __init__(self) -> None:
         try:
             from impacket.ldap.ldaptypes import (
@@ -143,34 +122,12 @@ class ImpacketParser:
 
 
 class Ldap3Backend:
-    """SRP + DIP: ldap3 bağlantı məsuliyyəti burada cəmləşib."""
-
     def __init__(self, ip: str, bind_user: str, password: str,
                  auth_type: str, cfg: LdapConfig) -> None:
         from ldap3 import ALL, Server, Connection
         from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
 
         server = Server(ip, get_info=ALL, connect_timeout=cfg.connect_timeout)
-        # DÜZƏLİŞ (yenilənib): `raise_exceptions=True` bind-in səssiz
-        # uğursuzluğunu düzəltmək üçün əlavə edilmişdi, AMMA bunun yan
-        # təsiri var idi — bu bayraq təkcə bind-ə deyil, connection-un
-        # BÜTÜN ömrü boyu hər sonrakı `search()` çağırışına da tətbiq
-        # olunur. Nəticədə DEEP_SCAN kimi geniş subtree axtarışlarında
-        # tamamilə normal/gözlənilən LDAP nəticə kodları (sizeLimitExceeded,
-        # adminLimitExceeded, referral və s.) da exception kimi atılmağa
-        # başladı. `parsers.py`-dəki `_paged_search_iter` isə məhz bu
-        # kodları (`result_code in (0, 4, 11)`) səssizcə idarə etmək üçün
-        # yazılıb — `raise_exceptions=True` bu məntiqi pozurdu: `search()`
-        # ilk çağırışda exception atır, `search_with_retry` bunu retry
-        # etmir (LDAP-səviyyəli xətalar qəsdən retry-ə salınmır), xəta
-        # `_scan_base`-in öz `except` bloğuna sızır və o baza üçün HEÇ
-        # bir record toplanmadan bitir — halbuki bind özü tam uğurlu idi.
-        #
-        # İndi `users_dump.py`-dəki (userləri çəkən modul) yanaşmaya
-        # uyğunlaşdırılıb: `raise_exceptions` defolt (`False`) saxlanılır,
-        # yəni `search()` bu cür kodlarda artıq exception atmır, sadəcə
-        # `conn.result`-da qaytarır ki, pagination məntiqi onu özü
-        # idarə etsin.
         self._conn = Connection(
             server,
             user=bind_user,
@@ -179,38 +136,16 @@ class Ldap3Backend:
             auto_bind=True,
             receive_timeout=cfg.receive_timeout,
         )
-        # Bind-in səssiz uğursuzluğu problemi isə BURADA, `raise_exceptions`-
-        # dan asılı olmadan, əl ilə həll olunur: `auto_bind=True` ilə
-        # `raise_exceptions=False` olduqda belə, bind uğursuz olsa
-        # `Connection` obyekti sadəcə `bound=False` vəziyyətində qalır və
-        # heç bir exception atılmır. Bu yoxlama olmasaydı, sonrakı
-        # `search()` çağırışları səssizcə boş nəticə qaytarardı və
-        # collector "success": true, "count": 0 göstərərdi, halbuki əsl
-        # səbəb uğursuz autentifikasiya olardı. Bu yoxlama HƏM bind
-        # xətasını üzə çıxarır (LDAPBindError ataraq `api.py`-dakı
-        # `except LDAPInvalidCredentialsResult`/generic except bloklarının
-        # işə düşməsini təmin edir), HƏM DƏ `search()`-ün normal limit/
-        # referral kodlarını sərbəst buraxmasına imkan verir.
         if not self._conn.bound:
-            # `raise_exceptions=False` olduğu üçün ldap3 artıq bind
-            # uğursuzluğunda ÖZÜ spesifik alt-sinif (məs.
-            # `LDAPInvalidCredentialsResult`) atmır — hamısı burada `bound`
-            # yoxlaması vasitəsilə üzə çıxır. Amma `api.py`-dakı
-            # `except LDAPInvalidCredentialsResult -> 401` blokunun
-            # işləməsi üçün (səhv şifrə/istifadəçi halında) LDAP nəticə
-            # kodunu (49 = invalidCredentials) yoxlayıb, uyğun olduqda
-            # məhz `LDAPInvalidCredentialsResult` atırıq. Digər bütün
-            # bind-uğursuzluğu halları (server əlçatmazlığı, timeout və s.)
-            # ümumi `LDAPBindError` kimi qalır.
             result_code = (self._conn.result or {}).get("result")
             description = (self._conn.result or {}).get("description", "")
             if result_code == 49 or description == "invalidCredentials":
                 raise LDAPInvalidCredentialsResult(
-                    f"LDAP autentifikasiya uğursuz oldu (bind_user={bind_user!r}): "
+                    f"LDAP authentication failed (bind_user={bind_user!r}): "
                     f"{self._conn.result}"
                 )
             raise LDAPBindError(
-                f"LDAP bind uğursuz oldu (bind_user={bind_user!r}): "
+                f"LDAP bind failed (bind_user={bind_user!r}): "
                 f"{self._conn.result}"
             )
 

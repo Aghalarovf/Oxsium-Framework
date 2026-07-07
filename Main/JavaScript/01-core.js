@@ -187,7 +187,13 @@ function updateStats(data) {
       const el = document.getElementById(id);
       if (el) { el.textContent = val ?? 0; el.className = 'stat-mini-val active'; }
     };
-    setMini('cnt-users',  c.users);
+    // NOT: c.users server tərəfindən gələn XAM (raw) cəmdir və Recycle
+    // Bin-dəki deleted userləri də əhatə edir (server tərəfində
+    // deleted/non-deleted ayrı COUNT dəstəyi yoxdur). Bunu birbaşa
+    // "cnt-users" sayğacına yazsaq, ilk renderda (connect anında) badge
+    // deleted+əsas userləri birləşdirilmiş göstərər. Ona görə burada
+    // yazılmır — dəqiq (yalnız əsas) say runDeepDiscoveryCounts() /
+    // loadUsers() tərəfindən usersData üzərindən hesablanıb yazılır.
     setMini('cnt-comp',   c.computers);
     setMini('cnt-groups', c.groups);
     setMini('cnt-ous',    c.ous);
@@ -195,6 +201,90 @@ function updateStats(data) {
     setMini('cnt-trusts', c.trusts);
   }
 }
+
+/* ── Environment Status panel: populate from domain_info.jsonl (via DB reader) ──
+  Source: sqlite_engine.py converts domain_info.jsonl -> "domain_info" table,
+  sqlite_reader.py serves it at GET /api/domain-info (DB_READER_BASE, port 30104).
+
+  Fields currently present in domain_info.jsonl: fqdn, netbios_name,
+  functional_level_name, domain_controllers[].os / os_version, etc.
+  Fields NOT yet present (session_user, protocol, kerberos/ntlm/smb enabled
+  flags) are read defensively below — when the writer module adds them,
+  they'll populate automatically; until then those stat fields keep
+  whatever value the live probe (updateStats/pingApi) last set. */
+async function loadDomainInfoFromDb() {
+  try {
+    const resp = await fetch(`${DB_READER_BASE}/api/domain-info`, { signal: AbortSignal.timeout(3000) });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data || !data.success) return;
+    applyDomainInfoStats(data.domain_info);
+  } catch (err) {
+    addLog(`domain_info.jsonl yüklənə bilmədi: ${err.message}`, 'warn');
+  }
+}
+
+function applyDomainInfoStats(info) {
+  if (!info) return;
+
+  const set = (id, val, cls) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const hasVal = val !== undefined && val !== null && val !== '';
+    el.textContent = hasVal ? val : '—';
+    el.className   = `stat-value ${cls || (hasVal ? 'accent' : 'dim')}`;
+  };
+
+  const dc = Array.isArray(info.domain_controllers) ? info.domain_controllers[0] : null;
+
+  /* ── Sahələr domain_info.jsonl-da mövcuddur ── */
+  set('stat-domain', info.fqdn || info.netbios_name, 'accent');
+  set('stat-os',     dc?.os,                          '');
+  set('stat-level',  info.functional_level_name,       '');
+
+  /* ── Hələ writer moduluna əlavə olunmayan sahələr: gələcəkdə bu açar
+     adlarla (session_user, protocol, kerberos_enabled, ntlm_enabled,
+     smb_enabled) yazılanda avtomatik doldurulacaq ── */
+  if (info.session_user !== undefined) set('stat-user', info.session_user, 'accent');
+  if (info.protocol     !== undefined) set('stat-proto', String(info.protocol || '').toUpperCase(), 'accent');
+
+  const toStatusText = (value) => {
+    if (value === true)  return { text: 'Enabled',  cls: 'green' };
+    if (value === false) return { text: 'Disabled', cls: 'red' };
+    return null;
+  };
+  const kerb = toStatusText(info.kerberos_enabled);
+  const ntlm = toStatusText(info.ntlm_enabled);
+  const smb  = toStatusText(info.smb_enabled);
+  if (kerb) set('stat-kerb', kerb.text, kerb.cls);
+  if (ntlm) set('stat-ntlm', ntlm.text, ntlm.cls);
+  if (smb)  set('stat-smb',  smb.text,  smb.cls);
+  if (kerb || ntlm || smb) refreshEnumerationProtocolPanel();
+
+    /* ── Right panel: "SMB Signing" / "NTLM Support" ──────────────────────────
+      Mənbə: domain_info cədvəlində smb_signing_required və ntlm_supported
+      sütunları; SMB signing üçün 1/0/null dəyərləri True/False/Unknown kimi
+      rəngləndiririk. */
+  const toBoolLabel = (raw) => {
+    if (raw === 1 || raw === true)  return { text: 'True',    cls: 'green' };
+    if (raw === 0 || raw === false) return { text: 'False',   cls: 'red' };
+    return { text: 'Unknown', cls: 'dim' };
+  };
+  const smbSigning = toBoolLabel(info.smb_signing_required);
+  set('stat-smb-signing', smbSigning.text, smbSigning.cls);
+
+  const ntlmSupport = toBoolLabel(info.ntlm_supported);
+  set('stat-ntlm-support', ntlmSupport.text, ntlmSupport.cls);
+}
+
+// NOTE: stat-api / stat-latency are intentionally NOT sourced from
+// domain_info.jsonl — they measure live reachability/latency of the
+// collector API (see pingApi() in 02-ui-shell.js) and reflect the current
+// connection to API_BASE, not static domain data.
+
+// Runs alongside loadUsers/loadComputers/... whenever the DB becomes ready
+// (see refreshAllSectionsAfterConnect() in 00-global.js).
+registerSectionLoader('domaininfo', loadDomainInfoFromDb);
 
 /* ── Session timer ── */
 function startSessionTimer() {
@@ -353,14 +443,28 @@ async function runDeepDiscoveryCounts() {
     const snap  = await tryLoadSnapshotSection(ep.section);
     const items = snap ? snap.records : [];
     const count = items.length;
+    // Badge/nav sayğacında göstəriləcək dəyər — default olaraq ümumi say,
+    // lakin "users" bölməsi üçün deleted (Recycle Bin) obyektlər çıxılır
+    // ki, ilk renderda (deep discovery) sayğac loadUsers() ilə eyni məntiqi
+    // izləsin və deleted+əsas userlər birləşdirilmiş şəkildə görünməsin.
+    let displayCount = count;
 
     if (snap) {
       if (ep.section === 'users') {
         usersData = items;
         usersMeta = snap.meta || {};
         if (typeof updatePentestCounts === 'function') updatePentestCounts();
+
+        const nonDeletedCount = usersData.filter(u => !u.deleted).length;
+        const deletedCount    = usersData.length - nonDeletedCount;
+        displayCount = nonDeletedCount;
+
         const usersMeta2 = document.getElementById('users-meta');
-        if (usersMeta2) usersMeta2.textContent = `${usersData.length} users · domain: ${(state.domain || '').toUpperCase()}`;
+        if (usersMeta2) {
+          usersMeta2.textContent = `${nonDeletedCount} users` +
+            (deletedCount > 0 ? ` · ${deletedCount} deleted (Recycle Bin)` : '') +
+            ` · domain: ${(state.domain || '').toUpperCase()}`;
+        }
         const activeTab = document.getElementById('tab-users');
         if (activeTab && activeTab.style.display !== 'none' && typeof renderUsers === 'function') renderUsers();
       } else if (ep.section === 'computers') {
@@ -413,9 +517,9 @@ async function runDeepDiscoveryCounts() {
       addLog(`[Render] ${ep.name}: failed to read from domain_data.db (sqlite_reader unavailable).`, 'err');
     }
 
-    if (ep.cntId) setMini(ep.cntId, count);
+    if (ep.cntId) setMini(ep.cntId, displayCount);
     const navEl = document.getElementById(ep.navId);
-    if (navEl) navEl.textContent = count;
+    if (navEl) navEl.textContent = displayCount;
   }
 
   setDeepEnumProgress(100, 'Deep enumeration completed');
@@ -575,6 +679,7 @@ async function doConnect(connectMode = 'deep') {
       addLog(`Connected as ${username}@${state.domain} via ${state.protocol.toUpperCase()}`, 'ok');
       addLog(`Domain Controller: ${state.dc || 'N/A'}`, 'ok');
       updateStats(data);
+      if (typeof loadDomainInfoFromDb === 'function') loadDomainInfoFromDb();
       runQuickSecurityStatusProbe();
       probeProtocols();
       startSessionTimer();
@@ -585,7 +690,8 @@ async function doConnect(connectMode = 'deep') {
       if (password) savedEntry.password = password;
       if (hash)     savedEntry.hash     = hash;
       saveSuccessfulUser(savedEntry);
-      document.getElementById('nav-users-count').textContent = data.counts?.users ?? '-';
+      // Bura data.counts.users (xam/combined say) yazılmır — bax updateStats()
+      // içindəki qeyd. Dəqiq say deep discovery/loadUsers() tərəfindən yazılır.
       showToast(`Connected to ${state.domain}`, 'success');
       state.connectMode = connectMode;
 
@@ -661,10 +767,12 @@ async function doLocalConnect() {
       setConnState('connected');
       addLog(`Local session attached: ${data.username}`, 'ok');
       updateStats(data);
+      if (typeof loadDomainInfoFromDb === 'function') loadDomainInfoFromDb();
       runQuickSecurityStatusProbe();
       probeProtocols();
       startSessionTimer();
-      document.getElementById('nav-users-count').textContent = data.counts?.users ?? '-';
+      // Bura data.counts.users (xam/combined say) yazılmır — bax updateStats()
+      // içindəki qeyd. Dəqiq say deep discovery/loadUsers() tərəfindən yazılır.
       showToast('Local session attached', 'success');
     } else {
       throw new Error(data.error || data.message || 'Failed to attach session');

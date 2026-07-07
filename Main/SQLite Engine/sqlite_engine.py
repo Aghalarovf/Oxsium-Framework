@@ -64,10 +64,31 @@ def _build_known_specs() -> dict[str, TableSpec]:
             "fqdn", "netbios_name", "domain_sid", "functional_level",
             "functional_level_name", "generated_at", "has_enterprise_ca",
             "laps_legacy", "laps_windows", "laps_enabled",
-            "smb_signing_policy_present", "smart_card_required",
+            "smb_signing_policy_present", "smb_signing_enabled",
+            "smb_signing_required", "ntlm_supported", "smart_card_required",
             "machine_account_quota", "risk_score", "highest_severity",
+            "success", "count", "error",
+            # ── fsmo / password_policy / kerberos_policy dicts, flattened by
+            #    _flatten_known_dicts() into "<dict>__<subkey>" columns.
+            #    These MUST be listed here explicitly — since scalar_columns
+            #    is not None for this spec, _write_record() only writes keys
+            #    that appear in this list, so omitting them means they're
+            #    silently dropped even though they're computed. ──
+            "fsmo__schema_master", "fsmo__naming_master", "fsmo__rid_master",
+            "fsmo__pdc_emulator", "fsmo__infrastructure",
+            "password_policy__min_length", "password_policy__complexity_enabled",
+            "password_policy__max_age_days", "password_policy__min_age_days",
+            "password_policy__history_count", "password_policy__lockout_threshold",
+            "password_policy__lockout_duration_mins",
+            "password_policy__lockout_observation_mins",
+            "password_policy__reversible_encryption",
+            "password_policy__pwd_properties_raw",
+            "kerberos_policy__max_ticket_age_hours",
+            "kerberos_policy__max_renew_age_days",
+            "kerberos_policy__max_service_age_mins",
+            "kerberos_policy__max_clock_skew_mins",
         ],
-        json_columns=["fine_grained_policies", "ca_list", "dns_zones"],
+        json_columns=["fine_grained_policies", "ca_list", "dns_zones", "meta"],
         child_tables=[
             ChildTableSpec(
                 source_key="domain_controllers",
@@ -446,6 +467,7 @@ KNOWN_SPECS = _build_known_specs()
 # --------------------------------------------------------------------------- #
 
 WHITELISTED_FILES: tuple[str, ...] = (
+    "domain_info.jsonl",
     "domain_users.jsonl",
     "domain_computers.jsonl",
     "domain_groups.jsonl",
@@ -476,27 +498,43 @@ _DOMAIN_INFO_FLATTEN_DICTS = {
 _ENVELOPE_KEYS = frozenset({"generated_at", "source", "success", "count", "error", "meta"})
 
 
-def _is_envelope(obj: dict) -> bool:
+def _is_envelope(obj: dict, file_stem: str | None = None) -> bool:
     """Returns True if the record looks like a file-level metadata envelope.
 
     An envelope has at least 2 of the known envelope keys and none of the
     typical domain-object keys (like 'dn', 'sid', 'username', etc.).
+
+    NOTE: domain_info.jsonl's real (non-envelope) record legitimately
+    carries success/count/error/meta/generated_at alongside the actual
+    domain payload (fqdn, netbios_name, domain_controllers, ...), so the
+    generic domain-field check above would misclassify it as an envelope
+    and drop it. For this file we additionally recognize domain_info-only
+    markers as proof of a real record.
     """
     envelope_hits = sum(1 for k in obj if k in _ENVELOPE_KEYS)
     has_domain_fields = any(k in obj for k in ("dn", "sid", "username", "sam_account_name",
                                                 "computer_name", "object_sid", "trust_partner",
                                                 "trustee_sid", "name", "guid"))
+    if file_stem == "domain_info":
+        has_domain_fields = has_domain_fields or any(
+            k in obj for k in ("fqdn", "netbios_name", "domain_controllers", "fsmo")
+        )
     return envelope_hits >= 2 and not has_domain_fields
 
 
-def iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
+def iter_jsonl(path: Path, file_stem: str | None = None) -> Iterator[dict[str, Any]]:
     """Reads a .jsonl file line by line and returns it as a dict generator.
 
     Skips:
     - Empty lines
     - Unparseable lines (with a warning)
     - Envelope/metadata records (the first-line summary that each file starts with)
+
+    file_stem (e.g. "domain_info") is passed to _is_envelope() so it can
+    apply file-specific rules for telling a real record apart from a pure
+    metadata envelope. Defaults to path.stem when not given.
     """
+    stem = file_stem if file_stem is not None else path.stem
     with path.open("r", encoding="utf-8") as fh:
         for line_no, raw_line in enumerate(fh, start=1):
             line = raw_line.strip()
@@ -512,7 +550,7 @@ def iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
                 logger.warning("%s:%d - not an object (type=%s), skipping",
                                 path.name, line_no, type(obj).__name__)
                 continue
-            if _is_envelope(obj):
+            if _is_envelope(obj, stem):
                 logger.debug("%s:%d - envelope/metadata record skipped", path.name, line_no)
                 continue
             yield obj
@@ -751,7 +789,7 @@ def _read_domain_fqdn(input_dir: Path, pattern: str) -> str:
         )
 
     fqdn: str | None = None
-    for record in iter_jsonl(info_path):
+    for record in iter_jsonl(info_path, file_stem="domain_info"):
         candidate = record.get("fqdn")
         if candidate:
             fqdn = str(candidate).strip()
@@ -815,7 +853,7 @@ def convert_file(
 
     writer = SqliteWriter(conn)
     count = 0
-    for record in iter_jsonl(jsonl_path):
+    for record in iter_jsonl(jsonl_path, file_stem=file_stem):
         _write_record(writer, spec, record, file_stem)
         count += 1
         if progress_cb and count % 500 == 0:

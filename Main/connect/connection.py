@@ -131,6 +131,7 @@ from group import groups
 from ou import ous
 from gpo import gpos
 from trust import trusts
+from dominfo import get_domain_info
 from acl import AclFilterConfig, get_domain_acls
 from acl.constants import _DEFAULT_TRUSTEE_RIDS, _DEFAULT_TRUSTEE_SIDS
 
@@ -400,6 +401,41 @@ def _write_domain_computers_jsonl_snapshot(result: dict, is_local: bool) -> None
                 )
     except Exception as exc:
         logger.warning("Could not write domain computers JSONL snapshot to %s: %s", out_path, exc)
+
+
+def _write_domain_info_jsonl_snapshot(result: dict, is_local: bool) -> None:
+    """
+    Write domain_info.jsonl as a single domain-level record.
+
+    Line 1 is the file metadata envelope, line 2 is the actual domain info row.
+    """
+    out_path = DOMAIN_OBJECT_DIR / "domain_info.jsonl"
+    record = dict(result)
+
+    try:
+        DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
+
+        meta_line = {
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "source": "local" if is_local else "domain",
+            "success": bool(result.get("success")),
+            "count": int(result.get("count") or 0),
+            "error": result.get("error") if not result.get("success") else None,
+            "meta": result.get("meta") or {},
+        }
+
+        _write_acl_jsonl_snapshot(out_path, meta_line, [record])
+
+        legacy_json = DOMAIN_OBJECT_DIR / "domain_info.json"
+        if legacy_json.exists() and legacy_json != out_path:
+            try:
+                legacy_json.unlink()
+            except Exception as exc:
+                logger.warning("Could not remove legacy domain info JSON snapshot %s: %s", legacy_json, exc)
+    except Exception as exc:
+        logger.warning("Could not write domain info JSONL snapshot to %s: %s", out_path, exc)
+    else:
+        _schedule_db_build()
 
 
 def _read_domain_computers_jsonl_snapshot() -> dict:
@@ -1113,15 +1149,66 @@ def _run_full_collector_pipeline(enum_req: dict) -> None:
     # sıfırlanır ki, əvvəlki domenə aid stale data yeni nəticələrlə qarışmasın.
     _clear_domain_object_dir()
     try:
+        domain_info_result = _run_enumeration_with_target_fallback(enum_req, get_domain_info)
+        _write_domain_info_jsonl_snapshot(domain_info_result, is_local=False)
+    except Exception as exc:
+        logger.warning("collector pipeline: dominfo collector failed: %s", exc)
+
+    try:
+        # DÜZƏLİŞ: əvvəllər `on_records` ötürülmürdü — bütün DEEP_SCAN (4 NC +
+        # 5 critical subtree) bitənə qədər heç nə diskə yazılmırdı və yalnız
+        # `acl_result["success"]` True olduqda son nəticə yazılırdı. VPN kimi
+        # dar-bant/yüksək-latency mühitlərdə bu, uzun gözləmə və (proses
+        # kəsilərsə) heç bir nəticənin qalmaması demək idi. İndi hər hazır
+        # batch (bax: collector._PARSE_BATCH_SIZE) dərhal `domain_aces.jsonl`-ə
+        # yazılır — `_write_domain_aces_snapshot` ilə eyni formatda (meta
+        # sətri + record-lar), sadəcə "partial: true" işarəli ki, yarımçıq
+        # olduğu bilinsin. Scan tam bitdikdə fayl son/dəqiq meta ilə üzərinə
+        # yazılır.
+        acl_stream_lock = threading.Lock()
+        acl_streamed: list[dict] = []
+
+        def _acl_stream_write(records: list[dict]) -> None:
+            with acl_stream_lock:
+                acl_streamed.extend(records)
+                try:
+                    out_path = _jsonl_snapshot_path(DOMAIN_ACES_JSON)
+                    DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
+                    partial_meta = {
+                        "generated_at": datetime.utcnow().isoformat() + "Z",
+                        "source": "domain",
+                        "success": False,
+                        "count": len(acl_streamed),
+                        "error": None,
+                        "meta": {"partial": True, "note": "ACL scan davam edir"},
+                    }
+                    _write_acl_jsonl_snapshot(out_path, partial_meta, acl_streamed)
+                except Exception as stream_exc:
+                    logger.warning("acl pipeline stream write failed: %s", stream_exc)
+
         def _acl_collector(ip_, domain_, username_, password_, config_):
-            return get_domain_acls(ip_, domain_, username_, password_, config_,
-                                    acl_filter=AclFilterConfig())
+            return get_domain_acls(
+                ip_, domain_, username_, password_, config_,
+                acl_filter=AclFilterConfig(),
+                on_records=_acl_stream_write,
+            )
 
         acl_result = _run_enumeration_with_target_fallback(enum_req, _acl_collector)
-        if acl_result.get("success"):
-            _write_domain_aces_snapshot(acl_result, is_local=False)
-            _write_domain_extended_rights_snapshot(acl_result, is_local=False)
-            _write_domain_dangerous_ace_snapshot(acl_result, is_local=False)
+        # DÜZƏLİŞ: əvvəllər yalnız `acl_result["success"]` True olduqda yazılırdı.
+        # `_build_result` (collector.py) top-level istisna olmadıqca həmişə
+        # success=True qaytarsa da, əlavə mühafizə xətti kimi indi ELƏCƏ DƏ
+        # streaming zamanı toplanmış nəticə mövcuddursa (top-level uğursuzluq
+        # halında belə) final snapshot yazılır — heç bir hal fayl tamamilə
+        # boş qalmasın deyə.
+        if acl_result.get("success") or acl_streamed:
+            final_result = acl_result if acl_result.get("success") else {
+                **acl_result,
+                "acls": acl_streamed,
+                "count": len(acl_streamed),
+            }
+            _write_domain_aces_snapshot(final_result, is_local=False)
+            _write_domain_extended_rights_snapshot(final_result, is_local=False)
+            _write_domain_dangerous_ace_snapshot(final_result, is_local=False)
     except Exception as exc:
         logger.warning("collector pipeline: acl collector failed: %s", exc)
 
