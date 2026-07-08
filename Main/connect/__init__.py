@@ -1,6 +1,4 @@
-# connect package — Active Directory connection & enumeration helpers
-#
-# Public surface area re-exported for convenience:
+
 from connect.config        import Config, logger
 from connect.utils         import (
     is_ntlm_hash, get_netbios_bind_user, domain_to_dn,

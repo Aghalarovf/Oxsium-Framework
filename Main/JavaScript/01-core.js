@@ -1,18 +1,9 @@
-﻿/* ═══════════════════════════════════════════════════
-   01-core.js
-   Connection lifecycle, stats panel, security
-   checker, deep enumeration, session timer.
-   Depends on: 00-globals.js
-   ═══════════════════════════════════════════════════ */
-
-/* ── Assessment Toolkit config ── */
-const ASSESSMENT_TOOLKITS = {
+﻿const ASSESSMENT_TOOLKITS = {
   users: [
     { label: 'Kerberoasting',  color: 'var(--accent)', countClass: 'accent',  countId: 'pt-kerb-count',  action: 'runKerberoasting()' },
     { label: 'AS-REP Roasting',color: 'var(--red)',    countClass: 'red',     countId: 'pt-asrep-count', action: 'runASREPRoasting()' },
     { label: 'Silver Ticket',  color: '#a78bfa',       countClass: 'purple',  countId: 'pt-silver-count',action: 'runSilverTicket()' },
     { label: 'Brute Force',    color: '#fb923c',       countClass: 'orange',  countId: 'pt-brute-count', action: 'runBruteForce()' },
-    { label: 'DCSync',         color: 'var(--amber)',  countClass: 'red',     countId: 'pt-dcsync-count',action: 'runDCSync()' },
   ],
   computers: [
     { label: 'LAPS Password Dumping', color: 'var(--accent)', countClass: 'dim' },
@@ -59,7 +50,7 @@ function renderAssessmentToolkit(tab) {
   }).join('');
 }
 
-/* ── Connection state display ── */
+
 function setConnState(s) {
   const dot = document.getElementById('top-conn-dot');
   const lbl = document.getElementById('top-conn-label');
@@ -94,10 +85,6 @@ function setConnState(s) {
   }
   updateConnectButtonState();
   updateModeButtonState();
-  updateShellTabState();
-  updateEnumerationTabState();
-  updateReconnaissanceTabState();
-  refreshEnumerationProtocolPanel();
 }
 
 function setEnvironmentDomainController(value, cls = 'accent') {
@@ -167,7 +154,6 @@ function updateStats(data) {
   set('stat-kerb', kerb.text, kerb.cls);
   set('stat-ntlm', ntlm.text, ntlm.cls);
   set('stat-smb',  smb.text,  smb.cls);
-  refreshEnumerationProtocolPanel();
   set('stat-api', 'Reachable', 'green');
   set('stat-latency', data.latency_ms ? `${data.latency_ms} ms` : '—', '');
   document.getElementById('sb-proto').textContent = (state.protocol || '').toUpperCase();
@@ -187,13 +173,8 @@ function updateStats(data) {
       const el = document.getElementById(id);
       if (el) { el.textContent = val ?? 0; el.className = 'stat-mini-val active'; }
     };
-    // NOT: c.users server tərəfindən gələn XAM (raw) cəmdir və Recycle
-    // Bin-dəki deleted userləri də əhatə edir (server tərəfində
-    // deleted/non-deleted ayrı COUNT dəstəyi yoxdur). Bunu birbaşa
-    // "cnt-users" sayğacına yazsaq, ilk renderda (connect anında) badge
-    // deleted+əsas userləri birləşdirilmiş göstərər. Ona görə burada
-    // yazılmır — dəqiq (yalnız əsas) say runDeepDiscoveryCounts() /
-    // loadUsers() tərəfindən usersData üzərindən hesablanıb yazılır.
+
+
     setMini('cnt-comp',   c.computers);
     setMini('cnt-groups', c.groups);
     setMini('cnt-ous',    c.ous);
@@ -202,25 +183,25 @@ function updateStats(data) {
   }
 }
 
-/* ── Environment Status panel: populate from domain_info.jsonl (via DB reader) ──
-  Source: sqlite_engine.py converts domain_info.jsonl -> "domain_info" table,
-  sqlite_reader.py serves it at GET /api/domain-info (DB_READER_BASE, port 30104).
 
-  Fields currently present in domain_info.jsonl: fqdn, netbios_name,
-  functional_level_name, domain_controllers[].os / os_version, etc.
-  Fields NOT yet present (session_user, protocol, kerberos/ntlm/smb enabled
-  flags) are read defensively below — when the writer module adds them,
-  they'll populate automatically; until then those stat fields keep
-  whatever value the live probe (updateStats/pingApi) last set. */
 async function loadDomainInfoFromDb() {
   try {
     const resp = await fetch(`${DB_READER_BASE}/api/domain-info`, { signal: AbortSignal.timeout(3000) });
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => null);
+      addLog(`domain_info fetch failed (HTTP ${resp.status}): ${(errData && (errData.error || errData.detail)) || 'no domain_info records in domain_data.db'}`, 'warn');
+      return;
+    }
     const data = await resp.json();
-    if (!data || !data.success) return;
+    if (!data || !data.success) {
+      addLog(`domain_info response missing success flag: ${(data && data.error) || 'unknown error'}`, 'warn');
+      return;
+    }
     applyDomainInfoStats(data.domain_info);
+    const dcInfo = Array.isArray(data.domain_info?.domain_controllers) ? data.domain_info.domain_controllers[0] : null;
+    addLog(`domain_info loaded from domain_data.db · OS: ${dcInfo?.os || '—'} · SMB Signing: ${data.domain_info?.smb_signing_required} · NTLM: ${data.domain_info?.ntlm_supported}`, 'ok');
   } catch (err) {
-    addLog(`domain_info.jsonl yüklənə bilmədi: ${err.message}`, 'warn');
+    addLog(`domain_info could not be loaded from domain_data.db: ${err.message}`, 'warn');
   }
 }
 
@@ -237,14 +218,12 @@ function applyDomainInfoStats(info) {
 
   const dc = Array.isArray(info.domain_controllers) ? info.domain_controllers[0] : null;
 
-  /* ── Sahələr domain_info.jsonl-da mövcuddur ── */
+
   set('stat-domain', info.fqdn || info.netbios_name, 'accent');
   set('stat-os',     dc?.os,                          '');
   set('stat-level',  info.functional_level_name,       '');
 
-  /* ── Hələ writer moduluna əlavə olunmayan sahələr: gələcəkdə bu açar
-     adlarla (session_user, protocol, kerberos_enabled, ntlm_enabled,
-     smb_enabled) yazılanda avtomatik doldurulacaq ── */
+
   if (info.session_user !== undefined) set('stat-user', info.session_user, 'accent');
   if (info.protocol     !== undefined) set('stat-proto', String(info.protocol || '').toUpperCase(), 'accent');
 
@@ -259,12 +238,8 @@ function applyDomainInfoStats(info) {
   if (kerb) set('stat-kerb', kerb.text, kerb.cls);
   if (ntlm) set('stat-ntlm', ntlm.text, ntlm.cls);
   if (smb)  set('stat-smb',  smb.text,  smb.cls);
-  if (kerb || ntlm || smb) refreshEnumerationProtocolPanel();
 
-    /* ── Right panel: "SMB Signing" / "NTLM Support" ──────────────────────────
-      Mənbə: domain_info cədvəlində smb_signing_required və ntlm_supported
-      sütunları; SMB signing üçün 1/0/null dəyərləri True/False/Unknown kimi
-      rəngləndiririk. */
+
   const toBoolLabel = (raw) => {
     if (raw === 1 || raw === true)  return { text: 'True',    cls: 'green' };
     if (raw === 0 || raw === false) return { text: 'False',   cls: 'red' };
@@ -277,16 +252,10 @@ function applyDomainInfoStats(info) {
   set('stat-ntlm-support', ntlmSupport.text, ntlmSupport.cls);
 }
 
-// NOTE: stat-api / stat-latency are intentionally NOT sourced from
-// domain_info.jsonl — they measure live reachability/latency of the
-// collector API (see pingApi() in 02-ui-shell.js) and reflect the current
-// connection to API_BASE, not static domain data.
 
-// Runs alongside loadUsers/loadComputers/... whenever the DB becomes ready
-// (see refreshAllSectionsAfterConnect() in 00-global.js).
 registerSectionLoader('domaininfo', loadDomainInfoFromDb);
 
-/* ── Session timer ── */
+
 function startSessionTimer() {
   state.sessionStart = Date.now();
   if (sessionTimerId) { clearInterval(sessionTimerId); sessionTimerId = null; }
@@ -300,7 +269,7 @@ function startSessionTimer() {
   }, 1000);
 }
 
-/* ── Deep enumeration progress ── */
+
 function setDeepEnumProgress(percent, label = '') {
   const wrap = document.getElementById('enum-progress-wrap');
   const fill = document.getElementById('enum-progress-fill');
@@ -348,23 +317,12 @@ function _updateEnumTabProgress(pct, moduleName) {
   if (modEl && moduleName) modEl.textContent = moduleName;
 }
 
-/* ── Deep discovery (runs all modules in sequence) ──────────────────────
-   YALNIZ collectorlara əmr verir (connection.py, API_BASE). POST cavabının
-   body-si RENDER üçün İSTİFADƏ OLUNMUR. Bütün collector-lar tetiklendikdən
-   sonra domain_data.db-nin tikilməsi gözlənilir və render YALNIZ
-   sqlite_reader.py-dən (DB_READER_BASE, tryLoadSnapshotSection vasitəsilə)
-   alınır — connection.py heç bir render funksiyası görmür. ── */
 
 function _sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * sqlite_reader.py (DB_READER_BASE) hazır olana qədər gözləyir.
- * pollForDbReady()-dən fərqli olaraq paylaşılan polling timer-ə
- * toxunmur (connect axını ilə paralel təhlükəsiz işləyə bilsin deyə)
- * və timeout zamanı sadəcə false qaytarır, asılı qalmır.
- */
+
 async function _waitForDbReaderReady(timeoutMs = 60000, intervalMs = 1000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -399,11 +357,7 @@ async function runDeepDiscoveryCounts() {
   _showEnumTabProgress();
   _updateEnumTabProgress(0, 'Initializing...');
 
-  /* ── Mərhələ 1: collector-ları ardıcıl tetiklə ──────────────────────
-     Hər POST connection.py-də müvafiq collector-u işə salır və
-     domain_*.jsonl snapshot-unu yazır (DB build debounce ilə planlaşdırılır).
-     Cavab body-si yalnız uğur/uğursuzluq üçün yoxlanılır, render datası
-     kimi İSTİFADƏ OLUNMUR. */
+
   for (let idx = 0; idx < modules.length; idx++) {
     const ep = modules[idx];
     try {
@@ -424,29 +378,30 @@ async function runDeepDiscoveryCounts() {
     _updateEnumTabProgress(percent, ep.name);
   }
 
-  /* ── Mərhələ 2: domain_data.db-nin tikilməsini gözlə ── */
-  setDeepEnumProgress(75, 'Verilənlər bazası hazırlanır...');
+
+  setDeepEnumProgress(75, 'Preparing database...');
   _updateEnumTabProgress(75, 'Building database...');
-  await _sleep(3500); // debounced DB build (~3s) üçün gözləmə
+  await _sleep(3500);
   const dbReady = await _waitForDbReaderReady(60000, 1000);
   if (!dbReady) {
-    addLog('sqlite_reader.py (30104) gözlənilən müddətdə hazır olmadı — bəzi bölmələr köhnə/boş qala bilər', 'error');
+    addLog('sqlite_reader.py (30104) was not ready within the expected time — some sections may remain stale/empty', 'error');
   }
 
-  /* ── Mərhələ 3: RENDER — YALNIZ sqlite_reader.py-dən (DB_READER_BASE) ──
-     connection.py-nin POST cavabları burada heç vaxt istifadə olunmur. */
-  setDeepEnumProgress(90, 'Cədvəllər yüklənir...');
+
+  setDeepEnumProgress(90, 'Loading tables...');
   _updateEnumTabProgress(90, 'Loading tables...');
+
+  if (typeof loadDomainInfoFromDb === 'function') {
+    await loadDomainInfoFromDb();
+  }
 
   for (let idx = 0; idx < modules.length; idx++) {
     const ep    = modules[idx];
     const snap  = await tryLoadSnapshotSection(ep.section);
     const items = snap ? snap.records : [];
     const count = items.length;
-    // Badge/nav sayğacında göstəriləcək dəyər — default olaraq ümumi say,
-    // lakin "users" bölməsi üçün deleted (Recycle Bin) obyektlər çıxılır
-    // ki, ilk renderda (deep discovery) sayğac loadUsers() ilə eyni məntiqi
-    // izləsin və deleted+əsas userlər birləşdirilmiş şəkildə görünməsin.
+
+
     let displayCount = count;
 
     if (snap) {
@@ -528,7 +483,7 @@ async function runDeepDiscoveryCounts() {
   setTimeout(_hideEnumTabProgress, 1200);
 }
 
-/* ── Connect ── */
+
 function validate() {
   let ok = true;
   [{ id: 'f-domain', err: 'err-domain' }, { id: 'f-ip', err: 'err-ip' }, { id: 'f-user', err: 'err-user' }]
@@ -681,7 +636,6 @@ async function doConnect(connectMode = 'deep') {
       updateStats(data);
       if (typeof loadDomainInfoFromDb === 'function') loadDomainInfoFromDb();
       runQuickSecurityStatusProbe();
-      probeProtocols();
       startSessionTimer();
       state._pass = password || '';
       state._hash = hash     || '';
@@ -690,8 +644,8 @@ async function doConnect(connectMode = 'deep') {
       if (password) savedEntry.password = password;
       if (hash)     savedEntry.hash     = hash;
       saveSuccessfulUser(savedEntry);
-      // Bura data.counts.users (xam/combined say) yazılmır — bax updateStats()
-      // içindəki qeyd. Dəqiq say deep discovery/loadUsers() tərəfindən yazılır.
+
+
       showToast(`Connected to ${state.domain}`, 'success');
       state.connectMode = connectMode;
 
@@ -769,10 +723,9 @@ async function doLocalConnect() {
       updateStats(data);
       if (typeof loadDomainInfoFromDb === 'function') loadDomainInfoFromDb();
       runQuickSecurityStatusProbe();
-      probeProtocols();
       startSessionTimer();
-      // Bura data.counts.users (xam/combined say) yazılmır — bax updateStats()
-      // içindəki qeyd. Dəqiq say deep discovery/loadUsers() tərəfindən yazılır.
+
+
       showToast('Local session attached', 'success');
     } else {
       throw new Error(data.error || data.message || 'Failed to attach session');
@@ -872,7 +825,7 @@ async function testConn() {
   }
 }
 
-/* ── Saved users ── */
+
 async function loadSavedUsers() {
   try {
     const resp = await fetch(`${API_BASE}/api/saved-users`, { method: 'GET' });
@@ -951,7 +904,7 @@ async function saveSuccessfulUser(entry) {
   }
 }
 
-/* ── Security checker ── */
+
 function resetSecurityCheckerCacheForSession() {
   securityCheckerSessionId++;
   securityCheckerLastResults = { kerberos: null, ntlm: null, smb: null };
@@ -1088,7 +1041,6 @@ function renderCheckerSuccessPanel({ normalized, body, meta, stateText, stateCla
     const el  = document.getElementById('stat-smb');
     if (el) { el.textContent = val === true ? 'Enabled' : val === false ? 'Disabled' : 'Unknown'; el.className = `stat-value ${val === true ? 'green' : val === false ? 'red' : 'dim'}`; }
   }
-  refreshEnumerationProtocolPanel();
 }
 
 function checkerPanelConfig(kind) {
@@ -1162,7 +1114,7 @@ async function openSecurityStatusPanel(kind) {
   }
 }
 
-/* ── Quick security probe (on connect) ── */
+
 async function runQuickSecurityStatusProbe() {
   if (!state.connected) return;
   const payload = buildEnumerationPayload();

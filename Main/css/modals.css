@@ -1,6 +1,3 @@
-/* ============================================================
-   modals.css — Gold Edition
-   ============================================================ */
 
 .status-modal-backdrop {
     position: fixed;
@@ -29,7 +26,6 @@
     overflow: hidden;
 }
 
-/* Üst altın xətt */
 .status-modal::before {
     content: '';
     position: absolute;
@@ -93,7 +89,6 @@
 .status-info-card p, .status-info-card li { font-size: 12px; line-height: 1.5; color: var(--text-pri); }
 .status-info-card ul { margin-left: 16px; display: flex; flex-direction: column; gap: 5px; }
 
-/* Attack hint modal */
 .attack-hint-modal {
     position: fixed;
     inset: 0;

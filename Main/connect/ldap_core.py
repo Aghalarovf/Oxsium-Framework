@@ -23,7 +23,6 @@ def _normalize_ldap_target(value: str) -> str:
     target = target.split("/", 1)[0].strip()
     target = target.split("\\", 1)[0].strip()
 
-    # Strip host:port for common hostname/IP cases.
     if target.count(":") == 1 and ("." in target):
         host, port = target.rsplit(":", 1)
         if port.isdigit():
@@ -50,26 +49,20 @@ def _build_ldap_targets(req: dict) -> list[str]:
 
     targets: list[str] = []
 
-    # If caller explicitly provides LDAP host/DC, always prefer it.
     for candidate in (ldap_host, dc):
         normalized = _normalize_ldap_target(candidate)
         if normalized:
             targets.append(normalized)
 
-    # For LDAP/LDAPS direct sessions, user IP is usually a DC.
     if protocol in ("ldap", "ldaps") and ip:
         targets.append(_normalize_ldap_target(ip))
 
-    # For WinRM/SMB/SSH sessions, connected IP is often a client member.
-    # Prefer domain DNS name so LDAP resolves to a domain controller.
     if domain:
         targets.append(_normalize_ldap_target(domain))
 
-    # Keep IP as final fallback.
     if ip:
         targets.append(_normalize_ldap_target(ip))
 
-    # De-duplicate while preserving order.
     deduped: list[str] = []
     for t in targets:
         if not t:
@@ -168,7 +161,6 @@ def _run_enumeration_with_target_fallback(req: dict, enum_fn):
         last_result = result
         if int(result.get("code") or 0) == 503:
             continue
-        # Stop on hard failures (invalid credentials, auth failures, etc.).
         if not _is_retryable_ldap_error(result.get("error", "")):
             break
 
@@ -270,7 +262,6 @@ def _collect_ldap_environment(
         except Exception:
             kerberos_enabled = True
 
-    # PowerView-like DC discovery: find DC computer objects and read their dNSHostName.
     dc_filters = [
         "(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=8192))",
         "(&(objectCategory=computer)(objectCapability=13))",
@@ -331,7 +322,6 @@ def _collect_ldap_environment(
             elif os_name_val:
                 os_version = os_name_val
 
-    # Best-effort SMB reachability probe for status panel.
     for smb_target in (dc_name, ldap_target, domain):
         candidate = str(smb_target or "").strip()
         if not candidate:

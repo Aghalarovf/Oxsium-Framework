@@ -2,10 +2,6 @@ import json
 import platform
 import subprocess
 
-# ---------------------------------------------------------------------------
-# PowerShell profile script (run on the remote host to gather AD context)
-# ---------------------------------------------------------------------------
-
 _POWERSHELL_PROFILE_SCRIPT = r'''
 $domainFqdn = $null
 $domainLevelRaw = $null
@@ -63,10 +59,6 @@ try {
 '''.strip()
 
 
-# ---------------------------------------------------------------------------
-# Local / remote command runners
-# ---------------------------------------------------------------------------
-
 def run_local_command(command: str) -> dict:
     try:
         if platform.system().lower() == 'windows':
@@ -89,10 +81,6 @@ def run_local_command(command: str) -> dict:
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
-
-# ---------------------------------------------------------------------------
-# PowerShell profile collection & application
-# ---------------------------------------------------------------------------
 
 def _parse_json_object_output(raw: str) -> dict:
     text = (raw or "").strip()

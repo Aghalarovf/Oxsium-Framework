@@ -98,7 +98,6 @@ def _guid_to_bloodhound_id(guid_val) -> str:
 
 
 def _get_child_ous(conn, parent_dn: str, page_size: int = 500) -> list:
-    """Direct child OU-ların DN siyahısı."""
     try:
         conn.search(parent_dn, "(objectClass=organizationalUnit)",
                     search_scope=LEVEL, attributes=["distinguishedName"],
@@ -113,10 +112,6 @@ def _get_child_ous(conn, parent_dn: str, page_size: int = 500) -> list:
 
 
 def _extract_parent_dn(dn: str) -> str:
-    """
-    OU-nun parent DN-ini çıxarır.
-    'OU=Sales,OU=Corp,DC=example,DC=com' → 'OU=Corp,DC=example,DC=com'
-    """
     if not dn:
         return ""
     parts = dn.split(",", 1)
@@ -124,24 +119,12 @@ def _extract_parent_dn(dn: str) -> str:
 
 
 def _calc_depth(dn: str) -> int:
-    """
-    OU dərinliyini OU= komponentlərini sayaraq hesablayır.
-    DC=example,DC=com altındakı birinci OU depth=1-dir.
-    """
     if not dn:
         return 0
     return sum(1 for part in dn.split(",") if part.strip().upper().startswith("OU="))
 
 
 def _parse_gplink(gp_link_str: str) -> list:
-    """
-    gPLink atributunu parse edir.
-    Format: [LDAP://CN={GUID},CN=Policies,...;FLAGS][...]
-    Hər GPO üçün: dn, guid, order (soldan saga = yüksək precedence),
-    enforced (flag & 2) və disabled (flag & 1) qaytarılır.
-    Precedence: gPLink siyahısında sondakı GPO ən yüksək prioritetlidir
-    (AD sağdan sola tətbiq edir — sondakı "ən yaxın" OU-dakı GPO).
-    """
     if not gp_link_str or not gp_link_str.strip():
         return []
     pattern = re.compile(r"\[([^\]]+)\]")
@@ -152,13 +135,12 @@ def _parse_gplink(gp_link_str: str) -> list:
         parts = link.split(";")
         gpo_dn = parts[0].replace("LDAP://", "").strip() if parts else ""
         flag = safe_int(parts[1]) if len(parts) > 1 else 0
-        # GUID çıxarışı CN={...} formatından
         guid_match = re.search(r"\{([A-Fa-f0-9\-]+)\}", gpo_dn)
         gpo_guid = guid_match.group(1).upper() if guid_match else ""
         parsed.append({
             "gpo_dn":    gpo_dn,
             "gpo_guid":  gpo_guid,
-            "order":     total - idx,   # Yüksək order = yüksək precedence
+            "order":     total - idx,   
             "enforced":  bool(flag & 2),
             "disabled":  bool(flag & 1),
             "link_flag": flag,
@@ -168,11 +150,6 @@ def _parse_gplink(gp_link_str: str) -> list:
 
 def _get_inherited_gpos(conn, ou_dn: str, domain_dn: str,
                         page_size: int = 500) -> list:
-    """
-    OU-nun parent zənciri boyunca gPLink-ləri toplayır (inherited GPOs).
-    gPOptions & 1 set-dirsə (inheritance blocked) həmin OU-da dayanır.
-    Yalnız DN string-lərinin siyahısı qaytarılır (dövri sorğudan çəkinmək üçün).
-    """
     inherited = []
     current = _extract_parent_dn(ou_dn)
     visited = set()
@@ -183,7 +160,6 @@ def _get_inherited_gpos(conn, ou_dn: str, domain_dn: str,
             conn.search(current, "(objectClass=organizationalUnit)",
                         search_scope=LEVEL, attributes=["gPLink", "gPOptions"],
                         paged_size=page_size)
-            # LEVEL axtarışı parent-in özünü tapmır; SUBTREE + filter lazımdır
             conn.search(current, "(distinguishedName=" + current + ")",
                         search_scope=SUBTREE, attributes=["gPLink", "gPOptions"],
                         paged_size=1)
@@ -195,7 +171,7 @@ def _get_inherited_gpos(conn, ou_dn: str, domain_dn: str,
                 for lnk in links:
                     lnk["inherited_from"] = current
                     inherited.extend([lnk])
-                if p_gpopts & 1:   # Inheritance blocked at this level
+                if p_gpopts & 1:  
                     break
         except Exception:
             pass
@@ -205,22 +181,9 @@ def _get_inherited_gpos(conn, ou_dn: str, domain_dn: str,
 
 
 def _get_privileged_objects_in_ou(conn, ou_dn: str, page_size: int = 500) -> dict:
-    """
-    OU daxilindəki privileged user və computer-ləri tapır.
-
-    Privileged users:
-      - adminCount=1 olan user-lər (SDProp tərəfindən protected)
-      - Məlum privileged qruplara (Domain Admins, Enterprise Admins və s.)
-        üzv olan user-lər birbaşa sorğulanmır — adminCount=1 kifayətdir.
-
-    Privileged computers:
-      - userAccountControl-da SERVER_TRUST_ACCOUNT (0x2000) set olan,
-        yəni Domain Controller olan kompüterlər.
-    """
     priv_users = []
     priv_computers = []
 
-    # ── Privileged Users (adminCount=1) ──────────────────────────────────────
     try:
         conn.search(
             ou_dn,
@@ -239,7 +202,6 @@ def _get_privileged_objects_in_ou(conn, ou_dn: str, page_size: int = 500) -> dic
     except Exception:
         pass
 
-    # ── Privileged Computers (Domain Controllers: SERVER_TRUST_ACCOUNT) ───────
     try:
         conn.search(
             ou_dn,
@@ -280,10 +242,7 @@ def _is_high_value(ou_name: str, ou_path: str) -> bool:
     return any(p in name_lower or p in path_lower for p in _HIGH_VALUE_OU_PATTERNS)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-
 def get_domain_ous(ip, domain, username, password, config):
-    """Enumerate all organizational units in the domain."""
     try:
         bind_user = get_bind_user(username, domain)
         auth_type = "SIMPLE"
@@ -340,31 +299,22 @@ def get_domain_ous(ip, domain, username, password, config):
             object_guid = _guid_to_bloodhound_id(raw_guid)
             object_id   = object_guid
 
-            # ── Parent-Child Relationship ────────────────────────────────────
             parent_dn  = _extract_parent_dn(ou_path or "")
             child_ous  = _get_child_ous(conn, ou_path, page_size) if ou_path else []
 
-            # ── Depth Level ──────────────────────────────────────────────────
             depth = _calc_depth(ou_path or "")
 
-            # ── Linked GPOs (parsed) ─────────────────────────────────────────
             linked_gpos = _parse_gplink(str(gp_link_raw or ""))
 
-            # ── Inherited GPOs ───────────────────────────────────────────────
             inherited_gpos = _get_inherited_gpos(conn, ou_path or "", domain_dn, page_size)
 
-            # ── GPO Order / Precedence ───────────────────────────────────────
-            # linked_gpos listindəki hər elementin "order" field-i artıq set-dir.
-            # Ən yüksək order = ən yüksək precedence (OU-ya ən yaxın GPO).
             gpo_precedence = [
                 {"gpo_guid": g["gpo_guid"], "order": g["order"], "enforced": g["enforced"]}
                 for g in linked_gpos
             ]
 
-            # ── Privileged Users & Computers ─────────────────────────────────
             priv = _get_privileged_objects_in_ou(conn, ou_path or "", page_size)
 
-            # ── Flags ────────────────────────────────────────────────────────
             has_gpo_links       = bool(linked_gpos)
             inheritance_blocked = bool(gp_options & 1)
             isaclprotected      = inheritance_blocked
@@ -395,7 +345,6 @@ def get_domain_ous(ip, domain, username, password, config):
                 risk_controls.append("Privileged Computers Present")
 
             ous.append({
-                # ── Əsas məlumatlar ──────────────────────────────────────────
                 "name":         ou_name or "Unknown OU",
                 "path":         ou_path or "",
                 "dn":           ou_path or "",
@@ -404,23 +353,19 @@ def get_domain_ous(ip, domain, username, password, config):
                 "managed_by":   managed_by or "",
                 "created":      created or "",
                 "modified":     modified or "",
-                # ── Parent-Child Relationship ─────────────────────────────────
                 "parent_dn":    parent_dn,
                 "childous":     child_ous,
                 "depth":        depth,
-                # ── GPO məlumatları ───────────────────────────────────────────
                 "gpo_links_raw":    str(gp_link_raw or ""),
-                "linked_gpos":      linked_gpos,       # Parse edilmiş, order daxil
-                "gpo_precedence":   gpo_precedence,    # GPO order siyahısı
-                "inherited_gpos":   inherited_gpos,    # Parent OU-lardan gələn GPO-lar
+                "linked_gpos":      linked_gpos,      
+                "gpo_precedence":   gpo_precedence,   
+                "inherited_gpos":   inherited_gpos,   
                 "has_gpo_links":    has_gpo_links,
                 "inheritance_blocked": inheritance_blocked,
-                # ── Privileged objects ────────────────────────────────────────
                 "privileged_users":           priv["privileged_users"],
                 "privileged_users_count":     priv["privileged_users_count"],
                 "privileged_computers":       priv["privileged_computers"],
                 "privileged_computers_count": priv["privileged_computers_count"],
-                # ── Flags & metadata ──────────────────────────────────────────
                 "object_count":        object_count,
                 "is_protected":        False,
                 "delegated_permissions": delegated_permissions,
@@ -437,16 +382,13 @@ def get_domain_ous(ip, domain, username, password, config):
 
         result = {"success": True, "count": len(ous), "ous": ous}
 
-        # ── domain_ous.jsonl-a yaz ───────────────────────────────────────────
         output_path = os.path.join(
             str(config.DOMAIN_OBJECT_DIR), "domain_ous.jsonl"
         )
         try:
             with open(output_path, "w", encoding="utf-8") as f:
-                # Meta sətir: success + count
                 meta = {"success": result["success"], "count": result["count"]}
                 f.write(json.dumps(meta, ensure_ascii=False, default=str) + "\n")
-                # Hər OU ayrı sətirdə
                 for ou in result["ous"]:
                     f.write(json.dumps(ou, ensure_ascii=False, default=str) + "\n")
         except Exception as write_exc:

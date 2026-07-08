@@ -1,10 +1,3 @@
-"""DCSync backend stubs.
-
-The DCSync GUI is preserved, but backend execution and persistence were removed.
-These helpers keep imports and API routes working without performing any action.
-"""
-
-
 def _read_dcsync_history() -> list[dict]:
     return []
 

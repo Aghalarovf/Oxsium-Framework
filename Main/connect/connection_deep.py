@@ -9,7 +9,6 @@ _DEF_COUNTS = {
 
 
 def apply_deep_defaults(result: dict, ip: str, check_port) -> None:
-    """Apply deep-connect defaults to keep response shape stable."""
     result.setdefault("os_version", "Unknown")
     result.setdefault("domain_level", "Unknown")
     result.setdefault("kerberos_enabled", True)

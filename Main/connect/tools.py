@@ -1,11 +1,3 @@
-"""
-Stubs for external protocol checker tools.
-
-Tools were removed from the repository; these functions remain as
-lightweight stubs so imports succeed but callers receive a clear
-error response indicating the checkers are no longer available.
-"""
-
 import json
 
 

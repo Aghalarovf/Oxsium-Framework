@@ -1,33 +1,15 @@
-﻿/* ═══════════════════════════════════════════════════
-   03-users.js
-   Users tab: load, render, filter, detail panel,
-   context menu, attack hint modal.
-   Depends on: 00-globals.js, 01-core.js
-   ═══════════════════════════════════════════════════ */
-
-/* ── State ── */
-let usersFilter = 'all';
+﻿let usersFilter = 'all';
 let usersSearch = '';
 let usersContextMenuEl      = null;
 let usersContextTarget      = null;
 let usersAttackHintModalEl  = null;
 
-/* ── Select Domains ──
-   Toolbar üzərindəki "Select Domains" düyməsi açılanda domain_data.db-dəki
-   "trusts" cədvəlindən "name" atributunu (etibar münasibəti olan domenlər) +
-   cari qoşulmuş domenin adını (state.domain) göstərir. Seçim edildikdə
-   Users cədvəli seçilmiş domenin "domain_sid" atributuna uyğun hesabları
-   göstərəcək şəkildə filtrlənir (DN son hissəsi ilə deyil, birbaşa SID
-   müqayisəsi ilə — çünki bir domenin adı ilə SID-i həmişə DN-dən çıxarıla
-   bilmir, məs. forest daxilində uşaq/valideyn domenlər). */
-let domainsListCache   = null;   // [{ name, isCurrent, sid }]
-let domainsSelected    = null;   // Set<string> (lowercased domain names) — null = hələ yüklənməyib / hamısı seçili
+
+let domainsListCache   = null;
+let domainsSelected    = null;
 let domainsDropdownOpen = false;
 
-/* trusts.sid sütunu backend tərəfindən Python bytes obyektinin str() forması
-   kimi saxlanılıb (məs. "b'\\x01\\x04\\x00...\\xe0#'"), əsl binary SID deyil.
-   Bunu Windows SID formatına (S-1-5-21-...) çevirmək üçün əvvəlcə python
-   bytes literalını bayt massivinə, sonra SID sətrinə çeviririk. */
+
 function parsePythonBytesLiteralToArray(str) {
   if (typeof str !== 'string') return null;
   const s = str.trim();
@@ -71,8 +53,7 @@ function sidBytesToString(bytes) {
   return `S-${revision}-${idAuth.toString()}-${subs.join('-')}`;
 }
 
-/* trust.sid dəyərini normallaşdırır: artıq "S-1-5-..." formatındadırsa
-   olduğu kimi qaytarır, python bytes-repr formatındadırsa çevirir. */
+
 function normalizeTrustSid(rawSid) {
   if (!rawSid) return null;
   const s = String(rawSid).trim();
@@ -82,10 +63,7 @@ function normalizeTrustSid(rawSid) {
   return sidBytesToString(bytes);
 }
 
-/* Cari domenin SID-i heç yerdə ayrıca saxlanılmır — lakin bütün user
-   qeydlərinin domain_sid sahəsi eyni domenə aid olduğundan, yüklənmiş
-   usersData içindəki ən çox rast gəlinən domain_sid dəyəri cari domenin
-   SID-i kimi qəbul edilir. */
+
 function guessCurrentDomainSid() {
   if (!Array.isArray(usersData) || usersData.length === 0) return null;
   const counts = new Map();
@@ -109,11 +87,11 @@ function domainNameToDcSuffix(name) {
 }
 
 function userBelongsToDomain(u, domain) {
-  // Üstünlük SID müqayisəsindədir — domain_sid dəqiq və etibarlıdır.
+
   if (domain.sid) {
     return (u.domain_sid || '').trim().toUpperCase() === domain.sid.toUpperCase();
   }
-  // SID tapılmadıqda (məs. trust.sid dekodlanmadısa) DN son hissəsinə görə fallback.
+
   const suffix = domainNameToDcSuffix(domain.name);
   if (!suffix) return false;
   return (u.dn || '').toLowerCase().endsWith(suffix);
@@ -124,7 +102,7 @@ async function fetchTrustsForDomainsDropdown() {
   const resp = await fetch(url, { method: 'GET' });
   const data = await resp.json().catch(() => null);
   if (!resp.ok || !data) {
-    throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine xətası (HTTP ${resp.status})`);
+    throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine error (HTTP ${resp.status})`);
   }
   const raw = Array.isArray(data.records) ? data.records : (Array.isArray(data.rows) ? data.rows : []);
   return raw
@@ -267,7 +245,7 @@ function resetDomainsSelection() {
   renderUsers();
 }
 
-/* ── Helpers ── */
+
 function decodeEncryptionTypes(val) {
   if (typeof val === 'undefined' || val === null) return [];
   const v = parseInt(val, 10);
@@ -305,27 +283,19 @@ function encryptionBadgeClass(val) {
   })[weakest] || 'yes-encryption-medium';
 }
 
-/* ── Load ──
-   Köhnə tryLoadSnapshotSection('users') + canlı LDAP fallback məntiqi
-   ləğv edilib. Users bölməsi indi BİRBAŞA sqlite_reader.py (port 8800)
-   REST API-na bağlıdır: domain_data.db-dəki "users" cədvəli /api/list
-   endpoint-i üzərindən axtarış/limit dəstəyi ilə oxunur. Heç bir nəhəng
-   JSON/JSONL faylı brauzer yaddaşına yüklənmir. */
+
 async function loadUsers() {
   document.getElementById('users-loading').style.display = 'flex';
   document.getElementById('u-table-body').innerHTML = '';
   closeDetail();
 
-  // Domen siyahısı (cari domen + trusts) yenidən yüklənsin, çünki
-  // reconnect zamanı state.domain dəyişmiş ola bilər.
+
   domainsListCache = null;
   domainsSelected  = null;
 
   try {
-    // limit yüksək saxlanılır ki, "Users" statistikası (silinməmiş say) və
-    // "Deleted" filtri tam dataset üzərində dəqiq hesablansın — server
-    // tərəfində deleted/non-deleted ayrı COUNT dəstəyi olmadığı üçün bu
-    // hesablama client tərəfdə aparılır.
+
+
     let url = `${DB_BASE}/api/list/users?limit=100000`;
     if (usersSearch && usersSearch.trim()) {
       url += `&q=${encodeURIComponent(usersSearch.trim())}`;
@@ -334,15 +304,13 @@ async function loadUsers() {
     const resp = await fetch(url, { method: 'GET' });
     const data = await resp.json().catch(() => null);
     if (!resp.ok || !data) {
-      throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine xətası (HTTP ${resp.status})`);
+      throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine error (HTTP ${resp.status})`);
     }
 
     usersData = Array.isArray(data.records) ? data.records : (Array.isArray(data.rows) ? data.rows : []);
     enumCacheLoaded.users = true;
 
-    // "Users" sayğacı yalnız silinməmiş (Recycle Bin-də olmayan) obyektləri
-    // göstərir — AD Recycle Bin-dən bərpa edilmiş "deleted" userlər buraya
-    // daxil edilmir, onlar ayrıca "Deleted" filtri ilə görünür.
+
     const nonDeletedCount = usersData.filter(u => !u.deleted).length;
     const deletedCount    = usersData.length - nonDeletedCount;
 
@@ -351,9 +319,9 @@ async function loadUsers() {
     document.getElementById('users-meta').textContent =
       `${nonDeletedCount} users` +
       (deletedCount > 0 ? ` · ${deletedCount} deleted (Recycle Bin)` : '') +
-      ` · mənbə: Oxsium SQLite Engine (.db)`;
+      ` · source: Oxsium SQLite Engine (.db)`;
 
-    addLog(`Users sqlite_reader.py-dən yükləndi: ${nonDeletedCount} hesab` +
+    addLog(`Users loaded from sqlite_reader.py: ${nonDeletedCount} accounts` +
       (deletedCount > 0 ? ` (+${deletedCount} deleted)` : '') +
       ` (Oxsium SQLite Engine)`, 'ok');
     renderUsers();
@@ -366,7 +334,7 @@ async function loadUsers() {
   }
 }
 
-/* ── Render ── */
+
 function renderUsers() {
   const body = document.getElementById('u-table-body');
   body.innerHTML = '';
@@ -383,11 +351,11 @@ function renderUsers() {
     );
   }
   if (usersFilter === 'deleted') {
-    // Yalnız AD Recycle Bin-dən bərpa edilmiş (silinmiş) userlər.
+
     list = list.filter(u => u.deleted);
   } else {
-    // Bütün digər filterlərdə (All daxil olmaqla) silinmiş userlər
-    // heç vaxt görünmür.
+
+
     list = list.filter(u => !u.deleted);
     if (usersFilter === 'admin')    list = list.filter(u => u.is_admin || !!u.potential_admin);
     if (usersFilter === 'spn')      list = list.filter(u => u.spn && u.spn.length > 0);
@@ -469,7 +437,7 @@ function renderUsers() {
   });
 }
 
-/* ── Filters ── */
+
 function setFilter(f, btn) {
   usersFilter = f;
   document.querySelectorAll('#filter-chips .chip').forEach(c => c.classList.remove('active'));
@@ -483,7 +451,7 @@ function filterUsers() {
   renderUsers();
 }
 
-/* ── Detail panel ── */
+
 function openDetail(u, row) {
   document.querySelectorAll('.u-row').forEach(r => r.classList.remove('selected'));
   row.classList.add('selected');
@@ -555,7 +523,7 @@ function openDetail(u, row) {
       <div class="spn-list">${groupsHtml}</div>
     </div>`;
 
-  // ── Admin Reason ─────────────────────────────────────────────────────────
+
   if ((isAbsAdmin || isPadAdmin) && u.admin_rules && u.admin_rules.length > 0) {
     const SEVERITY_META = {
       absolute: { label: 'Absolute Admin',         color: '#FF4444', bg: 'rgba(255,68,68,0.10)',  border: 'rgba(255,68,68,0.35)'  },
@@ -568,7 +536,7 @@ function openDetail(u, row) {
       const meta  = SEVERITY_META[rule.severity] || SEVERITY_META.tier2;
       const ruleNum = `Rule ${rule.level}`;
 
-      // Rule 1 / Rule 2 üçün detail — hansı qruplar match etdi
+
       const ruleDetail = rule.detail_json || rule.detail;
       let detailHtml = '';
       if (ruleDetail && ruleDetail.matched_groups && ruleDetail.matched_groups.length > 0) {
@@ -603,7 +571,7 @@ function openDetail(u, row) {
         <div class="admin-reason-list">${rulesHtml}</div>
       </div>`;
   } else if (!isAbsAdmin) {
-    // Admin deyilsə göstərmə
+
   }
 
   if (u.spn && u.spn.length > 0) {
@@ -623,7 +591,7 @@ function openDetail(u, row) {
       </div>`;
   }
 
-  // ── DG: Constrained Delegation targets ──────────────────────────────────
+
   if (u.msds_allowedtodelegateto && u.msds_allowedtodelegateto.length > 0) {
     body.innerHTML += `
       <div class="detail-section">
@@ -632,7 +600,7 @@ function openDetail(u, row) {
       </div>`;
   }
 
-  // ── ENC: Supported Encryption Types ─────────────────────────────────────
+
   const encTypes = decodeEncryptionTypes(u.msds_supportedencryptiontypes);
   if (encTypes.length > 0) {
     const hasWeak = encTypes.some(t => t.risk === 'red' || t.risk === 'amber');
@@ -658,7 +626,7 @@ function closeDetail() {
   document.querySelectorAll('.u-row').forEach(r => r.classList.remove('selected'));
 }
 
-/* ── Context menu ── */
+
 function ensureUsersContextMenu() {
   if (usersContextMenuEl) return usersContextMenuEl;
   const menu = document.createElement('div');
@@ -674,7 +642,6 @@ function ensureUsersContextMenu() {
     <button class="user-ctx-item" data-action="send-asrep">Send to AS-REP Roasting</button>
     <button class="user-ctx-item" data-action="send-silver">Send to Silver Ticket</button>
     <button class="user-ctx-item" data-action="send-bruteforce">Send to Brute Force</button>
-    <button class="user-ctx-item" data-action="send-dcsync">Send to DCSync</button>
     <div class="user-ctx-divider"></div>
     <button class="user-ctx-item" data-action="attack-hint">Attack Hint & Path</button>
   `;
@@ -716,7 +683,6 @@ function showUsersContextMenu(e, u, row) {
 function getEnabledSendActions(u) {
   const actions = new Set(['send-bruteforce']);
   if (u.asrep) actions.add('send-asrep');
-  if (u.dcsync) actions.add('send-dcsync');
   if (u.spn && u.spn.length > 0) { actions.add('send-kerberoast'); actions.add('send-silver'); }
   return actions;
 }
@@ -768,14 +734,13 @@ function runUsersContextAction(action) {
     'send-asrep':     () => { addLog(`Context dispatch: ${label} -> AS-REP Roasting`, 'info'); showToast(`Sent ${label} to AS-REP Roasting`, 'info'); runASREPRoasting(); },
     'send-silver':    () => { addLog(`Context dispatch: ${label} -> Silver Ticket`, 'info'); showToast(`Sent ${label} to Silver Ticket`, 'info'); runSilverTicket(); },
     'send-bruteforce':() => { addLog(`Context dispatch: ${label} -> Brute Force`, 'info'); showToast(`Sent ${label} to Brute Force`, 'info'); runBruteForce(); },
-    'send-dcsync':    () => { addLog(`Context dispatch: ${label} -> DCSync`, 'info'); showToast(`Sent ${label} to DCSync`, 'info'); runDCSync(); },
     'attack-hint':    () => { showAttackHintModal(); addLog(`Attack Hint panel opened for ${label}`, 'info'); },
   };
   if (map[action]) map[action]();
   hideUsersContextMenu();
 }
 
-/* ── Attack Hint modal ── */
+
 function ensureAttackHintModal() {
   if (usersAttackHintModalEl) return usersAttackHintModalEl;
   const modal = document.createElement('div');

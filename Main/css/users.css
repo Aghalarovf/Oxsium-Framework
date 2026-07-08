@@ -1,8 +1,3 @@
-/* ============================================================
-   users.css — .users-wrap, users-table, u-row, u-name,
-               flag, dcsync-overlay, user-detail, ctx-menu
-   ============================================================ */
-
 .users-wrap { display: flex; flex-direction: column; height: 100%; gap: 14px; }
 .users-header { flex-shrink: 0; }
 
@@ -17,7 +12,6 @@
 .users-meta { font-size: 10px; color: var(--text-dim); font-family: var(--ui); letter-spacing: 0.5px; }
 .users-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-/* Split layout */
 .users-split {
     display: flex;
     gap: 0;
@@ -29,7 +23,6 @@
     min-height: 300px;
 }
 
-/* Table */
 .users-table-wrap { flex: 1; display: flex; flex-direction: column; overflow: hidden; transition: flex 0.25s cubic-bezier(0.4,0,0.2,1); }
 
 .u-table-head {
@@ -50,7 +43,6 @@
 
 .u-table-body { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; scrollbar-gutter: stable; }
 
-/* User row */
 .u-row {
     display: flex;
     align-items: center;
@@ -93,7 +85,6 @@
 
 .u-sid { width: 280px; flex-shrink: 0; font-family: var(--mono); font-size: 10px; color: var(--text-sec); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0.2px; }
 
-/* Flag badges */
 .u-flag-cell { width: 52px; flex-shrink: 0; display: flex; justify-content: center; align-items: center; }
 
 .flag { font-size: 9px; font-family: var(--ui); font-weight: 700; padding: 3px 6px; border-radius: 3px; letter-spacing: 0.3px; }
@@ -146,9 +137,6 @@
     border: 1px solid rgba(39,174,96,0.3);
 }
 
-
-
-/* Delegation target items */
 .delegation-item {
     font-size: 10px;
     color: #5dade2;
@@ -164,7 +152,6 @@
 }
 .delegation-item:hover { background: rgba(52,152,219,0.15); border-color: #5dade2; }
 
-/* Encryption type rows */
 .enc-type-list { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 0; }
 .enc-type-row {
     display: flex;
@@ -180,7 +167,6 @@
 .enc-type-label { font-size: 10px; font-family: var(--mono); color: var(--text-pri); }
 .enc-type-note  { font-size: 9px; font-family: var(--ui); letter-spacing: 0.4px; text-transform: uppercase; }
 
-/* DCSync row states */
 .u-row.dcsync {
     border-left: 2px solid rgba(255,170,0,0.9);
     background: linear-gradient(90deg, rgba(255,204,51,0.11), rgba(255,138,0,0.1));
@@ -188,7 +174,6 @@
 }
 .u-row.dcsync:hover { background: linear-gradient(90deg, rgba(255,204,51,0.2), rgba(255,138,0,0.18)); border-left: 2px solid rgba(255,170,0,1); }
 
-/* Desc-risk row */
 .u-row.desc-risk {
     border-left: 2px solid rgba(255,68,85,0.92);
     background: linear-gradient(90deg, rgba(255,68,85,0.06), rgba(255,68,85,0.015));
@@ -251,7 +236,6 @@
 .u-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 100%; color: var(--text-dim); padding: 40px; }
 .u-empty p { font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; font-family: var(--ui); }
 
-/* ── Select Domains dropdown ── */
 .domains-select-wrap { position: relative; flex-shrink: 0; }
 
 .domains-select-btn {
@@ -337,7 +321,6 @@
     background: rgba(255,255,255,0.05); color: var(--text-dim); border: 1px solid var(--border);
 }
 
-/* Context menu */
 .user-ctx-menu {
     position: fixed;
     z-index: 9999;
@@ -360,7 +343,6 @@
 
 .user-ctx-divider { height: 1px; margin: 4px 5px; background: linear-gradient(90deg, rgba(240,192,48,0.72), rgba(240,192,48,0.1)); }
 
-/* DCSync console overlay */
 .dcsync-overlay {
     position: absolute;
     inset: 0;
@@ -401,7 +383,6 @@
 .dcsync-file-btn:hover { background: rgba(255,255,255,0.09); border-color: var(--accent); }
 .dcsync-key-hint { font-family: var(--ui); font-size: 10px; color: var(--text-dim); }
 
-/* Checkboxes */
 .dcsync-check-grid { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 4px; }
 .dcsync-check-item { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
 .dcsync-check-item input[type="checkbox"] { display: none; }
@@ -410,7 +391,6 @@
 .dcsync-check-item input:checked + .dcsync-check-box::after { content: ''; display: block; width: 8px; height: 5px; border-left: 2px solid #000; border-bottom: 2px solid #000; transform: rotate(-45deg) translateY(-1px); }
 .dcsync-check-lbl { font-family: var(--head); font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-pri); }
 
-/* Radio buttons */
 .dcsync-radio-stack { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
 .dcsync-radio-grid  { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 4px; }
 .dcsync-radio-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; user-select: none; background: rgba(255,255,255,0.02); transition: border-color 0.15s, background 0.15s; }
@@ -421,14 +401,12 @@
 .dcsync-radio-item:has(input:checked) .dcsync-radio-box::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: linear-gradient(135deg, #ffcc33, #ff8a00); display: block; }
 .dcsync-radio-lbl { font-family: var(--head); font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-pri); }
 
-/* Result area */
 .dcsync-result-status       { font-family: var(--ui); font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
 .dcsync-result-status.ok    { color: var(--green); }
 .dcsync-result-status.err   { color: var(--red); }
 .dcsync-result-status.warn  { color: var(--amber); }
 .dcsync-result-box { background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: 7px; padding: 12px 14px; font-family: var(--mono); font-size: 11px; color: var(--text-pri); min-height: 80px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; line-height: 1.6; }
 
-/* Footer */
 .dcsync-panel-footer { display: flex; gap: 12px; padding: 14px 20px; border-top: 1px solid var(--border); flex-shrink: 0; background: rgba(255,255,255,0.01); }
 .dcsync-run-btn { flex: 1; font-family: var(--head); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; background: var(--accent); color: #000; border: none; border-radius: 7px; padding: 12px; cursor: pointer; font-weight: 700; transition: opacity 0.15s, transform 0.1s; }
 .dcsync-run-btn:hover   { opacity: 0.88; }
@@ -438,7 +416,6 @@
 .dcsync-hist-btn { font-family: var(--head); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; background: none; border: 1px solid var(--border-hi); border-radius: 7px; color: var(--text-pri); padding: 12px 22px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
 .dcsync-hist-btn:hover { border-color: var(--accent); background: rgba(240,192,48,0.06); }
 
-/* User detail panel */
 .user-detail {
     width: 340px;
     flex-shrink: 0;
@@ -537,9 +514,8 @@
 
 .group-item { font-size: 10px; color: var(--text-sec); font-family: var(--mono); background: rgba(106,138,160,0.07); border: 1px solid var(--border-hi); border-radius: 4px; padding: 5px 10px; word-break: break-all; width: 100%; line-height: 1.4; }
 
-/* Users loading overlay */
 .users-loading { position: absolute; inset: 0; background: rgba(6,10,14,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-sec); font-size: 11px; font-family: var(--ui); letter-spacing: 1px; border-radius: var(--radius); z-index: 10; backdrop-filter: blur(2px); }
-/* ── Admin Reason section ──────────────────────────────────────────────── */
+
 .admin-reason-list {
     display: flex;
     flex-direction: column;

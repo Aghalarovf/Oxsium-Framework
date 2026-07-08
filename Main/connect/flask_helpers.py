@@ -6,7 +6,6 @@ from connect.utils import validate_ip, validate_domain, validate_username
 
 
 def require_json_fields(*fields):
-	"""Decorator: ensure all named fields are present in the JSON body."""
 	def decorator(f):
 		@wraps(f)
 		def wrapper(*args, **kwargs):
@@ -29,10 +28,6 @@ def is_local_request(data: dict | None) -> bool:
 
 
 def get_enumeration_request_data():
-	"""Parse and validate a standard enumeration request.
-
-	Returns (req_dict, None) on success or (None, error_response) on failure.
-	"""
 	req = request.get_json(silent=True)
 	if not req:
 		return None, (jsonify({"error": "JSON body is required"}), 400)

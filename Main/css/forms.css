@@ -1,7 +1,3 @@
-/* ============================================================
-   forms.css — Gold Edition
-   ============================================================ */
-
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
 .form-row.single { grid-template-columns: 1fr; }
 .form-row.triple { grid-template-columns: 1fr 1fr 1fr; }
@@ -47,7 +43,6 @@
     color: color-mix(in srgb, var(--text-pri) 60%, #3a3010 40%);
 }
 
-/* Password wrapper */
 .input-wrap { position: relative; }
 .input-wrap .form-input { padding-right: 38px; width: 100%; }
 
@@ -103,7 +98,6 @@
     box-shadow: 0 0 0 3px rgba(240,192,48,0.10);
 }
 
-/* Saved users */
 .saved-users-wrap { margin-top: 10px; }
 .saved-users-list { margin-top: 8px; border: 1px solid var(--border); background: var(--bg-input); border-radius: 4px; padding: 8px; }
 .saved-users-title { font-family: var(--head); font-size: 10px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-sec); margin-bottom: 6px; }
@@ -118,7 +112,6 @@
 .saved-user-meta  { font-size: 10px; color: var(--text-sec); line-height: 1.45; word-break: break-word; }
 .saved-user-empty { font-size: 11px; color: var(--text-dim); padding: 8px; text-align: center; }
 
-/* Enumeration output */
 .enumeration-output { margin-top: 14px; border: 1px solid rgba(240,192,48,0.20); background: rgba(0,0,0,0.55); padding: 10px; }
 .enum-output-title  { font-family: var(--head); font-size: 11px; letter-spacing: 0.08em; color: var(--text-hi); margin-bottom: 8px; }
 .enum-output-pre    { margin: 0; min-height: 180px; max-height: 280px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.45; color: var(--text-hi); background: #060500; border: 1px solid rgba(240,192,48,0.08); padding: 10px; white-space: pre-wrap; word-break: break-word; }

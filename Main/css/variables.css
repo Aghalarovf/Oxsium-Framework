@@ -1,8 +1,3 @@
-/* ============================================================
-   variables.css — Saf Qara + Saf Altın Elit Tema
-   Oxsium Framework — Gold Edition
-   ============================================================ */
-
 :root {
     --bg-deep:    #050505;
     --bg-base:    #0c0c0c;
@@ -16,30 +11,25 @@
     --border:     #2a2510;
     --border-hi:  #4a4018;
 
-    /* ── Açıq, parlaq Altın aksan ── */
     --accent:     #f0c030;
     --accent-dim: #8a6a18;
     --accent-glow:#f0c03022;
 
-    /* ── Status rəngləri ── */
     --green:      #c8a855;
     --green-dim:  #5a4820;
     --red:        #a07820;
     --amber:      #f0c030;
     --amber-dim:  #6a5015;
 
-    /* ── Mətn ── */
     --text-pri:   #e8d8a0;
     --text-sec:   #9a8848;
     --text-dim:   #504530;
     --text-hi:    #fff8e0;
 
-    /* ── Şriftlər ── */
     --mono:       'Share Tech Mono', monospace;
     --head:       'Rajdhani', sans-serif;
     --ui:         'Space Mono', monospace;
 
-    /* ── Layout ── */
     --sidebar-w:  210px;
     --right-w:    260px;
     --radius:     6px;

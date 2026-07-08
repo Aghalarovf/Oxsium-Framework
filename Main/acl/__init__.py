@@ -34,10 +34,8 @@ from .constants import (
     _DEFAULT_TRUSTEE_RIDS,
 )
 
-# ── Modellər ─────────────────────────────────────────────────────────────────
 from .models import LdapConfig, AclFilterConfig, LdapBackend, SecurityDescriptorParser, ObjectScope
 
-# ── Backend-lər ──────────────────────────────────────────────────────────────
 from .backends import (
     Ldap3Backend,
     ImpacketParser,
@@ -48,12 +46,9 @@ from .backends import (
     ldap_ts_to_iso,
 )
 
-# ── Public API ────────────────────────────────────────────────────────────────
 from .api import get_domain_acls, check_sensitive_template_acls, dangerous_ace, collect_all_aces_to_json, deep_scan_domain_acls
 
-# ── Köhnə kodu qırmamaq üçün açıq __all__ ────────────────────────────────────
 __all__ = [
-    # constants
     "GENERIC_ALL_RAW",
     "GENERIC_ALL_COMPOSED",
     "RAW_GENERIC_WRITE",

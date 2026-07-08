@@ -1,20 +1,7 @@
-/* ═══════════════════════════════════════════════════
-   11-objects-ous.js
-   OUs tab: load, render, filter, detail panel.
-   Depends on: 00-globals.js, 01-core.js
-   ═══════════════════════════════════════════════════ */
-
-/* ═══════ OUs ═══════ */
 let ousFilter = 'all';
 let ousSearch = '';
 
-/* ── Select Domains (OUs tab) ──
-   Users tabındakı paylaşılan domainsListCache/ensureDomainsListLoaded()
-   (03-objects-users.js) istifadə olunur; OUs tabına aid yalnız seçim
-   state-i (ousDomainsSelected) və dropdown UI-si burada saxlanılır.
-   Uyğunluq OU-nun sid (varsa) və ya dn/path son hissəsinə (dc=...) görə
-   yoxlanılır. */
-let ousDomainsSelected     = null;   // Set<string> (lowercased domain names) — null = hamısı seçili
+let ousDomainsSelected     = null;   
 let ousDomainsDropdownOpen = false;
 
 function ouBelongsToDomain(ou, domain) {
@@ -136,15 +123,9 @@ function resetOUsDomainsSelection() {
   renderOUs();
 }
 
-/* OU objects toggle cache */
-const ouObjectsCache   = new Map(); /* key: ou rowid/id → { users:[], computers:[], loaded: bool } */
-const ouObjectsLoading = new Set(); /* loading lock */
+const ouObjectsCache   = new Map();
+const ouObjectsLoading = new Set(); 
 
-/**
- * OU-nun daxilindəki BÜTÜN obyektləri DB-dən gətirir.
- * sqlite_reader.py: POST /api/query  → SELECT ... WHERE dn LIKE '%,<ou_dn>'
- * Üç ayrı sorğu: users, computers, groups (birbaşa OU üzvü olanlar, nested deyil).
- */
 async function fetchOUObjects(ou) {
   const cacheKey = String(ou?.rowid ?? ou?.id ?? ou?.dn ?? '');
   if (!cacheKey) return { users: [], computers: [], groups: [] };
@@ -161,11 +142,9 @@ async function fetchOUObjects(ou) {
 
   ouObjectsLoading.add(cacheKey);
   try {
-    /* OU-nun dn-i — sorğu üçün lazımdır */
     const ouDN = ou?.dn || ou?.path || '';
     if (!ouDN) throw new Error('OU DN not available');
 
-    /* DN escape: tırnak işarəsi SQLi-dən qorumaq üçün '' ilə əvəzlə */
     const safeDN = ouDN.replace(/'/g, "''");
     const pattern = `%,${safeDN}`;
 
@@ -305,7 +284,6 @@ async function toggleOUObjects(btn, objRowId, ou) {
     try {
       const objects = await fetchOUObjects(ou);
       renderOUObjectsRow(row, objects);
-      /* Count badge-ini yenilə — users + computers + groups */
       const countSpan = btn.querySelector('span:last-child');
       if (countSpan) {
         const total = (objects.users?.length || 0) + (objects.computers?.length || 0) + (objects.groups?.length || 0);
@@ -322,10 +300,8 @@ async function loadOUs() {
   document.getElementById('o-table-body').innerHTML = '';
   closeOUDetail();
 
-  // Domen seçimi reconnect zamanı yenidən qiymətləndirilsin.
   ousDomainsSelected = null;
 
-  /* 1) Domain Object qovluğunda snapshot varsa, connect tələb etmədən oxu */
   const snap = await tryLoadSnapshotSection('ous');
   if (snap) {
     ousData = snap.records;
@@ -340,7 +316,6 @@ async function loadOUs() {
     return;
   }
 
-  /* 2) Snapshot yoxdur → əvvəlki kimi canlı LDAP sorğusu, connect tələb olunur */
   if (!state.connected) {
     addLog('OUs: no snapshot found, domain connection required', 'warn');
     document.getElementById('o-table-body').innerHTML = '<div class="o-empty"><p>Connect to a domain first or Import collector ZIP</p></div>';
@@ -399,7 +374,6 @@ function renderOUs() {
     const inheritCls = ou.inheritance_blocked ? 'blocked' : 'enabled';
     const objRowId   = `ou-objects-${Math.random().toString(36).slice(2)}`;
 
-    /* Static cells */
     const cellName = document.createElement('div');
     cellName.className = 'o-cell o-cell-name';
     cellName.textContent = ou.name || '—';
@@ -409,7 +383,6 @@ function renderOUs() {
     cellPath.title = ou.path || '';
     cellPath.textContent = ou.path || '—';
 
-    /* Object count cell — toggle button (Groups pattern) */
     const cellObjCount = document.createElement('div');
     cellObjCount.className = 'o-cell o-cell-objcount';
 
@@ -433,7 +406,6 @@ function renderOUs() {
     });
     cellObjCount.appendChild(toggleBtn);
 
-    /* Inherit & managed cells */
     const cellInherit = document.createElement('div');
     cellInherit.className = `o-cell o-cell-inherit ${inheritCls}`;
     cellInherit.textContent = inheritVal;
@@ -451,7 +423,6 @@ function renderOUs() {
 
     body.appendChild(row);
 
-    /* Objects expand row (Groups pattern) */
     const objRow = document.createElement('div');
     objRow.id = objRowId;
     objRow.className = 'ou-objects-row';

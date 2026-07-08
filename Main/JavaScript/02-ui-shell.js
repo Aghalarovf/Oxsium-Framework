@@ -1,12 +1,4 @@
-﻿/* ═══════════════════════════════════════════════════
-   02-ui.js
-   Navigation, tab switching, form controls,
-   shell terminal, API ping, protocol probing.
-   Depends on: 00-globals.js, 01-core.js
-   ═══════════════════════════════════════════════════ */
-
-/* ── Mode / Protocol selectors ── */
-function switchMode(m) {
+﻿function switchMode(m) {
   if (state.connected && state.mode !== m) {
     showToast('Disconnect before switching session type', 'info');
     return;
@@ -26,7 +18,7 @@ function selectProto(p) {
   document.getElementById('sb-proto').textContent = p.toUpperCase();
 }
 
-/* ── Auth input lock (password ↔ hash mutual exclusion) ── */
+
 function updateAuthInputLockState(source = '') {
   const passEl = document.getElementById('f-pass');
   const hashEl = document.getElementById('f-hash');
@@ -63,7 +55,7 @@ function toggleHash() {
   f.type = f.type === 'password' ? 'text' : 'password';
 }
 
-/* ── Form clear ── */
+
 function clearForm() {
   ['f-domain','f-ip','f-dc','f-user','f-pass','f-hash'].forEach(id => {
     const el = document.getElementById(id);
@@ -77,7 +69,7 @@ function clearForm() {
   addLog('Form cleared', 'info');
 }
 
-/* ── Login / disconnect screen reset ── */
+
 function showLoginScreen() {
   switchMainTab('connect');
   ['tab-users','tab-computers','tab-ous','tab-gpo','tab-groups','tab-trusts','tab-acl'].forEach(id => {
@@ -133,11 +125,8 @@ function showLoginScreen() {
   }
 }
 
-/* ── Main tab switching ── */
+
 function switchMainTab(tab, btn) {
-  const comingSoonTabs = new Set(['powershell', 'enumeration', 'reconnaissance']);
-  if (comingSoonTabs.has(tab)) return;
-  if (tab === 'enumeration' && !state.connected) return;
   if (tab !== 'decision-engine' && typeof restoreDecisionTreeHost === 'function') {
     restoreDecisionTreeHost();
   }
@@ -157,7 +146,7 @@ function switchMainTab(tab, btn) {
     if (rightPanelEl) rightPanelEl.style.display = '';
   }
 
-  const allTabs = ['connect','powershell','enumeration','reconnaissance',
+  const allTabs = ['connect',
                    'users','computers','ous','gpo','groups','trusts','acl'];
   allTabs.forEach(t => {
     const el = document.getElementById(`tab-${t}`);
@@ -170,22 +159,6 @@ function switchMainTab(tab, btn) {
   } else {
     const activeBtn = document.querySelector(`.main-tab[data-tab="${tab}"]`);
     if (activeBtn) activeBtn.classList.add('active');
-  }
-
-  if (tab === 'powershell') {
-    document.getElementById('tab-powershell').style.display = '';
-    const term = document.getElementById('shell-terminal');
-    if (term) {
-      if (!state.connected) {
-          term.innerHTML = '<div class="shell-line shell-warn">Shell unavailable: connect with Local session first.</div>';
-        } else if (state.protocol !== 'local') {
-          term.innerHTML = '<div class="shell-line shell-warn">Shell is only available for Local sessions.</div>';
-      } else if (term.children.length === 0 || term.textContent.includes('Connect first')) {
-        term.innerHTML = '<div class="shell-line shell-info">Ready. Enter commands and press Enter.</div>';
-      }
-    }
-    updateShellTabState();
-    return;
   }
 
   if (tab === 'decision-engine') {
@@ -205,30 +178,7 @@ function switchMainTab(tab, btn) {
     else loadComputers();
     return;
   }
-  if (tab === 'enumeration') {
-    document.getElementById('tab-enumeration').style.display = '';
-    refreshEnumerationProtocolPanel();
-    resetEnumerationProtocolStats();
-    const titleEl = document.querySelector('#enumeration-placeholder .enumeration-placeholder-title');
-    const copyEl  = document.querySelector('#enumeration-placeholder .enumeration-placeholder-copy');
-    if (titleEl && copyEl) {
-      if (state.connected) {
-        titleEl.textContent = 'Protocol Hierarchy';
-        copyEl.textContent  = 'Protocol checks are manual. Click Scan to start probing.';
-      } else {
-        titleEl.textContent = 'Connect first to unlock Enumeration';
-        copyEl.textContent  = 'Enumeration features appear here once a Local or Remote session is active.';
-      }
-    }
-    return;
-  }
-  if (tab === 'reconnaissance') {
-    document.getElementById('tab-reconnaissance').style.display = '';
-    return;
-  }
-
   document.getElementById('tab-connect').style.display = '';
-  updateShellTabState();
 }
 
 function openDecisionEnginePage() {
@@ -250,7 +200,7 @@ function openDecisionEnginePage() {
   }
 }
 
-/* ── AD object sub-tab switching ── */
+
 function switchTab(tab) {
   const allObjTabs = ['connect','users','computers','ous','gpo','groups','trusts','acl'];
   allObjTabs.forEach(t => {
@@ -263,7 +213,7 @@ function switchTab(tab) {
   document.getElementById('sidebar-attacks').style.display = attackTabs.has(tab) ? 'flex' : 'none';
   renderAssessmentToolkit(tab);
 
-  /* Helper: true if user can browse AD object tabs (live session OR ZIP offline mode) */
+
   const _canBrowse = () => state.connected || !!state._zipOffline;
 
   const tabMap = {
@@ -284,7 +234,7 @@ function switchTab(tab) {
     }},
     trusts:    { el: 'tab-trusts',    nav: 'nav-trusts',    load: () => { if (!_canBrowse()) { document.getElementById('tr-empty').innerHTML = '<p>Connect to a domain first or import a ZIP</p>'; } else loadTrusts(); }},
     acl:       { el: 'tab-acl',       nav: 'nav-acl',       load: () => {
-      // Reset ACL search fields
+
       ['acl-search','acl-target-search','acl-principal-search'].forEach(id => {
         const el = document.getElementById(id); if (el) el.value = '';
       });
@@ -360,142 +310,7 @@ function openCertificatePage() {
   }
 }
 
-/* ── Enumeration tab state ── */
-function updateEnumerationTabState() {
-  const enumBtn = document.querySelector('.main-tab[data-tab="enumeration"]');
-  const enumTab = document.getElementById('tab-enumeration');
-  if (!enumBtn || !enumTab) return;
-  // Enumeration UI is removed/disabled in this build — keep the tab visually disabled.
-  enumBtn.disabled = true;
-  enumBtn.classList.add('disabled');
-  enumBtn.title = 'Coming Soon';
-  if (enumTab.style.display !== 'none') switchMainTab('connect');
-}
 
-function updateReconnaissanceTabState() {
-  const reconBtn = document.querySelector('.main-tab[data-tab="reconnaissance"]');
-  if (!reconBtn) return;
-  // Reconnaissance tab is always disabled in the UI.
-  reconBtn.disabled = true;
-  reconBtn.classList.add('disabled');
-  reconBtn.title = 'Coming Soon';
-}
-
-/* ── Shell terminal ── */
-function appendShellOutput(text, type = 'info') {
-  const term = document.getElementById('shell-terminal');
-  if (!term) return;
-  const line = document.createElement('div');
-  line.className   = `shell-line shell-${type}`;
-  line.textContent = text;
-  term.appendChild(line);
-  term.scrollTop = term.scrollHeight;
-}
-
-function clearShellOutput() {
-  const term = document.getElementById('shell-terminal');
-  if (!term) return;
-  term.innerHTML = '<div class="shell-line shell-info">Ready. Enter commands and press Enter.</div>';
-}
-
-function updateShellTabState() {
-  const input   = document.getElementById('shell-input');
-  const btn     = document.getElementById('btn-shell-send');
-  const enabled = state.connected && state.protocol === 'local';
-  if (input) input.disabled = !enabled;
-  if (btn)   btn.disabled   = !enabled;
-}
-
-async function sendShellCommand() {
-  const input = document.getElementById('shell-input');
-  const btn   = document.getElementById('btn-shell-send');
-  if (!input || !btn) return;
-  const command = input.value.trim();
-  if (!command) return;
-  if (!state.connected) { showToast('Connect first to use the shell', 'error'); return; }
-
-  appendShellOutput(`PS> ${command}`, 'prompt');
-  input.value  = '';
-  btn.disabled = true;
-
-  try {
-    const payload = {
-      mode: state.mode, protocol: state.protocol, command,
-      domain:   state.domain,
-      ip:       document.getElementById('f-ip').value.trim()   || state.dc,
-      username: document.getElementById('f-user').value.trim() || state.user,
-      password: state._pass || state._hash || '',
-      hash:     state._hash || '',
-    };
-    const resp = await fetch(`${API_BASE}/api/shell`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = await resp.json();
-    if (resp.ok && data.success) {
-      if (data.output) appendShellOutput(data.output, 'output');
-      if (data.stderr) appendShellOutput(data.stderr, 'error');
-      if (!data.output && !data.stderr) appendShellOutput('Command executed.', 'info');
-    } else {
-      appendShellOutput(data.error || 'Shell command failed', 'error');
-    }
-  } catch (err) {
-    appendShellOutput(err.message || 'Shell request failed', 'error');
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-function handleShellKey(e) {
-  if (e.key === 'Enter') { e.preventDefault(); sendShellCommand(); }
-}
-
-/* ── Enumeration module selector ── */
-function toggleEnumerationModuleList() {
-  const list = document.getElementById('enum-module-list');
-  if (!list) return;
-  list.style.display = list.style.display === 'block' ? 'none' : 'block';
-}
-
-function selectEnumerationModule(name, btn) {
-  const selected = document.getElementById('enum-selected-name');
-  if (selected) selected.textContent = name;
-  document.querySelectorAll('#enum-modules-scroll .module-item').forEach(el => el.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  document.getElementById('enum-module-list').style.display = 'none';
-}
-
-function setEnumerationOutput(text) {
-  const pre = document.getElementById('enum-output-pre');
-  if (!pre) return;
-  pre.textContent = text || 'No output';
-}
-
-async function executeEnumerationModule() {
-  if (!state.connected) { showToast('Connect first to run modules', 'error'); return; }
-  const selected = document.getElementById('enum-selected-name')?.textContent?.trim() || '';
-  if (selected !== 'Local Inventory (C)') {
-    setEnumerationOutput(`Module "${selected}" is not implemented yet.`);
-    return;
-  }
-  const btn = document.getElementById('btn-enum-exec');
-  if (btn) btn.disabled = true;
-  setEnumerationOutput('Running Local Inventory (C)...');
-  try {
-    const resp = await fetch(`${API_BASE}/api/enumeration/local-inventory`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: state.mode || 'local' }),
-    });
-    const data = await resp.json();
-    setEnumerationOutput((!resp.ok || !data.success) ? (data.error || 'Module execution failed.') : JSON.stringify(data.result || data, null, 2));
-  } catch (err) {
-    setEnumerationOutput(err.message || 'Module request failed.');
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-/* ── Misc / Credential / Certificate scan panels ── */
 function selectMiscMisconfig(name, btn) {
   const el = document.getElementById('misc-selected-name');
   if (el) el.textContent = name;
@@ -561,146 +376,7 @@ async function runCertificateMisconfigScan() {
   }
 }
 
-/* ── Enumeration protocol panel ── */
-const TOOLS_PROBE_KEYS = [
-  'dns','rpc','telnet','ftp','ssh','smtp','imap','pop3','ldap',
-  'http','tftp','snmp','ntp','dhcp','radius','rdp',
-  'mysql','mssql','postgresql','oracle','mongodb',
-];
 
-function refreshEnumerationProtocolPanel() {
-  const panel    = document.getElementById('enum-proto-panel');
-  const miscPanel= document.getElementById('misc-panel');
-  const credPanel= document.getElementById('cred-panel');
-  const certPanel= document.getElementById('cert-panel');
-  if (!panel) return;
-
-  if (!state.connected) {
-    panel.style.display = 'none';
-    if (miscPanel) miscPanel.style.display = 'none';
-    if (credPanel) credPanel.style.display = 'none';
-    if (certPanel) certPanel.style.display = 'none';
-    return;
-  }
-
-  panel.style.display = 'block';
-  if (miscPanel) miscPanel.style.display = 'block';
-  if (credPanel) credPanel.style.display = 'block';
-  if (certPanel) certPanel.style.display = 'block';
-
-  const copyValue = (fromId, toId) => {
-    const from = document.getElementById(fromId);
-    const to   = document.getElementById(toId);
-    if (!to) return;
-    to.textContent = from?.textContent?.trim() || '—';
-    const cls = String(from?.className || '');
-    if      (cls.includes('green')) to.className = 'enum-proto-value green';
-    else if (cls.includes('amber')) to.className = 'enum-proto-value amber';
-    else if (cls.includes('red'))   to.className = 'enum-proto-value red';
-    else                            to.className = 'enum-proto-value dim';
-  };
-  copyValue('stat-kerb', 'enum-stat-kerb');
-  copyValue('stat-ntlm', 'enum-stat-ntlm');
-  copyValue('stat-smb',  'enum-stat-smb');
-}
-
-function resetEnumerationProtocolStats() {
-  ['kerb','ntlm','smb',...TOOLS_PROBE_KEYS].forEach(key => {
-    const el = document.getElementById(`enum-stat-${key}`);
-    if (!el) return;
-    el.textContent = '—';
-    el.className   = 'enum-proto-value dim';
-  });
-}
-
-function _sortProtoRows() {
-  const panel = document.getElementById('enum-proto-panel');
-  if (!panel) return;
-  const rows = Array.from(panel.querySelectorAll('.enum-proto-row'));
-  const rank = (row) => {
-    const val = row.querySelector('.enum-proto-value');
-    if (!val) return 2;
-    if (val.classList.contains('green')) return 0;
-    if (val.classList.contains('red'))   return 1;
-    return 2;
-  };
-  rows.sort((a, b) => rank(a) - rank(b));
-  rows.forEach(r => panel.appendChild(r));
-}
-
-async function probeProtocols() {
-  if (!state.connected || !state.ip) return;
-  TOOLS_PROBE_KEYS.forEach(k => {
-    const el = document.getElementById(`enum-stat-${k}`);
-    if (el) { el.textContent = '…'; el.className = 'enum-proto-value dim'; }
-  });
-  try {
-    const resp = await fetch(`${API_BASE}/api/probe-protocols`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip: state.ip, timeout: 5 }),
-    });
-    const data = await resp.json();
-    if (!data.success) return;
-    Object.entries(data.results || {}).forEach(([key, info]) => {
-      const el = document.getElementById(`enum-stat-${key}`);
-      if (!el) return;
-      el.textContent = info.status || '—';
-      el.className   = 'enum-proto-value ' + (info.level === 'good' ? 'green' : info.level === 'bad' ? 'red' : 'dim');
-    });
-  } catch (_) {}
-}
-
-async function runToolsEnumeration() {
-  if (!state.connected || state.deepEnumRunning) return;
-  const scanBtn = document.getElementById('btn-enum-proto-scan');
-  state.deepEnumRunning = true;
-  if (scanBtn) { scanBtn.disabled = true; scanBtn.textContent = 'Scanning...'; }
-
-  _showEnumTabProgress();
-  _updateEnumTabProgress(0, 'Starting protocol checks...');
-
-  const ip          = state.ip;
-  const total       = TOOLS_PROBE_KEYS.length;
-  const CONCURRENCY = 5;
-  let   completed   = 0;
-
-  const probeOne = async (key) => {
-    try {
-      const resp = await fetch(`${API_BASE}/api/probe-protocols`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip, timeout: 5, protocols: [key] }),
-      });
-      const data = await resp.json();
-      const info = data.results?.[key];
-      if (info) {
-        const el = document.getElementById(`enum-stat-${key}`);
-        if (el) {
-          el.textContent = info.status || '—';
-          el.className   = 'enum-proto-value ' + (info.level === 'good' ? 'green' : info.level === 'bad' ? 'red' : 'dim');
-        }
-      }
-      addLog(`${key.toUpperCase()} probe: ${info?.status || 'done'}`, 'ok');
-    } catch (_) {
-      addLog(`${key.toUpperCase()} probe failed`, 'err');
-    }
-    completed++;
-    _updateEnumTabProgress(Math.round((completed / total) * 100), `Checking protocols... (${completed}/${total})`);
-  };
-
-  try {
-    for (let i = 0; i < total; i += CONCURRENCY) {
-      await Promise.all(TOOLS_PROBE_KEYS.slice(i, i + CONCURRENCY).map(probeOne));
-    }
-    _sortProtoRows();
-    _updateEnumTabProgress(100, 'All tools complete ✓');
-  } finally {
-    state.deepEnumRunning = false;
-    if (scanBtn) { scanBtn.disabled = false; scanBtn.textContent = 'Scan'; }
-    setTimeout(_hideEnumTabProgress, 1200);
-  }
-}
-
-/* ── API health ping ── */
 async function pingApi() {
   try {
     const t0   = Date.now();
@@ -722,7 +398,7 @@ async function pingApi() {
 pingApi();
 if (!apiPingTimerId) apiPingTimerId = setInterval(pingApi, 20000);
 
-/* ── Enter key → connect ── */
+
 function bindConnectHotkeysOnce() {
   ['f-domain','f-ip','f-dc','f-user','f-pass','f-hash'].forEach(id => {
     const el = document.getElementById(id);
@@ -735,7 +411,7 @@ function bindConnectHotkeysOnce() {
 }
 bindConnectHotkeysOnce();
 
-/* ── Auth input event binding ── */
+
 ['f-pass','f-hash'].forEach((id, i) => {
   const source = ['pass','hash'][i];
   const el = document.getElementById(id);
@@ -746,7 +422,7 @@ bindConnectHotkeysOnce();
 });
 updateAuthInputLockState();
 
-/* ── Escape closes modals ── */
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (typeof hideAttackHintModal    === 'function') hideAttackHintModal();

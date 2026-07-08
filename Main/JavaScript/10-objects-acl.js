@@ -1,16 +1,3 @@
-/* ═══════════════════════════════════════════════════
-   10-objects-acl.js
-   ACL tab: load, render, filter, detail panel.
-   Depends on: 00-globals.js
-   Data source: YALNIZ sqlite_reader.py (port 8800) — JSONL oxunmur.
-
-   Yükləmə strategiyası (RAM partlaması qarşısı):
-     loadACLs()     → offset=0,  limit=50000 (first batch)
-     loadMoreACLs() → offset+=50000 each call (next batch)
-   Hər iki funksiya HTML-dən birbaşa çağırıla bilər.
-   ═══════════════════════════════════════════════════ */
-
-/* ─── State ──────────────────────────────────────────────────────────────── */
 let aclSearch          = '';
 let aclTargetSearch    = '';
 let aclPrincipalSearch = '';
@@ -18,46 +5,28 @@ let aclFilter          = 'all';
 let aclObjectFilter    = 'all';
 let aclRightsSort      = 'none';
 
-/* Pagination state */
-let _aclOffset        = 0;       // şimdiki yüklənmiş sətir sayı
+let _aclOffset        = 0;       
 const ACL_PAGE_SIZE   = 2000;
-let _aclTotalInDB     = 0;       // DB-dəki ümumi ACE sayı (ilk sorğudan gəlir)
-let _aclLoading       = false;   // paralel sorğuların qarşısını alır
+let _aclTotalInDB     = 0;       
+let _aclLoading       = false;  
 
-/* ─── Dangerous ACEs / Extended Rights — limitsiz tam-cədvəl yüklənməsi ───
-   Bu iki filter 'aces' cədvəlinin 2K-lik səhifəsi üzərində İŞLƏMİR —
-   onların öz xüsusi SQLite cədvəlləri var (dangerous_ace, extended_rights),
-   hər ikisi 2000 limitindən çox-çox kiçikdir, ona görə bir sorğuda tam çəkilir. */
 const ACL_FILTER_TABLE_MAP = {
   'dangerous':        'dangerous_ace',
   'extended-rights':  'extended_rights',
 };
-let _aclFullFetchData      = [];    // aktiv full-fetch filterinin (limitsiz) sətirləri
-let _aclFullFetchActive    = false; // hazırda 'dangerous' / 'extended-rights' rejimindəyik?
+let _aclFullFetchData      = [];  
+let _aclFullFetchActive    = false; 
 let _aclFullFetchLoading   = false;
-let _aclFullFetchToken     = 0;     // köhnə cavabların gec gəlib data üzərinə yazmasının qarşısını alır
+let _aclFullFetchToken     = 0;   
 
-/* ─── Filter Target / Filter Principal — server-side debounce sorğusu ───
-   İstifadəçi yazdıqca hər keystroke-da sorğu getmir; 3 saniyə fasilə
-   (debounce) tələb olunur, sonra aktiv cədvələ uyğun server-side
-   WHERE target_name/target_dn LIKE... və ya principal/principal_sid LIKE...
-   sorğusu göndərilir. */
-const ACL_FILTER_DEBOUNCE_MS = 3000;
+const ACL_FILTER_DEBOUNCE_MS = 450;
 let _aclTargetDebounceTimer    = null;
 let _aclPrincipalDebounceTimer = null;
 
 let aclKnownPrincipalSIDs       = new Set();
 let aclKnownPrincipalSIDsLoaded = false;
 
-/* ── Select Domains (ACEs tab) ──
-   Users tabındakı paylaşılan domainsListCache/ensureDomainsListLoaded()
-   (03-objects-users.js) istifadə olunur; ACEs tabına aid yalnız seçim
-   state-i (aclDomainsSelected) və dropdown UI-si burada saxlanılır.
-   Uyğunluq ACE-nin target obyektinin domenini müəyyən edir: əvvəlcə
-   principal_sid domain SID prefiksinə görə (əgər hədəf sistemi principal
-   kimi eyni domendədirsə), sonra isə target_dn son hissəsinə (dc=...)
-   görə yoxlanılır. */
-let aclDomainsSelected     = null;   // Set<string> (lowercased domain names) — null = hamısı seçili
+let aclDomainsSelected     = null;   
 let aclDomainsDropdownOpen = false;
 
 function aclItemBelongsToDomain(item, domain) {
@@ -179,13 +148,11 @@ function resetACLDomainsSelection() {
   renderACLs();
 }
 
-/* ─── SID utility ────────────────────────────────────────────────────────── */
 function _normSid(value) {
   return String(value || '').trim().toUpperCase();
 }
 
 async function ensureACLKnownPrincipalSIDs() {
-  /* Əgər usersData/computersData/groupsData artıq yüklüdürsə, oradan al */
   const memSids = [
     ...(Array.isArray(usersData)     ? usersData.map(u     => _normSid(u?.sid))  : []),
     ...(Array.isArray(computersData) ? computersData.map(c => _normSid(c?.sid))  : []),
@@ -199,7 +166,6 @@ async function ensureACLKnownPrincipalSIDs() {
   }
   if (aclKnownPrincipalSIDsLoaded && aclKnownPrincipalSIDs.size > 0) return;
 
-  /* Fallback: connection.py-dən SID kataloqu */
   try {
     const resp = await fetch(`${API_BASE}/api/domain-object-sids`, { method: 'GET' });
     const data = await resp.json();
@@ -226,39 +192,16 @@ function isKnownPrincipalSIDForDangerous(item) {
   return aclKnownPrincipalSIDs.has(sid);
 }
 
-/* ─── ACE flag constants ─────────────────────────────────────────────────── */
 const ACE_FLAG_INHERITED         = 0x10;
 const ACE_FLAG_CONTAINER_INHERIT = 0x02;
 const ACE_FLAG_OBJECT_INHERIT    = 0x01;
 const ACE_FLAG_INHERIT_ONLY      = 0x08;
 const ACE_FLAG_NO_PROPAGATE      = 0x04;
 
-/* ─── Principal / rights helpers ─────────────────────────────────────────── */
 const _PV_INTERESTING_SID_RE = /^S-1-5-.*-[1-9]\d{3,}$/;
 function _pvSidIsInteresting(sid) { return _PV_INTERESTING_SID_RE.test(sid || ''); }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   ACL_EXCLUDED_DEFAULT_PRINCIPALS — TƏK massiv (single source of truth).
-
-   Dangerous ACEs və Extended Rights filterlərinin HƏR İKİSİ məhz bu
-   massivi istifadə edir. Massivdəki hər giriş bir built-in/default AD
-   trustee-ni təmsil edir və 3 açarla uyğunlaşdırılır (hamısı optional,
-   ən azı biri doldurulur):
-     sid  — tam SID uyğunluğu (well-known/BUILTIN SID-lər)
-     rid  — SID sonluğu (domen fərqli olsa belə, unresolved SID-lərdə də tutur)
-     name — principal adında substring axtarışı (case-insensitive)
-
-   Bu obyektlərdən biri uyğun gələrsə, həmin ACE nə Dangerous ACEs, nə də
-   Extended Rights nəticələrində Principal olaraq göstərilmir — çünki
-   bunlar hər domendə default olaraq mövcud olan, gözlənilən ACE-lərdir
-   (əsl privilege-escalation yolu deyil, "noise").
-
-   Mənbə: constants.py (_DEFAULT_TRUSTEE_SIDS, _DEFAULT_TRUSTEE_RIDS,
-   _PRIVILEGED_RIDS, _DANGEROUS_ACE_NOISY_*, _EXTENDED_RIGHTS_NOISY_*) və
-   əvvəlki frontend-only istisnalar.
-   ═══════════════════════════════════════════════════════════════════════ */
 const ACL_EXCLUDED_DEFAULT_PRINCIPALS = [
-  /* ── Well-known / BUILTIN SID-lər ── */
   { name: 'NT AUTHORITY\\SYSTEM',                        sid: 'S-1-5-18' },
   { name: 'NT AUTHORITY\\Local Service',                 sid: 'S-1-5-19' },
   { name: 'BUILTIN\\Administrators',                     sid: 'S-1-5-32-544', rid: '-544' },
@@ -272,7 +215,6 @@ const ACL_EXCLUDED_DEFAULT_PRINCIPALS = [
   { name: 'BUILTIN\\Terminal Server License Servers',     sid: 'S-1-5-32-561' },
   { name: 'Creator Owner',                               sid: 'S-1-3-0' },
 
-  /* ── Domain-relative well-known RID-lər ── */
   { name: 'Administrator',                    rid: '-500' },
   { name: 'krbtgt',                           rid: '-502' },
   { name: 'Domain Admins',                    rid: '-512' },
@@ -287,7 +229,6 @@ const ACL_EXCLUDED_DEFAULT_PRINCIPALS = [
   { name: 'RAS and IAS Servers',              rid: '-553' },
   { name: 'Enterprise Read-Only Domain Controllers', rid: '-498' },
 
-  /* ── Yalnız ad-əsaslı (RID/SID sabit deyil və ya BUILTIN-də göstərilmir) ── */
   { name: 'Administrators' },
   { name: 'Hyper-V Administrators' },
   { name: 'Storage Replica Administrators' },
@@ -310,10 +251,6 @@ const ACL_EXCLUDED_DEFAULT_PRINCIPALS = [
   { name: 'Performance Monitor Users' },
 ];
 
-/* Massivdən sürətli axtarış üçün 3 lookup dəsti qurulur (bir dəfə, modul
-   yüklənəndə). Yeni bir default trustee əlavə etmək üçün YALNIZ yuxarıdakı
-   ACL_EXCLUDED_DEFAULT_PRINCIPALS massivinə sətir əlavə etmək kifayətdir —
-   bu 3 dəst və aşağıdakı isExcludedDefaultPrincipal() avtomatik yenilənir. */
 const _ACL_EXCL_SIDS  = new Set(
   ACL_EXCLUDED_DEFAULT_PRINCIPALS.map(p => p.sid).filter(Boolean)
 );
@@ -332,9 +269,6 @@ function _matchesRidSuffix(sid, ridSet) {
   return false;
 }
 
-/* Bir ACE-nin principal-ının ACL_EXCLUDED_DEFAULT_PRINCIPALS massivində
-   olub-olmadığını yoxlayır. Həm Dangerous ACEs, həm də Extended Rights
-   filteri bu TƏK funksiyanı çağırır. */
 function isExcludedDefaultPrincipal(item) {
   const sid = (item?.principal_sid || '').trim();
   if (sid && _ACL_EXCL_SIDS.has(sid)) return true;
@@ -348,9 +282,6 @@ function isExcludedDefaultPrincipal(item) {
   return false;
 }
 
-/* Geriyə uyğunluq üçün nazik wrapper-lər — matchesACLFilter() və digər
-   render funksiyaları bu adları çağırır, hər ikisi eyni tək mənbəyə
-   (isExcludedDefaultPrincipal) yönləndirilir. */
 function isDangerousExcludedPrincipal(item) {
   return isExcludedDefaultPrincipal(item);
 }
@@ -402,7 +333,6 @@ function _hasObjectAceType(item) {
   return !!text && text !== '00000000-0000-0000-0000-000000000000' && text.toLowerCase() !== 'none';
 }
 
-/* ─── Extended-right priority ────────────────────────────────────────────── */
 const _EXTENDED_RIGHT_PRIORITY_ORDER = [
   'All-Extended-Rights', 'DS-Replication-Get-Changes', 'DS-Replication-Get-Changes-All',
   'DS-Replication-Get-Changes-In-Filtered-Set', 'ForceChangePassword', 'AddMember',
@@ -435,7 +365,6 @@ function _pvExtendedRightTopTier(item) {
   return _EXTENDED_RIGHT_HIGHLIGHT_SET.has(canonicalRightName(_pvObjectAceType(item)));
 }
 
-/* ─── Right classification ───────────────────────────────────────────────── */
 function _pvIsInterestingRight(item) {
   const rights = aclRightsSet(item);
   if (hasAnyRight(rights, [
@@ -481,7 +410,6 @@ function isDangerousACEVisible(item) {
   return true;
 }
 
-/* ─── Unique key helpers ─────────────────────────────────────────────────── */
 function _pvUniqueKey(item) {
   const rightsKey = [...(Array.isArray(item.rights) ? item.rights : [])]
     .map(r => canonicalRightName(r)).sort().join(',');
@@ -498,7 +426,6 @@ function _pvDangerousUniqueKey(item) {
   ].join('\x00');
 }
 
-/* ─── Severity scoring ───────────────────────────────────────────────────── */
 function aclSeverityScore(item) {
   const rights = aclRightsSet(item);
   const has    = (key) => hasAnyRight(rights, [key]);
@@ -529,7 +456,6 @@ function aclUnifiedCriticalScore(item) {
   return dangerousScore + extScore;
 }
 
-/* ─── Label helpers ──────────────────────────────────────────────────────── */
 function _pvAceFlagsLabel(aceFlags) {
   const f = parseInt(aceFlags, 10) || 0;
   const parts = [];
@@ -586,7 +512,6 @@ function _pvIdentityReferenceClass(item) {
   return item.identity_reference_class || item.principal_class || item.principal_scope || '—';
 }
 
-/* ─── Filter predicate ───────────────────────────────────────────────────── */
 function matchesACLFilter(item) {
   if (aclFilter === 'all') return true;
   if (aclFilter === 'dangerous') {
@@ -611,13 +536,10 @@ function matchesACLFilter(item) {
   return true;
 }
 
-/* ─── "Load More" düyməsini yenilə ──────────────────────────────────────── */
 function _updateLoadMoreBtn() {
   const btn  = document.getElementById('acl-load-more-btn');
   const wrap = document.getElementById('acl-load-more-wrap');
 
-  /* Dangerous ACEs / Extended Rights rejimində bütün sətirlər artıq
-     limitsiz çəkilib — "Load More" mənasızdır, gizlət. */
   if (_aclFullFetchActive) {
     if (wrap) wrap.style.display = 'none';
     return;
@@ -647,7 +569,6 @@ function _updateLoadMoreBtn() {
   }
 }
 
-/* ─── DB stat panelini yenilə ─────────────────────────────────────────── */
 function _updateACLDbStat() {
   const panel    = document.getElementById('acl-db-stat');
   const elTotal  = document.getElementById('acl-db-total');
@@ -668,9 +589,7 @@ function _updateACLDbStat() {
   }
 }
 
-/* ─── ACE ümumi sayını əvvəlcədən göstər (yüngül sorğu) ─────────────────────── */
 async function prefetchACECount() {
-  /* Tab açılmadan da nav badge-ini doldurur — yalnız 1 sətir çəkir, yüksüz. */
   if (_aclTotalInDB > 0) return;
 
   try {
@@ -688,14 +607,9 @@ async function prefetchACECount() {
       const badge = document.getElementById('nav-acl-count');
       if (badge) badge.textContent = total;
     }
-  } catch (_) { /* sessizce yox ol */ }
+  } catch (_) {  }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   loadACLs()
-   ─────────────────────────────────────────────────────────────────────────
-   Loads first batch from DB, writes to aclData, renders.
-   ═══════════════════════════════════════════════════════════════════════════ */
 async function loadACLs() {
   if (_aclLoading) return;
   _aclLoading = true;
@@ -704,22 +618,20 @@ async function loadACLs() {
   document.getElementById('acl-table-body').innerHTML = '';
   closeACLDetail();
 
-  /* Sıfırla */
   aclData    = [];
   _aclOffset = 0;
   _aclTotalInDB = 0;
   aclDomainsSelected = null;
   _updateLoadMoreBtn();
 
-  /* sqlite_reader sağlamlıq yoxlaması */
   try {
     const h = await fetch(`${DB_READER_BASE}/api/health`, { method: 'GET' });
     if (!h.ok) throw new Error('offline');
   } catch (_) {
     document.getElementById('acl-table-body').innerHTML =
-      '<div class="acl-empty"><p>sqlite_reader.py (port 8800) əlçatan deyil.</p></div>';
+      '<div class="acl-empty"><p>sqlite_reader.py (port 8800) is not available.</p></div>';
     document.getElementById('acl-loading').style.display = 'none';
-    addLog('ACL: sqlite_reader.py (8800) əlçatan deyil', 'warn');
+    addLog('ACL: sqlite_reader.py (8800) is not available', 'warn');
     _aclLoading = false;
     return;
   }
@@ -727,7 +639,6 @@ async function loadACLs() {
   await ensureACLKnownPrincipalSIDs();
 
   try {
-    /* /api/list/aces?offset=0&limit=50000 */
     const url  = `${DB_READER_BASE}/api/list/aces?offset=0&limit=${ACL_PAGE_SIZE}`;
     const resp = await fetch(url, { method: 'GET' });
     const data = await resp.json();
@@ -743,11 +654,11 @@ async function loadACLs() {
 
     document.getElementById('nav-acl-count').textContent = _aclTotalInDB;
     document.getElementById('acl-meta').textContent =
-      `${rows.length.toLocaleString()} / ${_aclTotalInDB.toLocaleString()} ACEs yükləndi · source: domain_data.db`;
+      `${rows.length.toLocaleString()} / ${_aclTotalInDB.toLocaleString()} ACEs loaded · source: domain_data.db`;
 
     renderACLObjectFilters();
     renderACLs();
-    addLog(`ACL DB-dən yükləndi: ${rows.length} ACE (cəmi DB-də: ${_aclTotalInDB})`, 'ok');
+    addLog(`Loaded from ACL DB: ${rows.length} ACE (total in DB: ${_aclTotalInDB})`, 'ok');
   } catch (err) {
     addLog(`ACL: ${err.message}`, 'err');
     document.getElementById('acl-table-body').innerHTML =
@@ -760,15 +671,10 @@ async function loadACLs() {
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   loadMoreACLs()
-   ─────────────────────────────────────────────────────────────────────────
-   Fetches next batch from DB, appends to aclData.
-   ═══════════════════════════════════════════════════════════════════════════ */
 async function loadMoreACLs() {
   if (_aclLoading) return;
   if (_aclOffset >= _aclTotalInDB) {
-    addLog('ACL: bütün ACE-lər artıq yüklənib', 'info');
+    addLog('ACL: all ACEs are already loaded', 'info');
     _updateLoadMoreBtn();
     return;
   }
@@ -776,12 +682,11 @@ async function loadMoreACLs() {
   _aclLoading = true;
   _updateLoadMoreBtn();
 
-  /* Yüklənir göstərgəsi — mövcud cədvəlin altında */
   const loadingIndicator = document.createElement('div');
   loadingIndicator.id        = 'acl-loadmore-indicator';
   loadingIndicator.className = 'acl-empty';
   loadingIndicator.style.padding = '12px';
-  loadingIndicator.textContent   = `Yüklənir… (${_aclOffset + 1}–${Math.min(_aclOffset + ACL_PAGE_SIZE, _aclTotalInDB)})`;
+  loadingIndicator.textContent   = `Loading… (${_aclOffset + 1}–${Math.min(_aclOffset + ACL_PAGE_SIZE, _aclTotalInDB)})`;
   document.getElementById('acl-table-body').appendChild(loadingIndicator);
 
   try {
@@ -792,27 +697,22 @@ async function loadMoreACLs() {
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
 
     const rows = Array.isArray(data.rows) ? data.rows : [];
-
-    /* aclData-ya əlavə et (mövcud filter/render üzərindən işləyəcək) */
     aclData   = aclData.concat(rows);
     _aclOffset += rows.length;
 
-    /* Total-i yenilə (serverdən gələn dəyərə etibar et) */
     if (typeof data.total === 'number') _aclTotalInDB = data.total;
 
     document.getElementById('nav-acl-count').textContent = _aclTotalInDB;
     document.getElementById('acl-meta').textContent =
-      `${aclData.length.toLocaleString()} / ${_aclTotalInDB.toLocaleString()} ACEs yükləndi · source: domain_data.db`;
+      `${aclData.length.toLocaleString()} / ${_aclTotalInDB.toLocaleString()} ACEs loaded · source: domain_data.db`;
 
-    /* Yalnız yeni əlavə olunan sətirləri render et (mövcudları toxunmadan qal) */
     _appendACLRows(rows);
     renderACLObjectFilters();
 
-    addLog(`ACL: daha ${rows.length} ACE əlavə edildi (cəmi: ${aclData.length} / ${_aclTotalInDB})`, 'ok');
+    addLog(`ACL: loaded ${rows.length} more ACEs (Total: ${aclData.length} / ${_aclTotalInDB})`, 'ok');
   } catch (err) {
     addLog(`ACL loadMore: ${err.message}`, 'err');
   } finally {
-    /* Yüklənir göstəriciyi sil */
     const ind = document.getElementById('acl-loadmore-indicator');
     if (ind) ind.remove();
 
@@ -822,15 +722,12 @@ async function loadMoreACLs() {
   }
 }
 
-/* ─── Yalnız yeni gələn sətirləri DOM-a əlavə et ────────────────────────── */
 function _appendACLRows(newRows) {
   const body = document.getElementById('acl-table-body');
 
-  /* Əgər cədvəl "boş" mesajı göstərirsə, sıfırla */
   const emptyEl = body.querySelector('.acl-empty');
   if (emptyEl) emptyEl.remove();
 
-  /* Mövcud filterləri tətbiq et, yalnız uyğun sətirləri əlavə et */
   const seen = new Set();
   if (aclFilter === 'dangerous') {
     document.querySelectorAll('.acl-row').forEach(r => {
@@ -842,26 +739,16 @@ function _appendACLRows(newRows) {
   newRows.forEach(item => {
     if (!matchesACLFilter(item)) return;
 
-    /* Dangerous filter-də duplicate-lər */
     if (aclFilter === 'dangerous') {
       const k = _pvDangerousUniqueKey(item);
       if (seen.has(k)) return;
       seen.add(k);
     }
 
-    /* Mövcud axtarış filterlərini yoxla */
     if (aclSearch && ![
       (item.target_name || ''), (item.target_dn || ''),
       (item.principal   || ''), _pvAclRightsLabel(item), (item.target_type || ''),
     ].some(s => s.toLowerCase().includes(aclSearch))) return;
-
-    if (aclTargetSearch && ![
-      (item.target_name || ''), (item.target_dn || ''),
-    ].some(s => s.toLowerCase().includes(aclTargetSearch))) return;
-
-    if (aclPrincipalSearch && ![
-      (item.principal || ''), (item.principal_sid || ''),
-    ].some(s => s.toLowerCase().includes(aclPrincipalSearch))) return;
 
     if (aclObjectFilter !== 'all' &&
         String(item.target_type || '').toLowerCase() !== aclObjectFilter) return;
@@ -872,7 +759,6 @@ function _appendACLRows(newRows) {
   body.appendChild(frag);
 }
 
-/* ─── Tək ACL sırasını DOM elementinə çevir ─────────────────────────────── */
 function _buildACLRow(item) {
   const row      = document.createElement('div');
   const aceFlags = parseInt(item.ace_flags, 10) || 0;
@@ -901,23 +787,10 @@ function _buildACLRow(item) {
   return row;
 }
 
-/* ─── Full render (filter/sort dəyişdikdə) ──────────────────────────────── */
 function renderACLs() {
   const body = document.getElementById('acl-table-body');
   body.innerHTML = '';
 
-  /* Dangerous ACEs / Extended Rights aktivdirsə, mənbə aclData yox,
-     limitsiz çəkilmiş _aclFullFetchData-dır. Bu sətirlər artıq uyğun
-     SQLite cədvəlindən (dangerous_ace / extended_rights) gəlir, lakin
-     həmin cədvəllər RAW ACL nəticələridir — default/built-in trustee
-     istisnası (ACL_EXCLUDED_DEFAULT_PRINCIPALS) server tərəfində
-     TƏTBİQ OLUNMUR (bax api.py: dangerous_ace() funksiyası mövcuddur,
-     amma heç bir yerdən çağırılmır — collector.py bunu wire etməyib).
-     Ona görə matchesACLFilter() burda ÇAĞIRILMASA da (o, 'aces' bazasına
-     aid digər şərtləri ehtiva edir və full-fetch üçün uyğun deyil),
-     isExcludedDefaultPrincipal() mütləq tətbiq olunmalıdır — əks halda
-     Dangerous ACEs / Extended Rights nəticələrində SYSTEM, Domain Admins,
-     DnsAdmins və digər default trustee-lər görünməyə davam edər. */
   let list;
   if (_aclFullFetchActive) {
     list = _aclFullFetchData.filter(item => !isExcludedDefaultPrincipal(item));
@@ -938,22 +811,6 @@ function renderACLs() {
       (i.principal    || '').toLowerCase().includes(q) ||
       _pvAclRightsLabel(i).toLowerCase().includes(q)  ||
       (i.target_type  || '').toLowerCase().includes(q)
-    );
-  }
-  /* Filter Target / Filter Principal: full-fetch rejimində bu süzgəc artıq
-     server-side (debounce sorğusu ilə) tətbiq olunub gəlib — burda təkrar
-     client-side filterləmə yalnız debounce gözlədiyi 3 saniyəlik aralıqda
-     köhnə nəticənin üstündə əlavə dəqiqləşdirmə kimi işləyir, ziyansızdır. */
-  if (aclTargetSearch) {
-    list = list.filter(i =>
-      (i.target_name || '').toLowerCase().includes(aclTargetSearch) ||
-      (i.target_dn   || '').toLowerCase().includes(aclTargetSearch)
-    );
-  }
-  if (aclPrincipalSearch) {
-    list = list.filter(i =>
-      (i.principal     || '').toLowerCase().includes(aclPrincipalSearch) ||
-      (i.principal_sid || '').toLowerCase().includes(aclPrincipalSearch)
     );
   }
   if (aclObjectFilter !== 'all') {
@@ -983,21 +840,19 @@ function renderACLs() {
   if (!filteredACLs.length) {
     const sourceEmpty = _aclFullFetchActive ? _aclFullFetchData.length === 0 : aclData.length === 0;
     const emptyMsg = sourceEmpty
-      ? (_aclFullFetchLoading ? 'Yüklənir…' : 'DB-dən heç bir ACE yüklənməyib.')
+      ? (_aclFullFetchLoading ? 'Loading…' : 'No ACEs loaded from DB.')
       : aclFilter === 'dangerous'
-        ? 'Maraqlı ACE tapılmadı.'
-        : 'Uyğun ACL girişi yoxdur.';
+        ? 'No ACE of interest found.'
+        : 'No matching ACL entry.';
     body.innerHTML = `<div class="acl-empty"><p>${emptyMsg}</p></div>`;
     return;
   }
 
-  /* DocumentFragment — toplu DOM əlavəsi, hər sətirdə reflow yoxdur */
   const frag = document.createDocumentFragment();
   filteredACLs.forEach(item => frag.appendChild(_buildACLRow(item)));
   body.appendChild(frag);
 }
 
-/* ─── Filter / Search ────────────────────────────────────────────────────── */
 function filterACLs() {
   const targetVal    = (document.getElementById('acl-target-search')?.value    || '').toLowerCase();
   const principalVal = (document.getElementById('acl-principal-search')?.value || '').toLowerCase();
@@ -1008,27 +863,18 @@ function filterACLs() {
   aclTargetSearch    = targetVal;
   aclPrincipalSearch = principalVal;
 
-  /* Dərhal mövcud (artıq yüklənmiş) data üzərində client-side render —
-     istifadəçi yazarkən boş ekran görməsin. */
   renderACLs();
 
-  /* Target / Principal dəyişdikdə isə 3 saniyəlik debounce ilə aktiv
-     cədvələ server-side sorğu göndər (yazı dayanandan 3 san sonra). */
   if (targetChanged || principalChanged) {
     _scheduleACLServerFilter();
   }
 }
 
-/* ─── Filter Target / Filter Principal — 3 saniyəlik debounce server sorğusu ───
-   Hər keystroke timer-i sıfırlayır; yazı 3 saniyə dayananda DB-yə
-   server-side WHERE target_name/target_dn LIKE... və/və ya
-   principal/principal_sid LIKE... sorğusu göndərilir, nəticə aktiv
-   filterin mənbəyinə (aclData və ya _aclFullFetchData) yazılıb render olunur. */
 function _scheduleACLServerFilter() {
   if (_aclTargetDebounceTimer)    clearTimeout(_aclTargetDebounceTimer);
   if (_aclPrincipalDebounceTimer) clearTimeout(_aclPrincipalDebounceTimer);
 
-  const fireToken = ++_aclFullFetchToken; // eyni token sistemi — gecikmiş cavabları ləğv edir
+  const fireToken = ++_aclFullFetchToken; 
   _aclTargetDebounceTimer = setTimeout(() => {
     _runACLServerSideFilter(fireToken);
   }, ACL_FILTER_DEBOUNCE_MS);
@@ -1039,10 +885,7 @@ async function _runACLServerSideFilter(myToken) {
 
   try {
     const params = new URLSearchParams({ offset: '0' });
-    /* Dangerous/Extended Rights cədvəlləri kiçikdir → limitsiz çək.
-       'aces' üçünsə hələ də ACL_PAGE_SIZE tətbiq olunur (2K limiti qalır,
-       çünki bu sorğu yalnız Target/Principal axtarışını server-də işlədir,
-       əsas 'aces' tabının pagination siyasətini dəyişmir). */
+
     if (ACL_FILTER_TABLE_MAP[aclFilter]) {
       params.set('limit', '500000');
     } else {
@@ -1055,7 +898,7 @@ async function _runACLServerSideFilter(myToken) {
     const resp = await fetch(url, { method: 'GET' });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-    if (myToken !== _aclFullFetchToken) return; // başqa sorğu/filter dəyişimi bunu artıq köhnəltdi
+    if (myToken !== _aclFullFetchToken) return; 
 
     const rows = Array.isArray(data.rows) ? data.rows : [];
 
@@ -1064,13 +907,13 @@ async function _runACLServerSideFilter(myToken) {
       _aclFullFetchData   = rows;
       const visibleCount = rows.filter(item => !isExcludedDefaultPrincipal(item)).length;
       document.getElementById('acl-meta').textContent =
-        `${visibleCount.toLocaleString()} / ${(data.total ?? rows.length).toLocaleString()} (filtrlənmiş, default trustee-lər çıxarılıb, source: ${baseTable}) · domain_data.db`;
+        `${visibleCount.toLocaleString()} / ${(data.total ?? rows.length).toLocaleString()} (filtered, default trustees removed, source: ${baseTable}) · domain_data.db`;
     } else {
       aclData       = rows;
       _aclOffset    = rows.length;
       _aclTotalInDB = typeof data.total === 'number' ? data.total : rows.length;
       document.getElementById('acl-meta').textContent =
-        `${rows.length.toLocaleString()} / ${_aclTotalInDB.toLocaleString()} ACEs (filtrlənmiş) · source: domain_data.db`;
+        `${rows.length.toLocaleString()} / ${_aclTotalInDB.toLocaleString()} ACEs (filtered) · source: domain_data.db`;
       _updateLoadMoreBtn();
       _updateACLDbStat();
     }
@@ -1089,8 +932,6 @@ async function setACLFilter(filter, btn) {
   document.querySelectorAll('#acl-filter-chips .chip').forEach(ch => ch.classList.remove('active'));
   if (btn) btn.classList.add('active');
 
-  /* Filter düyməsi dəyişdikdə, gözləyən debounce sorğusu varsa ləğv et —
-     köhnə filterə aid gecikmiş nəticə yeni rejimə qarışmasın. */
   if (_aclTargetDebounceTimer)    clearTimeout(_aclTargetDebounceTimer);
   if (_aclPrincipalDebounceTimer) clearTimeout(_aclPrincipalDebounceTimer);
   _aclFullFetchToken++;
@@ -1099,32 +940,18 @@ async function setACLFilter(filter, btn) {
     await ensureACLKnownPrincipalSIDs();
   }
 
-  /* ── Dangerous ACEs / Extended Rights: 2K limitini keçərək DB-dəki bütün
-     uyğun sətirləri xüsusi cədvəldən (dangerous_ace / extended_rights) çək. ── */
   if (ACL_FILTER_TABLE_MAP[aclFilter]) {
     await ensureACLKnownPrincipalSIDs();
     await loadACLFullFilterTable(aclFilter);
-    return; // loadACLFullFilterTable artıq renderACLs()-i çağırır
+    return; 
   }
 
-  /* 'all' və ya digər yüngül filterlərə qayıdış — normal paginated aclData-ya keç */
   _aclFullFetchActive = false;
   _aclFullFetchData   = [];
   renderACLs();
   _updateLoadMoreBtn();
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   loadACLFullFilterTable(filterKey)
-   ─────────────────────────────────────────────────────────────────────────
-   'Dangerous ACEs' və ya 'Extended Rights' düyməsi basıldıqda çağırılır.
-   ACL_PAGE_SIZE (2000) limitini bypass edib, həmin filterin öz xüsusi
-   SQLite cədvəlindən (dangerous_ace / extended_rights) BÜTÜN sətirləri
-   bir dəfəyə çəkir — bu cədvəllər artıq kiçikdir (yüzlərlə sətir),
-   ona görə limitsiz tək sorğu təhlükəsizdir.
-   Aktiv Filter Target / Filter Principal dəyərləri varsa, onlar da
-   server-side ötürülür ki, nəticə əvvəlcədən süzülmüş gəlsin.
-   ═══════════════════════════════════════════════════════════════════════════ */
 async function loadACLFullFilterTable(filterKey) {
   const table = ACL_FILTER_TABLE_MAP[filterKey];
   if (!table) return;
@@ -1135,7 +962,7 @@ async function loadACLFullFilterTable(filterKey) {
 
   const body = document.getElementById('acl-table-body');
   if (body) {
-    body.innerHTML = '<div class="acl-empty"><p>Yüklənir… (DB-dən bütün uyğun ACE-lər çəkilir)</p></div>';
+    body.innerHTML = '<div class="acl-empty"><p>Loading… (all matching ACEs are fetched from the database)</p></div>';
   }
 
   try {
@@ -1145,7 +972,7 @@ async function loadACLFullFilterTable(filterKey) {
     if (myToken === _aclFullFetchToken) {
       _aclFullFetchData = [];
       if (body) body.innerHTML = '<div class="acl-empty"><p>sqlite_reader.py (port 8800) əlçatan deyil.</p></div>';
-      addLog('ACL: sqlite_reader.py (8800) əlçatan deyil', 'warn');
+      addLog('ACL: sqlite_reader.py (port 8800) is offline', 'warn');
     }
     _aclFullFetchLoading = false;
     return;
@@ -1161,18 +988,14 @@ async function loadACLFullFilterTable(filterKey) {
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
 
-    /* Köhnə / artıq keçərliliyini itirmiş cavabı buraxma (sürətli filter dəyişimi zamanı) */
     if (myToken !== _aclFullFetchToken) return;
 
     const rows = Array.isArray(data.rows) ? data.rows : [];
     _aclFullFetchData = rows;
 
-    /* Meta yazısı raw (DB-dəki) say deyil, default trustee-lər çıxarıldıqdan
-       sonra faktiki görünəcək say ilə göstərilsin — əks halda "459 / 459"
-       yazıb cədvəldə 62 sətir göstərmək çaşdırıcı olardı. */
     const visibleCount = rows.filter(item => !isExcludedDefaultPrincipal(item)).length;
     document.getElementById('acl-meta').textContent =
-      `${visibleCount.toLocaleString()} / ${rows.length.toLocaleString()} ${filterKey === 'dangerous' ? 'Dangerous ACE' : 'Extended Right'} (default trustee-lər çıxarılıb, source: ${table}) · domain_data.db`;
+      `${visibleCount.toLocaleString()} / ${rows.length.toLocaleString()} ${filterKey === 'dangerous' ? 'Dangerous ACE' : 'Extended Right'} (default trustees removed, source: ${table}) · domain_data.db`;
 
     renderACLObjectFilters();
     renderACLs();
@@ -1226,7 +1049,6 @@ function renderACLObjectFilters() {
   });
 }
 
-/* ─── Detail Panel ───────────────────────────────────────────────────────── */
 function showACLDetail(item, row) {
   document.querySelectorAll('.acl-row').forEach(r => r.classList.remove('selected'));
   row.classList.add('selected');

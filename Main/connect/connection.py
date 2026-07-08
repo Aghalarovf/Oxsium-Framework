@@ -31,18 +31,12 @@ DOMAIN_USERS_JSON = Config.DOMAIN_USERS_JSON
 DOMAIN_COMPUTERS_JSON = Config.DOMAIN_COMPUTERS_JSON
 DOMAIN_GROUPS_JSON = Config.DOMAIN_GROUPS_JSON
 
-# Legacy paths (backward compatibility)
-LEGACY_DOMAIN_USERS_JSON = Path(PROJECT_ROOT) / "domain_users.json"
-LEGACY_DOMAIN_COMPUTERS_JSON = Path(PROJECT_ROOT) / "domain_computers.json"
 LEGACY_DOMAIN_OUS_JSON = Path(PROJECT_ROOT) / "domain_ous.json"
 LEGACY_DOMAIN_GROUPS_JSON = Path(PROJECT_ROOT) / "domain_groups.json"
 LEGACY_DOMAIN_TRUSTS_JSON = Path(PROJECT_ROOT) / "domain_trusts.json"
 LEGACY_DOMAIN_GPOS_JSON = Path(PROJECT_ROOT) / "domain_gpos.json"
 LEGACY_DOMAIN_ACES_JSON = Path(PROJECT_ROOT) / "domain_aces.json"
 
-# -- SQLite Engine -- subprocess icra (SQLite Engine/sqlite_engine.py) --
-# sqlite_engine.py birbaşa subprocess kimi çağırılır:
-#   python sqlite_engine.py <DOMAIN_OBJECT_DIR> --output <db_path> --quiet
 _SQLITE_ENGINE_CANDIDATES = [
     Path(__file__).parent.parent / 'SQLite Engine' / 'sqlite_engine.py',  # canonical
     Path(__file__).parent / 'SQLite Engine' / 'sqlite_engine.py',         # fallback
@@ -56,20 +50,13 @@ if _SQLITE_ENGINE_PATH is None:
 else:
     logger.info('sqlite_engine found: %s', _SQLITE_ENGINE_PATH)
 
-# -- Debounced DB builder --
-# Snapshots arrive in quick succession; run the engine once, 3 seconds after the last write.
 _db_build_timer: threading.Timer | None = None
 _db_build_lock  = threading.Lock()
 _DB_BUILD_DELAY = 3.0
 
 
 def _run_sqlite_engine() -> None:
-    """sqlite_engine.py-ni subprocess kimi icra edir.
 
-    QEYD: sqlite_reader.py (port 8800) burada artıq AVTOMATİK başladılmır.
-    domain_data.db tikildikdən sonra sqlite_reader.py-nin işə salınması
-    manual/əl ilə həyata keçirilir (məs. ayrıca terminal/prosesdən:
-    `python sqlite_reader.py <db_yolu> --port 8800`)."""
     if _SQLITE_ENGINE_PATH is None:
         logger.warning('sqlite_engine module not available -- DB build skipped')
         return
@@ -93,7 +80,6 @@ def _run_sqlite_engine() -> None:
 
 
 def _schedule_db_build() -> None:
-    """Debounced DB build -- called after a snapshot is written."""
     global _db_build_timer
     with _db_build_lock:
         if _db_build_timer is not None:
@@ -102,12 +88,6 @@ def _schedule_db_build() -> None:
         _db_build_timer.daemon = True
         _db_build_timer.start()
 
-
-# -- SQLite Reader -- ayrıca, müstəqil bir Flask prosesi (domain_data.db-ni
-# HTTP üzərindən salt-oxuma rejimində serverə qoyur). Bu proses connection.py
-# tərəfindən AVTOMATİK başladılmır -- sqlite_reader.py manual olaraq əl ilə
-# (məs. ayrıca terminal/prosesdən) işə salınmalıdır:
-#   python sqlite_reader.py <domain_data.db yolu> --port 30104
 SQLITE_READER_HOST = "127.0.0.1"
 SQLITE_READER_PORT = int(os.getenv("SQLITE_READER_PORT", 30104))
 SQLITE_READER_BASE = f"http://{SQLITE_READER_HOST}:{SQLITE_READER_PORT}"
@@ -124,7 +104,6 @@ try:
 except ImportError:
     pass
 
-# ── Main package imports ──────────────────────────────────────────────────────────
 from user import users_dump as users
 from computer import computers
 from group import groups
@@ -135,7 +114,6 @@ from dominfo import get_domain_info
 from acl import AclFilterConfig, get_domain_acls
 from acl.constants import _DEFAULT_TRUSTEE_RIDS, _DEFAULT_TRUSTEE_SIDS
 
-# ── Connect package imports ───────────────────────────────────────────────────────
 from connect.utils         import validate_ip, validate_domain, validate_username
 from connect.network       import _tcp_probe, check_port
 from connect.ldap_core     import (
@@ -148,14 +126,12 @@ from connect.shell         import (
     run_local_command,
     _collect_powershell_profile, _apply_powershell_profile,
 )
-from connect.tools         import run_local_inventory_c_tool, run_smb_checker_tool, run_ntlm_checker_tool, run_kerberos_checker_tool, run_simple_protocol_probe, SIMPLE_PROTOCOL_CHECKERS
 from connect.saved_users   import _read_old_users, _write_old_users
 from connect.flask_helpers import (
     require_json_fields, is_local_request, get_enumeration_request_data,
 )
 from connect.connection_fast import run_connect_strategy
 from connect.connection_deep import apply_deep_defaults, enrich_with_env_probe
-from connect.dcsync        import _read_dcsync_history, run_dcsync_tool, save_kerberos_key
 
 
 
@@ -169,12 +145,6 @@ def _probe_ldap_ports(ip: str, timeout: float = 4.0) -> list[dict]:
 
 def _ldap_ports_refused(ports: list[dict]) -> bool:
     return bool(ports) and all(port_info.get("result") == "closed" for port_info in ports)
-
-
-
-# ---------------------------------------------------------------------------
-# Flask app setup
-# ---------------------------------------------------------------------------
 
 app = Flask(__name__)
 CORS(
@@ -191,10 +161,6 @@ limiter = Limiter(
     storage_uri=os.getenv("REDIS_URL", "memory://"),
 )
 
-
-# ---------------------------------------------------------------------------
-# Helper: normalise enumeration response status codes
-# ---------------------------------------------------------------------------
 
 def _enumeration_status(result: dict) -> int:
     status = result.get("code", 500)
@@ -230,10 +196,6 @@ def _is_default_trustee(sid: str) -> bool:
 
 
 def _write_domain_users_snapshot(result: dict, is_local: bool) -> None:
-    """
-    Overwrite domain_users.jsonl on every /api/users request.
-    Format: line 1 = metadata, lines 2+ = one user record per line.
-    """
     out_path = DOMAIN_OBJECT_DIR / "domain_users.jsonl"
 
     meta_line = {
@@ -250,7 +212,6 @@ def _write_domain_users_snapshot(result: dict, is_local: bool) -> None:
         DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
         _write_acl_jsonl_snapshot(out_path, meta_line, users_list)
 
-        # Remove old JSON-format snapshot if present.
         old_json = DOMAIN_OBJECT_DIR / "domain_users.json"
         if old_json.exists() and old_json != out_path:
             try:
@@ -258,22 +219,13 @@ def _write_domain_users_snapshot(result: dict, is_local: bool) -> None:
             except Exception as exc:
                 logger.warning("Could not remove old users JSON snapshot %s: %s", old_json, exc)
 
-        # Remove old legacy file in repo root so consumers use a single source.
-        if LEGACY_DOMAIN_USERS_JSON.exists() and LEGACY_DOMAIN_USERS_JSON != out_path:
-            try:
-                LEGACY_DOMAIN_USERS_JSON.unlink()
-            except Exception as exc:
-                logger.warning("Could not remove legacy users snapshot %s: %s", LEGACY_DOMAIN_USERS_JSON, exc)
     except Exception as exc:
         logger.warning("Could not write domain users JSONL snapshot to %s: %s", out_path, exc)
     else:
-        _schedule_db_build()  # Snapshot written -- trigger DB build with debounce
+        _schedule_db_build()  
 
 
 def _write_domain_users_proto_snapshot(result: dict, output_path: Path) -> None:
-    """
-    Best-effort protobuf snapshot writer used when the enumerator didn't write it.
-    """
     try:
         from proto_bridge import save_payload as _save_payload
     except Exception as exc:
@@ -294,15 +246,7 @@ def _write_domain_object_snapshot(
     data_key: str,
     legacy_path: Path | None = None,
 ) -> None:
-    """
-    Generic Domain Object snapshot writer — JSONL format.
 
-    Line 1: metadata (generated_at, source, success, count, meta, error).
-    Lines 2+: one record per line (groups / ous / trusts / …).
-
-    Uses overwrite semantics on every request so stale context is cleared.
-    """
-    # Always write to .jsonl regardless of what filename says
     jsonl_filename = Path(filename).with_suffix(".jsonl").name
     out_path = DOMAIN_OBJECT_DIR / jsonl_filename
 
@@ -320,7 +264,6 @@ def _write_domain_object_snapshot(
         DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
         _write_acl_jsonl_snapshot(out_path, meta_line, records)
 
-        # Remove old .json-format snapshot if it still exists alongside the new .jsonl.
         old_json = DOMAIN_OBJECT_DIR / filename
         if old_json.exists() and old_json != out_path:
             try:
@@ -336,27 +279,11 @@ def _write_domain_object_snapshot(
     except Exception as exc:
         logger.warning("Could not write domain JSONL snapshot to %s: %s", out_path, exc)
     else:
-        _schedule_db_build()  # Snapshot written -- trigger DB build with debounce
+        _schedule_db_build() 
 
-
-# ---------------------------------------------------------------------------
-# Computers snapshots are stored in JSONL format:
-#   - Line 1: metadata object (generated_at, source, success, count, meta, ...)
-#   - Subsequent lines: one computer record per line (JSON object)
-# This allows large computer lists to be read/written line by line.
-# ---------------------------------------------------------------------------
 
 def _write_domain_computers_jsonl_snapshot(result: dict, is_local: bool) -> None:
-    """
-    Write domain computers to domain_computers.jsonl.
 
-    Format:
-      - Line 1: metadata (generated_at, source, success, count, error, meta)
-      - Lines 2+: one JSON object per computer record
-
-    Overwrites the previous snapshot on every enumeration so stale data is
-    cleared automatically.
-    """
     out_path = _jsonl_snapshot_path(DOMAIN_COMPUTERS_JSON)
     computers_list = list(result.get("computers") or [])
 
@@ -380,7 +307,6 @@ def _write_domain_computers_jsonl_snapshot(result: dict, is_local: bool) -> None
 
         _write_acl_jsonl_snapshot(out_path, meta_line, computers_list)
 
-        # Remove old JSON-format snapshot — JSONL is now the source of truth.
         if DOMAIN_COMPUTERS_JSON.exists() and DOMAIN_COMPUTERS_JSON != out_path:
             try:
                 DOMAIN_COMPUTERS_JSON.unlink()
@@ -390,25 +316,12 @@ def _write_domain_computers_jsonl_snapshot(result: dict, is_local: bool) -> None
                     DOMAIN_COMPUTERS_JSON, exc,
                 )
 
-        # Remove legacy root-level snapshot.
-        if LEGACY_DOMAIN_COMPUTERS_JSON.exists() and LEGACY_DOMAIN_COMPUTERS_JSON != out_path:
-            try:
-                LEGACY_DOMAIN_COMPUTERS_JSON.unlink()
-            except Exception as exc:
-                logger.warning(
-                    "Could not remove legacy computers snapshot %s: %s",
-                    LEGACY_DOMAIN_COMPUTERS_JSON, exc,
-                )
     except Exception as exc:
         logger.warning("Could not write domain computers JSONL snapshot to %s: %s", out_path, exc)
 
 
 def _write_domain_info_jsonl_snapshot(result: dict, is_local: bool) -> None:
-    """
-    Write domain_info.jsonl as a single domain-level record.
 
-    Line 1 is the file metadata envelope, line 2 is the actual domain info row.
-    """
     out_path = DOMAIN_OBJECT_DIR / "domain_info.jsonl"
     record = dict(result)
 
@@ -439,12 +352,7 @@ def _write_domain_info_jsonl_snapshot(result: dict, is_local: bool) -> None:
 
 
 def _read_domain_computers_jsonl_snapshot() -> dict:
-    """
-    Read domain computers from domain_computers.jsonl.
 
-    Returns a dict compatible with the standard enumeration result shape:
-      {"success": bool, "count": int, "computers": [...], "meta": {...}}
-    """
     in_path = _jsonl_snapshot_path(DOMAIN_COMPUTERS_JSON)
     if not in_path.exists():
         return {
@@ -476,27 +384,17 @@ def _read_domain_computers_jsonl_snapshot() -> dict:
         }
 
 
-# ---------------------------------------------------------------------------
-# ACL snapshots are stored in JSONL format:
-#   - Line 1: metadata object (generated_at, source, success, count, meta, ...)
-#   - Subsequent lines: one ACL record per line (JSON object)
-# This allows large ACL lists to be read/written line by line.
-# ---------------------------------------------------------------------------
-
 def _jsonl_snapshot_path(json_path: Path) -> Path:
-    """Convert a .json path to .jsonl for ACL snapshots."""
     return json_path.with_suffix(".jsonl")
 
 
 def _write_acl_jsonl_snapshot(out_path: Path, meta_line: dict, records: list[dict]) -> None:
-    """Write a JSONL ACL snapshot: first line is metadata, the rest are records."""
     lines = [json.dumps(meta_line, ensure_ascii=False, default=str)]
     lines.extend(json.dumps(r, ensure_ascii=False, default=str) for r in records)
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _read_acl_jsonl_snapshot(in_path: Path) -> tuple[dict, list[dict]]:
-    """Read a JSONL ACL snapshot, return (metadata, records)."""
     text = in_path.read_text(encoding="utf-8")
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if not lines:
@@ -509,12 +407,6 @@ def _read_acl_jsonl_snapshot(in_path: Path) -> tuple[dict, list[dict]]:
 
 
 def _write_domain_aces_snapshot(result: dict, is_local: bool) -> None:
-    """
-    Write ACL findings to domain_aces.jsonl for human-readable storage.
-
-    On every enumeration run this overwrites the previous JSONL snapshot so stale
-    context is cleared automatically.
-    """
     out_path = _jsonl_snapshot_path(DOMAIN_ACES_JSON)
     aces = list(result.get("acls") or result.get("aces") or [])
 
@@ -538,14 +430,12 @@ def _write_domain_aces_snapshot(result: dict, is_local: bool) -> None:
 
         _write_acl_jsonl_snapshot(out_path, meta_line, aces)
 
-        # Remove old parquet snapshot if it exists.
         if DOMAIN_ACES_PARQUET.exists():
             try:
                 DOMAIN_ACES_PARQUET.unlink()
             except Exception as exc:
                 logger.warning("Could not remove old ACL parquet snapshot %s: %s", DOMAIN_ACES_PARQUET, exc)
 
-        # Remove the old JSON-format snapshot now that JSONL is the source of truth.
         if DOMAIN_ACES_JSON.exists() and DOMAIN_ACES_JSON != out_path:
             try:
                 DOMAIN_ACES_JSON.unlink()
@@ -682,7 +572,6 @@ def _extract_dangerous_rows(result: dict) -> list[dict]:
 
 
 def _write_domain_dangerous_ace_snapshot(result: dict, is_local: bool) -> None:
-    """Write dangerous ACE subset to domain_dangerous_ace.jsonl for fast reuse."""
     out_path = _jsonl_snapshot_path(DOMAIN_DANGEROUS_ACE_JSON)
     try:
         DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
@@ -694,12 +583,9 @@ def _write_domain_dangerous_ace_snapshot(result: dict, is_local: bool) -> None:
         error = result.get("error") if not success else None
         rows = _extract_dangerous_rows(result) if success else []
 
-        # Filter out default trustee ACEs so snapshots don't contain
-        # built-in/default system trustees (e.g. SYSTEM, Administrators).
         try:
             rows = [r for r in rows if not _is_default_trustee(str(r.get("principal_sid") or ""))]
         except Exception:
-            # If the helper is unavailable for any reason, fall back to original rows.
             pass
 
         meta_line = {
@@ -719,7 +605,6 @@ def _write_domain_dangerous_ace_snapshot(result: dict, is_local: bool) -> None:
 
         _write_acl_jsonl_snapshot(out_path, meta_line, rows)
 
-        # Remove the old JSON-format snapshot now that JSONL is the source of truth.
         if DOMAIN_DANGEROUS_ACE_JSON.exists() and DOMAIN_DANGEROUS_ACE_JSON != out_path:
             try:
                 DOMAIN_DANGEROUS_ACE_JSON.unlink()
@@ -730,7 +615,6 @@ def _write_domain_dangerous_ace_snapshot(result: dict, is_local: bool) -> None:
 
 
 def _read_domain_dangerous_ace_snapshot() -> dict:
-    """Read dangerous ACE subset from domain_dangerous_ace.jsonl."""
     in_path = _jsonl_snapshot_path(DOMAIN_DANGEROUS_ACE_JSON)
     if not in_path.exists():
         return {
@@ -766,7 +650,6 @@ def _read_domain_dangerous_ace_snapshot() -> dict:
 
 
 def _read_domain_aces_parquet_snapshot() -> dict:
-    """Read full ACL rows from domain_aces.jsonl."""
     in_path = _jsonl_snapshot_path(DOMAIN_ACES_JSON)
     if not in_path.exists():
         return {
@@ -835,7 +718,6 @@ def _extract_extended_right_rows(result: dict) -> list[dict]:
 
 
 def _write_domain_extended_rights_snapshot(result: dict, is_local: bool) -> None:
-    """Write extended-right ACEs to domain_extended_rights.jsonl for fast reuse."""
     out_path = _jsonl_snapshot_path(DOMAIN_EXTENDED_RIGHTS_JSON)
     try:
         DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
@@ -847,7 +729,6 @@ def _write_domain_extended_rights_snapshot(result: dict, is_local: bool) -> None
         error = result.get("error") if not success else None
         rows = _extract_extended_right_rows(result) if success else []
 
-        # Filter out default trustee ACEs from extended-rights snapshots as well.
         try:
             rows = [r for r in rows if not _is_default_trustee(str(r.get("principal_sid") or ""))]
         except Exception:
@@ -870,7 +751,6 @@ def _write_domain_extended_rights_snapshot(result: dict, is_local: bool) -> None
 
         _write_acl_jsonl_snapshot(out_path, meta_line, rows)
 
-        # Remove the old JSON-format snapshot now that JSONL is the source of truth.
         if DOMAIN_EXTENDED_RIGHTS_JSON.exists() and DOMAIN_EXTENDED_RIGHTS_JSON != out_path:
             try:
                 DOMAIN_EXTENDED_RIGHTS_JSON.unlink()
@@ -881,7 +761,6 @@ def _write_domain_extended_rights_snapshot(result: dict, is_local: bool) -> None
 
 
 def _read_domain_extended_rights_snapshot() -> dict:
-    """Read extended-right ACEs from domain_extended_rights.jsonl."""
     in_path = _jsonl_snapshot_path(DOMAIN_EXTENDED_RIGHTS_JSON)
     if not in_path.exists():
         return {
@@ -930,14 +809,6 @@ def _read_domain_extended_rights_snapshot() -> dict:
 
 
 def _read_snapshot_sids(snapshot_path: Path, list_key: str) -> list[str]:
-    """
-    Read SID values from a Domain Object snapshot.
-
-    Supports both JSON (legacy) and JSONL formats.
-    For JSONL: line 1 is metadata, subsequent lines are individual records.
-    Falls back to the JSONL counterpart (.jsonl) when the .json file is absent.
-    """
-    # Prefer JSONL counterpart if JSON file is gone (computers migrated to JSONL).
     jsonl_path = snapshot_path.with_suffix(".jsonl")
     effective_path = snapshot_path if snapshot_path.exists() else jsonl_path
 
@@ -947,10 +818,8 @@ def _read_snapshot_sids(snapshot_path: Path, list_key: str) -> list[str]:
     try:
         text = effective_path.read_text(encoding="utf-8")
 
-        # JSONL format: each line is a separate JSON object.
         if effective_path.suffix == ".jsonl":
             lines = [ln for ln in text.splitlines() if ln.strip()]
-            # Line 0 is metadata — skip it, records start at line 1.
             items = []
             for ln in lines[1:]:
                 try:
@@ -978,10 +847,6 @@ def _read_snapshot_sids(snapshot_path: Path, list_key: str) -> list[str]:
         return []
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
-
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "version": "1.0.0", "protocols": list(PROTOCOL_HANDLERS.keys())})
@@ -989,10 +854,6 @@ def health():
 
 @app.route("/api/domain-object-sids", methods=["GET"])
 def domain_object_sids():
-    """
-    Return known principal SIDs derived from Domain Object snapshots.
-    Used by ACL Dangerous filter to hide orphaned SIDs.
-    """
     user_sids = _read_snapshot_sids(DOMAIN_USERS_JSON, "users")
     computer_sids = _read_snapshot_sids(DOMAIN_COMPUTERS_JSON, "computers")
     group_sids = _read_snapshot_sids(DOMAIN_GROUPS_JSON, "groups")
@@ -1084,22 +945,8 @@ def test_connection():
 
 
 def _clear_domain_object_dir() -> None:
-    """
-    Domain Object qovluğundakı bütün faylları silir.
-
-    Hər yeni /api/connect uğurlu olduqda collector pipeline işə düşməzdən
-    əvvəl çağırılır ki, köhnə domenə aid JSONL/JSON/DB faylları yeni
-    nəticələrlə qarışmasın — təmiz slate üzərindən yazılsın.
-
-    Silmə qaydaları:
-      • Yalnız birbaşa fayllar silinir (alt qovluqlar toxunulmaz qalır).
-      • Hər silinmə xətası ayrıca loglanır, digər faylların silinməsini
-        DAYANDIRMIR.
-      • Qovluq mövcud deyilsə heç nə edilmir (mkdir sonradan
-        collector-lar tərəfindən çağırılacaq).
-    """
     if not DOMAIN_OBJECT_DIR.exists():
-        logger.info("clear_domain_object_dir: qovluq mövcud deyil, keçilir — %s", DOMAIN_OBJECT_DIR)
+        logger.info("clear_domain_object_dir: folder not found — %s", DOMAIN_OBJECT_DIR)
         return
 
     deleted, failed = 0, 0
@@ -1121,32 +968,11 @@ def _clear_domain_object_dir() -> None:
 
 
 def _run_full_collector_pipeline(enum_req: dict) -> None:
-    """
-    Bütün domain collector-larını (users/computers/ous/gpos/groups/trusts/acl)
-    ardıcıl olaraq işə salır və hər birinin nəticəsini öz .jsonl snapshot
-    faylına yazır. Bu funksiya /api/connect uğurlu olduqdan sonra ayrıca bir
-    background thread-də çağırılır (bax: connect()) -- həmin sorğunun HTTP
-    cavabını GƏCİKDİRMİR.
 
-    Hər .jsonl yazılışı _schedule_db_build() vasitəsilə debounced DB tikintisi
-    planlaşdırır. Bütün collector-lar bitdikdən sonra debounce gözlənilmədən
-    DB sinxron tikilir ki, sonuncu snapshot da daxil olsun. sqlite_reader.py
-    (port 8800) burada AVTOMATİK başladılmır -- manual olaraq əl ilə işə
-    salınmalıdır. Frontend onun hazır olduğunu /api/health (8800) pollinqi
-    ilə aşkarlayır.
-
-    Tək bir collector-un uğursuz olması digərlərini DAYANDIRMIR -- hər biri
-    öz try/except blokunda işləyir ki, məsələn ACL enumeration uğursuz olsa
-    belə Users/Computers snapshot-ları yenə DB-yə düşsün.
-    """
     ip = enum_req.get("ip") or enum_req.get("dc") or enum_req.get("domain")
     domain = enum_req.get("domain")
     logger.info("collector pipeline started: ip=%s domain=%s", ip, domain)
 
-
-    # ── Köhnə faylları təmizlə ───────────────────────────────────────────────
-    # Yeni collector nəticələri yazılmadan əvvəl Domain Object qovluğu
-    # sıfırlanır ki, əvvəlki domenə aid stale data yeni nəticələrlə qarışmasın.
     _clear_domain_object_dir()
     try:
         domain_info_result = _run_enumeration_with_target_fallback(enum_req, get_domain_info)
@@ -1155,16 +981,6 @@ def _run_full_collector_pipeline(enum_req: dict) -> None:
         logger.warning("collector pipeline: dominfo collector failed: %s", exc)
 
     try:
-        # DÜZƏLİŞ: əvvəllər `on_records` ötürülmürdü — bütün DEEP_SCAN (4 NC +
-        # 5 critical subtree) bitənə qədər heç nə diskə yazılmırdı və yalnız
-        # `acl_result["success"]` True olduqda son nəticə yazılırdı. VPN kimi
-        # dar-bant/yüksək-latency mühitlərdə bu, uzun gözləmə və (proses
-        # kəsilərsə) heç bir nəticənin qalmaması demək idi. İndi hər hazır
-        # batch (bax: collector._PARSE_BATCH_SIZE) dərhal `domain_aces.jsonl`-ə
-        # yazılır — `_write_domain_aces_snapshot` ilə eyni formatda (meta
-        # sətri + record-lar), sadəcə "partial: true" işarəli ki, yarımçıq
-        # olduğu bilinsin. Scan tam bitdikdə fayl son/dəqiq meta ilə üzərinə
-        # yazılır.
         acl_stream_lock = threading.Lock()
         acl_streamed: list[dict] = []
 
@@ -1194,12 +1010,7 @@ def _run_full_collector_pipeline(enum_req: dict) -> None:
             )
 
         acl_result = _run_enumeration_with_target_fallback(enum_req, _acl_collector)
-        # DÜZƏLİŞ: əvvəllər yalnız `acl_result["success"]` True olduqda yazılırdı.
-        # `_build_result` (collector.py) top-level istisna olmadıqca həmişə
-        # success=True qaytarsa da, əlavə mühafizə xətti kimi indi ELƏCƏ DƏ
-        # streaming zamanı toplanmış nəticə mövcuddursa (top-level uğursuzluq
-        # halında belə) final snapshot yazılır — heç bir hal fayl tamamilə
-        # boş qalmasın deyə.
+  
         if acl_result.get("success") or acl_streamed:
             final_result = acl_result if acl_result.get("success") else {
                 **acl_result,
@@ -1213,16 +1024,10 @@ def _run_full_collector_pipeline(enum_req: dict) -> None:
         logger.warning("collector pipeline: acl collector failed: %s", exc)
 
     try:
-        # get_domain_groups öz içindən domain_groups.jsonl-ə yazır (members: [] boş).
-        # _write_domain_object_snapshot ÇAĞIRILMIR — çünki o funksiya faylı
-        # boş members-lərlə üzərinə yazar və members mərhələsinin nəticəsini məhv edər.
         _run_enumeration_with_target_fallback(enum_req, groups.get_domain_groups)
     except Exception as exc:
         logger.warning("collector pipeline: groups collector failed: %s", exc)
 
-    # group_member collector — get_domain_groups-dan sonra işləməlidir ki,
-    # domain_groups.jsonl mövcud olsun. LDAP-dan members-ləri çəkir və
-    # domain_groups.jsonl-i members massivi dolu şəkildə yenidən yazır.
     try:
         _run_enumeration_with_target_fallback(enum_req, groups.get_all_group_members)
     except Exception as exc:
@@ -1270,9 +1075,6 @@ def _run_full_collector_pipeline(enum_req: dict) -> None:
     except Exception as exc:
         logger.warning("collector pipeline: users collector failed: %s", exc)
 
-    # Bütün collector-lar bitdi -- debounce timer-i ləğv edib DB-ni dərhal
-    # (sinxron) tikir ki, son snapshot da daxil olsun. sqlite_reader.py burada
-    # avtomatik başladılmır -- manual olaraq əl ilə işə salınmalıdır.
     with _db_build_lock:
         global _db_build_timer
         if _db_build_timer is not None:
@@ -1311,8 +1113,6 @@ def connect():
     connect_mode = str(req.get("connect_mode", "deep")).lower()
     skip_counts  = bool(req.get("skip_counts_probe", False))
 
-    # Debug: log incoming connect mode and skip_counts_probe to help diagnose
-    # client/server mismatch issues when Deep connect returns incomplete data.
     logger.info("/api/connect called: ip=%s proto=%s connect_mode=%s skip_counts_probe=%s", ip, proto, connect_mode, skip_counts)
 
     if password and hash_value:
@@ -1358,19 +1158,8 @@ def connect():
         result["connect_mode"] = connect_mode
 
         if connect_mode != "fast":
-            # Port/host məlumatları üçün yüngül probe (env-probe/counts YOX —
-            # bunlar artıq aşağıdakı collector pipeline tərəfindən təmin edilir).
             apply_deep_defaults(result, ip, check_port=check_port)
 
-        # ── Collector pipeline tetiklenmesi ─────────────────────────────
-        # Connect uğurlu oldu. GUI-yə nə canlı enumeration datası, nə də
-        # GLOBAL_STATE ölçüsündə cavab qaytarılmır. Bunun əvəzinə bütün
-        # collector-lar (users/computers/ous/gpos/groups/trusts/acl) ayrıca
-        # bir background thread-də işə salınır; hər biri bitdikcə öz .jsonl
-        # faylını yazır, sonda domain_data.db tikilir (bax:
-        # _run_full_collector_pipeline). sqlite_reader.py (port 8800) burada
-        # avtomatik başladılmır -- manual olaraq əl ilə işə salınmalıdır.
-        # Frontend bunu /api/health (8800) pollinqi ilə izləyir (bax: 00-global.js).
         enum_req = dict(req)
         enum_req["mode"]     = "remote"
         enum_req["ip"]       = ip
@@ -1389,7 +1178,7 @@ def connect():
 
         return jsonify({
             "success": True,
-            "message": "Collector tamamlandı. .jsonl faylları SQLite (.db)-yə çevrilir.",
+            "message": "Collector pipeline started; results will be available in the database once complete",
             "status": "processing_db",
             "connect_mode": connect_mode,
             "protocol": proto,
@@ -1436,11 +1225,6 @@ def list_users():
 
     _write_domain_users_snapshot(result, is_local=local_mode)
 
-    # connection.py YALNIZ collector-a əmr verir və nəticəni .jsonl-ə yazır
-    # (yuxarıda) + DB build-i debounce ilə planlaşdırır (_write_domain_users_snapshot
-    # daxilində). Render BURADA BAŞ VERMİR — frontend domain_data.db-dən
-    # render üçün birbaşa sqlite_reader.py-nin /api/users endpoint-inə
-    # müraciət edir.
     return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
 
 
@@ -1483,12 +1267,6 @@ def list_ous():
 
 
 def _write_domain_gpos_snapshot(result: dict) -> None:
-    """
-    Write GPO snapshot to domain_gpos.jsonl, including extra summary lines
-    (all_cpasswords, inheritance_blocked, ou_inheritance) appended at the
-    end. Used by both the /api/gpo route and the full collector pipeline
-    (see _run_full_collector_pipeline) so both paths stay in sync.
-    """
     out_path = DOMAIN_OBJECT_DIR / "domain_gpos.jsonl"
     try:
         DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1503,8 +1281,6 @@ def _write_domain_gpos_snapshot(result: dict) -> None:
         gpos_list = list(result.get("gpos") or [])
         _write_acl_jsonl_snapshot(out_path, meta_line, gpos_list)
 
-        # Extra fields (all_cpasswords, inheritance_blocked, ou_inheritance)
-        # are appended as an extra line at the end of the file
         extra_lines = []
         if result.get("all_cpasswords"):
             extra_lines.append(
@@ -1520,7 +1296,6 @@ def _write_domain_gpos_snapshot(result: dict) -> None:
             with open(out_path, "a", encoding="utf-8") as _f:
                 _f.write("\n".join(extra_lines) + "\n")
 
-        # Remove old .json file
         old_json = DOMAIN_OBJECT_DIR / "domain_gpos.json"
         if old_json.exists() and old_json != out_path:
             try:
@@ -1536,7 +1311,7 @@ def _write_domain_gpos_snapshot(result: dict) -> None:
     except Exception as exc:
         logger.warning("Could not write GPO JSONL snapshot to %s: %s", out_path, exc)
     else:
-        _schedule_db_build()  # Snapshot written -- trigger DB build with debounce
+        _schedule_db_build()  
 
 
 @app.route("/api/gpo", methods=["POST"])
@@ -1552,9 +1327,6 @@ def list_gpos():
         else _run_enumeration_with_target_fallback(req, gpos.get_domain_gpos)
     )
 
-    # Save the full result — extra fields such as all_cpasswords, wmi_filters,
-    # inheritance_blocked, ou_inheritance, sysvol_available would be lost by
-    # _write_domain_object_snapshot, so we use the dedicated GPO writer.
     _write_domain_gpos_snapshot(result)
 
     return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
@@ -1572,12 +1344,8 @@ def list_groups():
         result = _local_enumeration_removed("Group")
         return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
 
-    # MƏRHƏLƏ 1: get_domain_groups ozunden domain_groups.jsonl-e yazir (members: [] bos).
-    # _write_domain_object_snapshot CAĞIRILMIR -- o funksiya faylin uzurine bos members-le
-    # yazaraq members merhelesinin neticesini mehv edir.
     result = _run_enumeration_with_target_fallback(req, groups.get_domain_groups)
 
-    # MƏRHƏLƏ 2: members-leri doldur ve domain_groups.jsonl-i yeniden yaz.
     if result.get("success"):
         try:
             members_result = _run_enumeration_with_target_fallback(req, groups.get_all_group_members)
@@ -1650,7 +1418,6 @@ def list_acl_entries():
             "code":    400,
         }
     else:
-        # ACL filter — frontend-den gelen acl_filter parametrine gore qur
         acl_filter_raw = req.get("acl_filter") or {}
         acl_filter_name = str(req.get("acl_source") or "live").strip().lower()
         acl_filter = AclFilterConfig(
@@ -1755,157 +1522,6 @@ def decision_engine_graph():
     return jsonify(result), code
 
 
-@app.route("/api/enumeration/local-inventory", methods=["POST"])
-def enumeration_local_inventory():
-    req  = request.get_json(silent=True) or {}
-    mode = str(req.get("mode", "")).lower()
-    if mode and mode != "local":
-        return jsonify({"success": False, "error": "This module is available for local mode only"}), 400
-    result = run_local_inventory_c_tool()
-    status = 200 if result.get("success") else result.get("code", 500)
-    return jsonify(result), status
-
-
-@app.route("/api/smb-check", methods=["POST"])
-@limiter.limit("10 per minute")
-def smb_check():
-    req  = request.get_json(silent=True) or {}
-    mode = str(req.get("mode", "remote")).lower()
-    if mode == "local":
-        return jsonify({"success": False, "error": "SMB checker requires remote target credentials", "code": 400}), 400
-    result = run_smb_checker_tool(req)
-    status = 200 if result.get("success") else result.get("code", 500)
-    if status not in (200, 400, 401, 403, 404, 500, 503):
-        status = 500
-    return jsonify(result), status
-
-
-@app.route("/api/ntlm-check", methods=["POST"])
-@limiter.limit("10 per minute")
-def ntlm_check():
-    req  = request.get_json(silent=True) or {}
-    mode = str(req.get("mode", "remote")).lower()
-    if mode == "local":
-        return jsonify({"success": False, "error": "NTLM checker requires remote target credentials", "code": 400}), 400
-    result = run_ntlm_checker_tool(req)
-    status = 200 if result.get("success") else result.get("code", 500)
-    if status not in (200, 400, 401, 403, 404, 500, 503):
-        status = 500
-    return jsonify(result), status
-
-
-@app.route("/api/kerberos-check", methods=["POST"])
-@limiter.limit("10 per minute")
-def kerberos_check():
-    req  = request.get_json(silent=True) or {}
-    mode = str(req.get("mode", "remote")).lower()
-    if mode == "local":
-        return jsonify({"success": False, "error": "Kerberos checker requires remote target credentials", "code": 400}), 400
-    result = run_kerberos_checker_tool(req)
-    status = 200 if result.get("success") else result.get("code", 500)
-    if status not in (200, 400, 401, 403, 404, 500, 503):
-        status = 500
-    return jsonify(result), status
-
-
-@app.route("/api/probe-protocols", methods=["POST"])
-@limiter.limit("20 per minute")
-def probe_protocols():
-    req     = request.get_json(silent=True) or {}
-    ip      = str(req.get("ip", "")).strip()
-    timeout = float(req.get("timeout", 5) or 5)
-    requested = req.get("protocols")  # optional list; None means probe all
-
-    if not ip:
-        return jsonify({"success": False, "error": "Missing ip", "code": 400}), 400
-
-    all_keys = list(SIMPLE_PROTOCOL_CHECKERS.keys())
-    keys     = [k for k in (requested or all_keys) if k in all_keys]
-
-    results = {}
-    for key in keys:
-        r       = run_simple_protocol_probe(key, ip, timeout)
-        summary = r.get("summary", "Unknown") if r.get("success") else "Unknown"
-        level   = "good" if summary == "Enabled" else ("bad" if summary == "Disabled" else "unknown")
-        results[key] = {"status": summary, "level": level}
-
-    return jsonify({"success": True, "results": results}), 200
-
-
-@app.route("/api/security-status-quick", methods=["POST"])
-@limiter.limit("30 per minute")
-def security_status_quick():
-    req = request.get_json(silent=True) or {}
-    mode = str(req.get("mode", "remote")).lower()
-
-    if mode == "local":
-        smb_enabled = check_port("127.0.0.1", 445)
-        return jsonify({
-            "success": True,
-            "source": "quick-port-probe",
-            "kerberos_enabled": False,
-            "ntlm_enabled": smb_enabled,
-            "smb_enabled": smb_enabled,
-            "notes": ["Local mode quick probe"],
-        }), 200
-
-    ip = str(req.get("ip", "")).strip()
-    domain = str(req.get("domain", "")).strip()
-    dc = str(req.get("dc", "")).strip() or str(req.get("ldap_host", "")).strip()
-
-    if not ip and not domain and not dc:
-        return jsonify({"success": False, "error": "Missing target fields", "code": 400}), 400
-
-    kerberos_target = dc or domain or ip
-    smb_target = ip or dc or domain
-
-    kerberos_enabled = check_port(kerberos_target, 88) if kerberos_target else None
-    smb_enabled = check_port(smb_target, 445) if smb_target else None
-
-    # Quick signal only: in AD paths NTLM is typically available when SMB auth path is open.
-    ntlm_enabled = smb_enabled
-
-    return jsonify({
-        "success": True,
-        "source": "quick-port-probe",
-        "targets": {
-            "kerberos": kerberos_target,
-            "smb": smb_target,
-        },
-        "kerberos_enabled": kerberos_enabled,
-        "ntlm_enabled": ntlm_enabled,
-        "smb_enabled": smb_enabled,
-    }), 200
-
-
-@app.route("/api/dcsync", methods=["POST"])
-@limiter.limit("5 per minute")
-def dcsync_execute():
-    req = request.get_json(silent=True) or {}
-    result = run_dcsync_tool(req)
-    status = 200 if result.get("success") else result.get("code", 500)
-    if status not in (200, 400, 401, 403, 404, 500, 503):
-        status = 500
-    return jsonify(result), status
-
-
-@app.route("/api/dcsync-history", methods=["GET"])
-def dcsync_history():
-    items = _read_dcsync_history()
-    return jsonify({"success": True, "history": items}), 200
-
-
-@app.route("/api/kerberos-keys", methods=["POST"])
-@limiter.limit("10 per minute")
-def kerberos_keys_save():
-    req = request.get_json(silent=True) or {}
-    result = save_kerberos_key(req)
-    status = 200 if result.get("success") else result.get("code", 500)
-    if status not in (200, 400, 401, 403, 404, 500, 503):
-        status = 500
-    return jsonify(result), status
-
-
 @app.route("/api/saved-users", methods=["GET"])
 def get_saved_users():
     items = _read_old_users()
@@ -1965,9 +1581,6 @@ def save_saved_user():
 @app.route("/api/browse-folder", methods=["POST"])
 @limiter.limit("30 per minute")
 def browse_folder():
-    """
-    Opens a native Windows folder-picker dialog via tkinter and returns the selected path.
-    """
     try:
         import tkinter as tk
         from tkinter import filedialog
@@ -1995,11 +1608,6 @@ def browse_folder():
 @app.route("/api/resolve-folder", methods=["POST"])
 @limiter.limit("30 per minute")
 def resolve_folder():
-    """
-    Helper for the File System Access API path (browser security only exposes
-    the directory *name*, not the full path). We search common locations for a
-    directory matching the given hint name and return the first match.
-    """
     req  = request.get_json(silent=True) or {}
     hint = str(req.get("hint", "")).strip()
 
@@ -2020,14 +1628,8 @@ def resolve_folder():
         if _os.path.isdir(candidate):
             return jsonify({"success": True, "path": candidate}), 200
 
-    # Could not resolve — just return the hint so the frontend can still use it
     return jsonify({"success": False, "error": f"Could not resolve folder: {hint}"}), 200
 
-
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Agent Generator  (async job system)
-# ---------------------------------------------------------------------------
 
 import subprocess
 import threading
@@ -2036,10 +1638,9 @@ import uuid as _uuid_mod
 _AGENT_GENERATOR_DIR = Path(__file__).parent.parent / "Agent Generator"
 _BUILD_BAT           = _AGENT_GENERATOR_DIR / "Build.bat"
 
-# job_id -> { status, lines, returncode, error }
 _build_jobs: dict = {}
 _build_jobs_lock   = threading.Lock()
-_active_build_id   = None          # only one build at a time
+_active_build_id   = None          
 
 
 def _run_build_job(job_id: str, env: dict) -> None:
@@ -2050,7 +1651,7 @@ def _run_build_job(job_id: str, env: dict) -> None:
             cwd=str(_AGENT_GENERATOR_DIR),
             env=env,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,      # merge stderr into stdout
+            stderr=subprocess.STDOUT,      
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -2058,7 +1659,6 @@ def _run_build_job(job_id: str, env: dict) -> None:
 
         logger.info("generate-agent [%s]: PID %s started", job_id, proc.pid)
 
-        # Stream lines in real-time
         for raw_line in proc.stdout:
             line = raw_line.rstrip("\r\n")
             with _build_jobs_lock:
@@ -2137,7 +1737,7 @@ def agent_build_status():
 
     return jsonify({
         "success":    True,
-        "status":     job["status"],       # "running" | "done"
+        "status":     job["status"],       
         "lines":      lines,
         "offset":     offset + len(lines),
         "returncode": job["returncode"],
@@ -2145,13 +1745,6 @@ def agent_build_status():
         "error":      job["error"],
     }), 200
 
-
-# ---------------------------------------------------------------------------
-# Offline Snapshot Reader  — reads domain_*.jsonl files from the Domain
-# Object directory directly, without requiring a connect/LDAP call.
-# ---------------------------------------------------------------------------
-
-# section name → (jsonl filename, data key used in the response)
 SNAPSHOT_SECTION_MAP = {
     "users":     ("domain_users.jsonl",     "users"),
     "computers": ("domain_computers.jsonl", "computers"),
@@ -2164,16 +1757,7 @@ SNAPSHOT_SECTION_MAP = {
 
 
 def _read_generic_jsonl_snapshot(filename: str, data_key: str) -> dict:
-    """
-    Reads the given domain_*.jsonl file and returns it in the standard
-    enumeration response format: {success, count, <data_key>: [...], meta}.
 
-    As with GPO snapshots, extra metadata lines (all_cpasswords,
-    inheritance_blocked, ou_inheritance) that are dicts but do not carry the
-    expected record fields (e.g. "name"/"username"/"sid") are collected
-    separately and added under an "extra" key in the response — they are not
-    mixed into the record list.
-    """
     in_path = DOMAIN_OBJECT_DIR / filename
     if not in_path.exists():
         return {
@@ -2196,8 +1780,6 @@ def _read_generic_jsonl_snapshot(filename: str, data_key: str) -> dict:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        # Extra summary lines written in GPO snapshots (all_cpasswords,
-        # inheritance_blocked/ou_inheritance) are separated from the main records.
         if set(row.keys()) <= {"all_cpasswords", "inheritance_blocked", "ou_inheritance"}:
             extra_lines.append(row)
         else:
@@ -2230,15 +1812,6 @@ def _read_generic_jsonl_snapshot(filename: str, data_key: str) -> dict:
 @app.route("/api/snapshot/<section>", methods=["GET", "POST"])
 @limiter.limit("60 per minute")
 def read_offline_snapshot(section):
-    """
-    For ZIP Import (offline) mode — reads domain_<section>.jsonl from the
-    Domain Object directory without any LDAP/connect call, and returns it in
-    the standard enumeration response format.
-
-    This endpoint does not require a domain connection; after a ZIP import
-    the frontend loads all sections (users/computers/ous/gpos/groups/trusts/acl)
-    from here.
-    """
     section = str(section or "").strip().lower()
     cfg = SNAPSHOT_SECTION_MAP.get(section)
     if not cfg:
@@ -2257,11 +1830,6 @@ def read_offline_snapshot(section):
 @app.route("/api/snapshot-status", methods=["GET"])
 @limiter.limit("60 per minute")
 def snapshot_status():
-    """
-    Reports which domain_*.jsonl files are present in the Domain Object
-    directory — the frontend can use this after a ZIP import to check
-    whether offline data is available.
-    """
     availability = {}
     for section, (filename, _data_key) in SNAPSHOT_SECTION_MAP.items():
         path = DOMAIN_OBJECT_DIR / filename
@@ -2274,18 +1842,10 @@ def snapshot_status():
     }), 200
 
 
-# ---------------------------------------------------------------------------
-# ZIP Uploader  — extracts files to the Domain Object directory
-# ---------------------------------------------------------------------------
-
 @app.route("/api/upload-zip", methods=["POST"])
 @limiter.limit("30 per minute")
 def upload_zip():
-    """
-    Extracts the uploaded ZIP file and places all its contents into
-    DOMAIN_OBJECT_DIR (/Main/Domain Object/).
-    The general Domain Object directory, not the one under Agent Generator.
-    """
+
     if "file" not in request.files:
         return jsonify({"success": False, "error": "No file sent.", "code": 400}), 400
 
@@ -2314,11 +1874,9 @@ def upload_zip():
             skipped = []
 
             for info in zf.infolist():
-                # Skip directories
                 if info.filename.endswith("/"):
                     continue
 
-                # Path traversal protection
                 safe_name = Path(info.filename).name
                 if not safe_name or safe_name.startswith("."):
                     skipped.append(info.filename)
@@ -2332,8 +1890,6 @@ def upload_zip():
                 extracted_files.append(safe_name)
                 logger.info("upload-zip: %s -> %s", info.filename, dest_path)
 
-        # ZIP files extracted to Domain Object directory.
-        # Trigger sqlite_engine in the background -- DB is updated immediately.
         threading.Thread(target=_run_sqlite_engine, daemon=True).start()
 
         return jsonify({
@@ -2350,19 +1906,10 @@ def upload_zip():
         logger.error("upload-zip error: %s", exc)
         return jsonify({"success": False, "error": str(exc), "code": 500}), 500
 
-
-# ---------------------------------------------------------------------------
-# SQLite DB Builder endpoint
-# ---------------------------------------------------------------------------
-
 @app.route("/api/build-sqlite-db", methods=["POST"])
 @limiter.limit("10 per minute")
 def build_sqlite_db():
-    """
-    Converts hardcoded JSONL files in the Domain Object directory to domain_data.db.
-    Called by the frontend after a ZIP import or domain connect.
-    Runs in the background -- response is returned immediately.
-    """
+
     if _SQLITE_ENGINE_PATH is None:
         return jsonify({
             "success": False,
@@ -2377,10 +1924,6 @@ def build_sqlite_db():
         "output": db_out,
     }), 202
 
-
-# ---------------------------------------------------------------------------
-# Entrypoint
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     app.run(

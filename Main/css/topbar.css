@@ -1,7 +1,3 @@
-/* ============================================================
-   topbar.css — Gold Edition
-   ============================================================ */
-
 .topbar {
     height: 58px;
     background: var(--bg-base);
@@ -14,7 +10,6 @@
     position: relative;
 }
 
-/* Altın alt xətti */
 .topbar::after {
     content: '';
     position: absolute;
@@ -82,7 +77,6 @@
 .main-tab[data-tab="certificate"]:hover { color: var(--text-pri); border-color: var(--border-hi); background: var(--bg-panel); }
 .main-tab[data-tab="certificate"].active{ color: var(--accent); border-color: var(--accent-dim); background: var(--accent-glow); }
 
-/* Connection badge */
 .conn-badge {
     margin-left: auto;
     display: flex;

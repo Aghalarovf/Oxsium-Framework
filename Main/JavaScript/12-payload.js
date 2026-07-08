@@ -1,11 +1,3 @@
-/* ═══════════════════════════════════════════════════
-   payload.js
-   Oxsium Framework — Payload panel məntiqi
-   (Agent + Beacon)
-   Depends on: 00-globals.js (state, addLog, showToast)
-   ═══════════════════════════════════════════════════ */
-
-/* ── Internal payload state ── */
 const payloadState = {
   activeTab:       'agent',
   agent: {
@@ -22,7 +14,6 @@ const payloadState = {
   }
 };
 
-/* TAB SWITCHING */
 function switchPayloadTab(tab) {
   payloadState.activeTab = tab;
   document.getElementById('payload-agent').style.display  = tab === 'agent'  ? 'block' : 'none';
@@ -36,7 +27,6 @@ function switchPayloadTab(tab) {
   addLog(`Payload tab switched → ${tab.toUpperCase()}`, 'info');
 }
 
-/* FORMAT SELECTION */
 function selectFmt(target, fmt, btn) {
   payloadState[target].fmt = fmt;
   const scope = target === 'agent' ? 'payload-agent' : 'payload-beacon';
@@ -44,7 +34,6 @@ function selectFmt(target, fmt, btn) {
   btn.classList.add('selected');
 }
 
-/* BEACON TYPE SELECTION */
 function selectBeaconType(btype, btn) {
   payloadState.beacon.type = btype;
   document.querySelectorAll('.beacon-type-btn').forEach(b => b.classList.remove('selected'));
@@ -56,7 +45,6 @@ function selectBeaconType(btype, btn) {
   if (portEl && (!portEl.value || Object.values(portMap).includes(portEl.value))) portEl.value = portMap[btype] || '';
 }
 
-/* RANGE ↔ INPUT SYNC */
 function syncRange(rangeId, inputId, labelId, suffix) {
   const val = document.getElementById(rangeId).value;
   document.getElementById(inputId).value = val;
@@ -72,7 +60,6 @@ function syncInput(inputId, rangeId, labelId, suffix) {
   }
 }
 
-/* AES KEY GENERATION */
 function genKey(inputId) {
   const arr = new Uint8Array(32);
   crypto.getRandomValues(arr);
@@ -81,7 +68,6 @@ function genKey(inputId) {
   addLog('AES-256 key generated.', 'info');
 }
 
-/* Logo file picker handlers */
 function browseLogo() {
   const fi = document.getElementById('ag-logo-file');
   if (fi) fi.click();
@@ -90,15 +76,10 @@ function browseLogo() {
 async function browseOutputPath() {
   const inputEl = document.getElementById('ag-output-path');
 
-  // ── Modern browser: File System Access API ─────────────────────────────
   if (window.showDirectoryPicker) {
     try {
       const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-      // Build a best-effort Windows-style path from the directory name.
-      // Full absolute path is not exposed by the browser for security reasons;
-      // we ask the backend to resolve it via a temp probe if needed.
       const name = dirHandle.name;
-      // Try to get the real path from the backend
       try {
         const resp = await fetch(`${API_BASE}/api/resolve-folder`, {
           method: 'POST',
@@ -120,14 +101,12 @@ async function browseOutputPath() {
     return;
   }
 
-  // ── Fallback: backend dialog via /api/browse-folder ────────────────────
   try {
     const resp = await fetch(`${API_BASE}/api/browse-folder`, { method: 'POST' });
     const data = await resp.json().catch(() => ({}));
     if (data.success && data.path) {
       inputEl.value = data.path;
     } else if (data.cancelled) {
-      // user closed the dialog — do nothing
     } else {
       showToast(data.error || 'Could not open folder picker.', 'error');
     }
@@ -147,7 +126,6 @@ function handleLogoFileChange(e) {
   }
 }
 
-/* Padding unit selector */
 function togglePaddingUnits() {
   const panel = document.getElementById('ag-padding-units');
   if (!panel) return;
@@ -161,7 +139,6 @@ function setPaddingUnit(u) {
   if (panel) panel.style.display = 'none';
 }
 
-/* USER-AGENT PRESETS (Beacon) */
 function applyUaPreset(preset) {
   const uaEl = document.getElementById('bc-ua');
   if (!uaEl || !preset) return;
@@ -235,7 +212,6 @@ function previewPayloadCmd(target) {
   showToast('Command preview written to log terminal.', 'info');
 }
 
-/* GENERATE PAYLOAD */
 async function generatePayload(target) {
   const label = target === 'agent' ? 'Agent' : 'Beacon';
 
@@ -252,7 +228,6 @@ async function generatePayload(target) {
     return;
   }
 
-  // ── Agent: collect config and call /api/generate-agent ──────────────────
   const cfg = collectAgentConfig();
 
   const fmt    = cfg.fmt || 'exe';
@@ -280,7 +255,6 @@ async function generatePayload(target) {
   if (genBtn) { genBtn.disabled = true; genBtn.textContent = 'Building…'; }
 
   try {
-    // ── 1. Build işini başlat, job_id al ──────────────────────────────────
     const startResp = await fetch(`${API_BASE}/api/generate-agent`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -312,7 +286,6 @@ async function generatePayload(target) {
     const jobId = startData.job_id;
     addLog(`[PAYLOAD] Build job started (id: ${jobId})`, 'info');
 
-    // ── 2. Hər 1.5s-dən bir poll et, satırları log-a yaz ─────────────────
     let offset = 0;
     let dots   = 0;
     const dotTimer = setInterval(() => {
@@ -362,7 +335,6 @@ async function generatePayload(target) {
   }
 }
 
-/* CONFIG COLLECTORS */
 function collectAgentConfig() {
   return {
     name:      document.getElementById('ag-name').value,
@@ -415,7 +387,6 @@ function collectBeaconConfig() {
   };
 }
 
-/* TEMPLATE SAVE / LOAD */
 function savePayloadTemplate(target) {
   const cfg  = target === 'agent' ? collectAgentConfig() : collectBeaconConfig();
   const name = cfg.name || cfg.c2url || `template-${Date.now()}`;
@@ -502,16 +473,13 @@ function loadPayloadTemplate(target, idx) {
   showToast(`Template "${item.name}" loaded.`, 'ok');
 }
 
-/* HELPERS */
 function setVal(id, val) { const el = document.getElementById(id); if (el && val !== undefined && val !== null) el.value = val; }
 function setChk(id, val) { const el = document.getElementById(id); if (el) el.checked = !!val; }
 function escHtml(str) { return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-/* Auto-init on DOM ready */
 document.addEventListener('DOMContentLoaded', () => {
   const bcPort = document.getElementById('bc-port');
   if (bcPort && !bcPort.value) bcPort.value = '443';
-  // padding default
   const padBtn = document.getElementById('ag-padding-unit-btn');
   if (padBtn) padBtn.textContent = payloadState.agent.paddingUnit || 'KB';
 });

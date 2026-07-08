@@ -1,11 +1,3 @@
-/* ═══════════════════════════════════════════════════
-   13-server.js
-   Server tab: protocol selector, run/stop toggle,
-   listener list, log terminal.
-   Depends on: 00-globals.js, 01-core.js, 12-payload.js
-   ═══════════════════════════════════════════════════ */
-
-/* ── Protocol selector ── */
 function selectServerProto(proto, btn) {
   document.querySelectorAll('.transport-btn').forEach(b => b.classList.remove('selected'));
   btn.classList.add('selected');
@@ -14,9 +6,7 @@ function selectServerProto(proto, btn) {
   if (portEl && portMap[proto]) portEl.value = portMap[proto];
 }
 
-/* ── Server status badge helper ── */
 function setSrvStatusBadge(state) {
-  // state: 'online' | 'offline' | 'starting' | 'error'
   const badge = document.getElementById('srv-global-status');
   const dot   = document.getElementById('srv-status-dot');
   const text  = document.getElementById('srv-status-text');
@@ -27,22 +17,6 @@ function setSrvStatusBadge(state) {
   text.textContent = state.toUpperCase();
 }
 
-/* ── Run / Stop toggle ──────────────────────────────────────────────────────
- *
- *  start.py serves the HTML on http://127.0.0.1:8000 and also exposes a
- *  lightweight bridge on the same port:
- *
- *    POST /api/launch/start  { host, port, transport }
- *    POST /api/launch/stop
- *    GET  /api/launch/status  -> { running: bool }
- *
- *  These endpoints let the HTML GUI ask start.py to spawn / kill
- *  server_api.py via subprocess — without any extra server.
- * ─────────────────────────────────────────────────────────────────────────── */
-
-/* Resolve bridge base URL.
- * When served by start.py the page is at http://127.0.0.1:8000/...
- * Fall back to 8000 when opened as a local file. */
 const BRIDGE_BASE = (location.protocol === 'http:' || location.protocol === 'https:')
   ? `${location.protocol}//${location.hostname}:${location.port || 8000}`
   : 'http://127.0.0.1:8000';
@@ -58,7 +32,6 @@ function runServerToggle(btn) {
                   ?.textContent?.trim().split('\n')[0]?.trim().toLowerCase() || 'https';
 
   if (!running) {
-    // ── Starting ──────────────────────────────────────────────────────────
     setSrvStatusBadge('starting');
     btn.disabled = true;
 
@@ -100,12 +73,11 @@ function runServerToggle(btn) {
       });
 
   } else {
-    // ── Stopping ──────────────────────────────────────────────────────────
-    setSrvStatusBadge('starting');   // amber pulse while stopping
+    setSrvStatusBadge('starting');   
     btn.disabled = true;
 
     fetch(`${BRIDGE_BASE}/api/launch/stop`, { method: 'POST' })
-      .catch(() => {})   // ignore network error — process is dead anyway
+      .catch(() => {})   
       .finally(() => {
         btn.dataset.running   = '0';
         btn.style.background  = 'rgba(0,212,100,0.08)';
@@ -125,7 +97,6 @@ function runServerToggle(btn) {
   }
 }
 
-/* ── Sync badge on page load ─────────────────────────────────────────────── */
 (function syncSrvStatusOnLoad() {
   fetch(`${BRIDGE_BASE}/api/launch/status`)
     .then(r => r.json())
@@ -144,10 +115,9 @@ function runServerToggle(btn) {
         if (label) label.textContent = 'Stop Server';
       }
     })
-    .catch(() => { /* bridge not reachable — badge stays OFFLINE */ });
+    .catch(() => {  });
 })();
 
-/* ── Listener list ── */
 function updateSrvListeners(proto, host, port) {
   const list = document.getElementById('srv-listeners-list');
   if (!list) return;

@@ -55,9 +55,6 @@ def _ldap_refused_message(ip: str, base_message: str | None = None) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# LDAP / LDAPS
-# ---------------------------------------------------------------------------
 
 def connect_ldap(ip: str, user: str, password: str, domain: str, use_ssl: bool = False) -> dict:
     tag = "ldaps" if use_ssl else "ldap"
@@ -160,10 +157,6 @@ def connect_ldap_fast(ip: str, user: str, password: str, domain: str, use_ssl: b
     }
 
 
-# ---------------------------------------------------------------------------
-# Local
-# ---------------------------------------------------------------------------
-
 def connect_local() -> dict:
     try:
         import getpass
@@ -190,10 +183,6 @@ def connect_local() -> dict:
     except Exception as e:
         return {"success": False, "error": f"Local session attach failed: {e}"}
 
-
-# ---------------------------------------------------------------------------
-# Dispatch table
-# ---------------------------------------------------------------------------
 
 PROTOCOL_HANDLERS = {
     "ldap":   lambda ip, u, p, d: connect_ldap(ip, u, p, d, use_ssl=False),

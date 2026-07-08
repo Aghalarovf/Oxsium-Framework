@@ -31,7 +31,6 @@
 </head>
 <body>
 
-<!-- ── TOP BAR ── -->
 <header class="topbar">
   <div class="topbar-logo" style="display:flex;align-items:center;gap:10px;margin-right:8px;">
     <div class="logo-icon" style="width:35px;height:35px;border:none;border-radius:4px;display:flex;align-items:center;justify-content:center;position:relative;overflow:visible;">
@@ -53,15 +52,6 @@
     <button class="main-tab" data-tab="decision-engine" onclick="openDecisionEnginePage()" title="Open the Decision Engine page in a separate window">
       <span class="tab-dot"></span> Decision Engine
     </button>
-    <button class="main-tab disabled" data-tab="powershell" title="Coming Soon ..." aria-disabled="true" disabled>
-      <span class="tab-dot"></span> PowerShell
-    </button>
-    <button class="main-tab disabled" data-tab="enumeration" title="Coming Soon ..." aria-disabled="true" disabled>
-      <span class="tab-dot"></span> Enumeration
-    </button>
-    <button class="main-tab disabled" data-tab="reconnaissance" title="Coming Soon ..." aria-disabled="true" disabled>
-      <span class="tab-dot"></span> Reconnaissance
-    </button>
   </nav>
 
   <div class="conn-badge">
@@ -70,10 +60,8 @@
   </div>
 </header>
 
-<!-- ── MAIN LAYOUT ── -->
 <div class="layout">
 
-  <!-- LEFT SIDEBAR -->
   <aside class="sidebar">
     <div class="sidebar-section">
       <div class="sidebar-section-title">Objects</div>
@@ -121,7 +109,6 @@
       </div>
     </div>
 
-    <!-- Attack Modules — yalnız Users seçildikdə görünür -->
     <div class="sidebar-section sidebar-attacks" id="sidebar-attacks" style="display:none;">
       <div class="sidebar-section-title" style="display:flex;align-items:center;gap:6px;">
         <svg width="8" height="8" viewBox="0 0 8 8" fill="none" style="color:var(--red)">
@@ -137,14 +124,11 @@
     </div>
   </aside>
 
-  <!-- MAIN CONTENT -->
   <main class="main" id="main-content">
-    <!-- CONNECT TAB -->
     <div id="tab-connect" class="connect-wrap fade-in" data-tab="connect">
       <div class="section-title">Connection Setup</div>
       <div class="section-sub">Configure and establish connection to the target Active Directory environment</div>
 
-      <!-- MODE TOGGLE -->
       <div class="mode-toggle">
         <button class="mode-btn active" id="mode-remote" onclick="switchMode('remote')">
           <img src="assets/Icons/remote.png" alt="Remote" style="width:14px;height:14px;vertical-align:middle;margin-right:8px" onerror="this.onerror=null;this.src='assets/favicon.png'"> Remote
@@ -154,9 +138,7 @@
         </button>
       </div>
 
-      <!-- REMOTE CONNECT -->
       <div id="remote-form">
-        <!-- Credentials -->
         <div class="connect-card">
           <div class="card-title">Target Credentials</div>
 
@@ -215,7 +197,6 @@
           </div>
         </div>
 
-        <!-- Protocol -->
         <div class="connect-card">
           <div class="card-title">Connection Protocol</div>
 
@@ -292,10 +273,8 @@
         </div>
       </div>
 
-      <!-- LOCAL CONNECT / PAYLOAD -->
       <div id="local-form" style="display:none;">
 
-  <!-- PAYLOAD TAB SEÇİCİ -->
   <div class="payload-tab-bar">
     <button class="payload-tab-btn active agent" id="ptab-agent" onclick="switchPayloadTab('agent')" type="button">
       <span class="ptab-dot"></span>
@@ -314,10 +293,8 @@
     </button>
   </div>
 
-  <!-- ══════════ AGENT PANEL ══════════ -->
   <div id="payload-agent" class="payload-pane">
 
-    <!-- OUTPUT FORMAT -->
     <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar agent"></span>
@@ -330,7 +307,6 @@
       </div>
     </div>
 
-    <!-- AGENT CONFIG -->
     <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar agent"></span>
@@ -364,14 +340,8 @@
           </div>
         </div>
       </div>
-
-      
-
     </div>
 
-    
-
-    <!-- PERSISTENCE -->
     <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar agent"></span>
@@ -409,7 +379,6 @@
       </div>
     </div>
 
-    <!-- SECURITY -->
     <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar agent"></span>
@@ -477,7 +446,6 @@
       </div>
     </div>
 
-    <!-- OUTPUT PATH -->
     <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar agent"></span>
@@ -494,7 +462,6 @@
       </div>
     </div>
 
-    <!-- ACTIONS -->
     <div class="action-row">
       <button class="btn-secondary" type="button" onclick="previewPayloadCmd('agent')">
         <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style="margin-right:6px;vertical-align:middle">
@@ -530,12 +497,10 @@
       </div>
     </div>
 
-  </div><!-- /payload-agent -->
+  </div>
 
-  <!-- ══════════ BEACON PANEL ══════════ -->
   <div id="payload-beacon" class="payload-pane" style="display:none;">
 
-    <!-- BEACON TYPE -->
     <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar beacon"></span>
@@ -574,7 +539,6 @@
       </div>
     </div>
 
-    <!-- CALLBACK CONFIG -->
     <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar beacon"></span>
@@ -624,7 +588,6 @@
       </div>
     </div>
 
-    <!-- STEALTH OPTIONS -->
     <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar beacon"></span>
@@ -691,7 +654,6 @@
       </div>
     </div>
 
-    <!-- ENCRYPTION -->
     <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar beacon"></span>
@@ -713,7 +675,6 @@
       </div>
     </div>
 
-    <!-- OUTPUT -->
     <div class="connect-card">
       <div class="card-title">
         <span class="card-accent-bar beacon"></span>
@@ -742,7 +703,6 @@
       </div>
     </div>
 
-    <!-- ACTIONS -->
     <div class="action-row">
       <button class="btn-secondary" type="button" onclick="previewPayloadCmd('beacon')">
         <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style="margin-right:6px;vertical-align:middle">
@@ -778,12 +738,10 @@
       </div>
     </div>
 
-  </div><!-- /payload-beacon -->
+  </div>
 
-  <!-- ══════════ SERVER PANEL ══════════ -->
   <div id="payload-server" class="payload-pane" style="display:none;">
 
-    <!-- ── SERVER STATUS OVERVIEW ── -->
     <div class="srv-status-overview">
       <div class="srv-status-badge" id="srv-global-status">
         <span class="srv-status-dot" id="srv-status-dot"></span>
@@ -809,7 +767,6 @@
       </div>
     </div>
 
-    <!-- ── SECTION: SERVER CONFIG ── -->
     <div class="server-section-header"></div>
     <div class="connect-card server-card">
       <div class="card-title">
@@ -847,7 +804,6 @@
       </div>
     </div>
 
-    <!-- ── SECTION: MODULES ── -->
     <div class="server-section-header" style="margin-top:14px"></div>
     <div class="connect-card server-card">
       <div class="card-title">
@@ -971,7 +927,6 @@
       </div>
     </div>
 
-    <!-- ── SECTION: DATA INGESTION CONFIG ── -->
     <div class="server-section-header" style="margin-top:14px"></div>
     <div class="connect-card server-card">
       <div class="card-title">
@@ -1025,7 +980,6 @@
         </div>
       </div>
 
-      <!-- ZIP Import -->
       <div class="server-section-header" style="margin:14px 0 12px"></div>
       <div style="display:flex;flex-direction:column;gap:8px;">
         <label class="form-label" style="display:flex;align-items:center;gap:7px;">
@@ -1059,7 +1013,6 @@
 
     </div>
 
-    <!-- ── SECTION: TLS / SSL ── -->
     <div class="server-section-header" style="margin-top:14px"></div>
     <div class="connect-card server-card" style="opacity:0.4;pointer-events:none;user-select:none;">
       <div class="card-title">
@@ -1094,7 +1047,6 @@
       </div>
     </div>
 
-    <!-- ── SECTION: ALERTING ── -->
     <div class="server-section-header" style="margin-top:14px"></div>
     <div class="connect-card server-card" style="opacity:0.4;pointer-events:none;user-select:none;">
       <div class="card-title">
@@ -1124,7 +1076,6 @@
       </div>
     </div>
 
-    <!-- ── SECTION: NETWORK INTERFACES ── -->
     <div class="server-section-header" style="margin-top:14px"></div>
     <div class="connect-card server-card">
       <div class="card-title">
@@ -1151,7 +1102,6 @@
       </div>
     </div>
 
-    <!-- ── SECTION: ACTIVE LISTENERS ── -->
     <div class="server-section-header" style="margin-top:14px"></div>
     <div class="connect-card server-card">
       <div class="card-title">
@@ -1169,7 +1119,6 @@
       </div>
     </div>
 
-    <!-- ── RUN SERVER ── -->
     <div style="margin-top:14px;display:flex;gap:8px">
       <button class="btn-generate" id="srv-run-btn" style="flex:1;background:rgba(224,123,32,0.08);border:1px solid rgba(224,123,32,0.35);color:var(--srv);height:44px;border-radius:4px;font-family:var(--head);font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;transition:background .2s,box-shadow .2s,border-color .2s;"
         onmouseover="this.style.background='rgba(224,123,32,0.18)';this.style.boxShadow='0 0 22px rgba(224,123,32,0.22)';this.style.borderColor='rgba(224,123,32,0.65)'"
@@ -1184,7 +1133,6 @@
       </button>
     </div>
 
-    <!-- ── SERVER LOG ── -->
     <div style="margin-top:14px">
       <div class="log-title-bar">server.log</div>
       <div class="log-terminal" id="srv-log-terminal">
@@ -1192,11 +1140,10 @@
       </div>
     </div>
 
-  </div><!-- /payload-server -->
+  </div>
 
       </div>
 
-      <!-- LOG TERMINAL -->
       <div style="margin-top: 20px;">
         <div class="log-terminal" id="log-terminal">
           <div class="log-header">
@@ -1213,312 +1160,8 @@
       </div>
     </div>
 
-    <!-- ══════════ POWERSHELL TAB ══════════ -->
-    <div id="tab-powershell" class="powershell-wrap fade-in" style="display:none;">
-      <div class="section-title">PowerShell Shell</div>
-      <div class="section-sub">Interactive local PowerShell console. Use Local session for commands.</div>
-
-      <div class="shell-panel">
-        <div class="shell-header">
-          <div class="shell-meta">
-            <div class="shell-title">Interactive Web Shell</div>
-            <div class="shell-desc">Send PowerShell commands to the connected endpoint and view live output here.</div>
-          </div>
-          <button class="btn-secondary" onclick="clearShellOutput()">Clear</button>
-        </div>
-
-        <div class="shell-terminal" id="shell-terminal">
-          <div class="shell-line shell-warn">Session not started. Connect first and then open the PowerShell tab.</div>
-        </div>
-
-        <div class="shell-input-row">
-          <input id="shell-input" class="shell-input" type="text" placeholder="Enter PowerShell command and press Enter" onkeydown="handleShellKey(event)" autocomplete="off" spellcheck="false" disabled>
-          <button class="btn-primary" id="btn-shell-send" onclick="sendShellCommand()" disabled>Send</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="tab-enumeration" class="enumeration-wrap fade-in" style="display:none;">
-
-      <!-- In-tab deep enumeration progress -->
-      <div id="enum-tab-progress" class="enum-tab-progress" style="display:none;">
-        <div class="enum-tab-spin-wrap">
-          <div class="enum-tab-spinner"></div>
-        </div>
-        <div class="enum-tab-progress-label" id="enum-tab-progress-label">Enumerating domain objects...</div>
-        <div class="enum-tab-bar-row">
-          <div class="enum-tab-bar">
-            <div class="enum-tab-bar-fill" id="enum-tab-bar-fill"></div>
-          </div>
-          <span class="enum-tab-pct" id="enum-tab-pct">0%</span>
-        </div>
-        <div class="enum-tab-module" id="enum-tab-module">Initializing...</div>
-      </div>
-
-      <div class="enumeration-panel" id="enumeration-panel">
-        <div class="enumeration-placeholder" id="enumeration-placeholder">
-          <div class="enumeration-placeholder-title">Connect to unlock Enumeration</div>
-          <div class="enumeration-placeholder-copy">Enumeration modules appear here once a Local or Remote session is connected.</div>
-
-          <div class="enum-proto-panel" id="enum-proto-panel" style="display:none;">
-            <div class="enum-proto-head">
-              <div class="enum-proto-title">Protocol Hierarchy</div>
-              <button class="btn-secondary enum-proto-scan-btn" id="btn-enum-proto-scan" type="button" onclick="runToolsEnumeration()">Scan</button>
-            </div>
-            <div class="enum-proto-list">
-            <div class="enum-proto-row" onclick="openSecurityStatusPanel('kerberos')" role="button" tabindex="0">
-              <span class="enum-proto-name">Kerberos</span>
-              <span class="enum-proto-value dim" id="enum-stat-kerb">—</span>
-            </div>
-            <div class="enum-proto-row" onclick="openSecurityStatusPanel('ntlm')" role="button" tabindex="0">
-              <span class="enum-proto-name">NTLM</span>
-              <span class="enum-proto-value dim" id="enum-stat-ntlm">—</span>
-            </div>
-            <div class="enum-proto-row" onclick="openSecurityStatusPanel('smb')" role="button" tabindex="0">
-              <span class="enum-proto-name">SMB</span>
-              <span class="enum-proto-value dim" id="enum-stat-smb">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">DNS</span>
-              <span class="enum-proto-value dim" id="enum-stat-dns">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">RPC</span>
-              <span class="enum-proto-value dim" id="enum-stat-rpc">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">Telnet</span>
-              <span class="enum-proto-value dim" id="enum-stat-telnet">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">FTP</span>
-              <span class="enum-proto-value dim" id="enum-stat-ftp">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">SSH</span>
-              <span class="enum-proto-value dim" id="enum-stat-ssh">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">SMTP</span>
-              <span class="enum-proto-value dim" id="enum-stat-smtp">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">IMAP</span>
-              <span class="enum-proto-value dim" id="enum-stat-imap">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">POP3</span>
-              <span class="enum-proto-value dim" id="enum-stat-pop3">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">LDAP</span>
-              <span class="enum-proto-value dim" id="enum-stat-ldap">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">HTTP / HTTPS</span>
-              <span class="enum-proto-value dim" id="enum-stat-http">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">TFTP</span>
-              <span class="enum-proto-value dim" id="enum-stat-tftp">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">SNMP</span>
-              <span class="enum-proto-value dim" id="enum-stat-snmp">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">NTP</span>
-              <span class="enum-proto-value dim" id="enum-stat-ntp">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">DHCP (Client / Server)</span>
-              <span class="enum-proto-value dim" id="enum-stat-dhcp">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">RADIUS</span>
-              <span class="enum-proto-value dim" id="enum-stat-radius">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">RDP</span>
-              <span class="enum-proto-value dim" id="enum-stat-rdp">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">MySQL</span>
-              <span class="enum-proto-value dim" id="enum-stat-mysql">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">MSSQL</span>
-              <span class="enum-proto-value dim" id="enum-stat-mssql">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">PostgreSQL</span>
-              <span class="enum-proto-value dim" id="enum-stat-postgresql">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">Oracle TNS</span>
-              <span class="enum-proto-value dim" id="enum-stat-oracle">—</span>
-            </div>
-            <div class="enum-proto-row">
-              <span class="enum-proto-name">MongoDB</span>
-              <span class="enum-proto-value dim" id="enum-stat-mongodb">—</span>
-            </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-      <div class="misc-panel" id="misc-panel" style="display:none;">
-        <div class="misc-misconfig-panel">
-            <div class="misc-misconfig-head">
-              <div class="misc-misconfig-title">Miscellaneous Misconfiguration</div>
-              <button class="btn-secondary misc-scan-btn" id="btn-misc-scan" type="button" onclick="runMiscManualScan()">Manual Scan</button>
-            </div>
-            <div class="misc-misconfig-tabs" id="misc-misconfig-tabs">
-              <button class="misc-tab-item active" type="button" onclick="selectMiscMisconfig('noPAC', this)"><span class="misc-tab-name">noPAC</span><span class="misc-tab-value">-</span></button>
-              <button class="misc-tab-item" type="button" onclick="selectMiscMisconfig('PrintNightmare', this)"><span class="misc-tab-name">PrintNightmare</span><span class="misc-tab-value">-</span></button>
-              <button class="misc-tab-item" type="button" onclick="selectMiscMisconfig('PetitPotam', this)"><span class="misc-tab-name">PetitPotam</span><span class="misc-tab-value">-</span></button>
-              <button class="misc-tab-item" type="button" onclick="selectMiscMisconfig('NTLM Relayx', this)"><span class="misc-tab-name">NTLM Relayx</span><span class="misc-tab-value">-</span></button>
-              <button class="misc-tab-item" type="button" onclick="selectMiscMisconfig('SpoolSample/PrinterBug', this)"><span class="misc-tab-name">SpoolSample/PrinterBug</span><span class="misc-tab-value">-</span></button>
-            </div>
-            <div class="misc-misconfig-actions">
-              <div class="misc-selected">Selected: <strong id="misc-selected-name">noPAC</strong></div>
-            </div>
-        </div>
-      </div>
-      <div class="cred-panel" id="cred-panel" style="display:none;">
-        <div class="cred-harvest-panel">
-          <div class="cred-harvest-head">
-            <div class="cred-harvest-title">Credential Harvesting</div>
-            <button class="btn-secondary cred-scan-btn" id="btn-cred-scan" type="button" onclick="runCredentialHarvestScan()">Scan</button>
-          </div>
-          <div class="cred-harvest-tabs" id="cred-harvest-tabs">
-            <button class="cred-tab-item active" type="button" onclick="selectCredentialHarvesting('SAM & SYSTEM Dumping', this)">
-              <span class="cred-tab-name">SAM & SYSTEM Dumping</span>
-            </button>
-            <button class="cred-tab-item" type="button" onclick="selectCredentialHarvesting('LSASS Dumping', this)">
-              <span class="cred-tab-name">LSASS Dumping</span>
-            </button>
-            <button class="cred-tab-item" type="button" onclick="selectCredentialHarvesting('NTDS.dit Extraction', this)">
-              <span class="cred-tab-name">NTDS.dit Extraction</span>
-            </button>
-            <button class="cred-tab-item" type="button" onclick="selectCredentialHarvesting('Windows Credential Manager', this)">
-              <span class="cred-tab-name">Windows Credential Manager</span>
-            </button>
-          </div>
-          <div class="cred-selected">Selected: <strong id="cred-selected-name">SAM & SYSTEM Dumping</strong></div>
-        </div>
-      </div>
-      <div class="cert-panel" id="cert-panel" style="display:none;">
-        <div class="cert-misconfig-panel">
-          <div class="cert-misconfig-head">
-            <div class="cert-misconfig-title">Certificate Server Misconfiguration</div>
-            <button class="btn-secondary cert-scan-btn" id="btn-cert-scan" type="button" onclick="runCertificateMisconfigScan()">Scan</button>
-          </div>
-          <div class="cert-misconfig-tabs" id="cert-misconfig-tabs">
-            <button class="cert-tab-item active" type="button" onclick="selectCertificateMisconfig('ESC1 - Misconfigured Template', this)">
-              <span class="cert-tab-name">ESC1 - Misconfigured Template</span>
-            </button>
-            <button class="cert-tab-item" type="button" onclick="selectCertificateMisconfig('ESC2 - Any Purpose EKU', this)">
-              <span class="cert-tab-name">ESC2 - Any Purpose EKU</span>
-            </button>
-            <button class="cert-tab-item" type="button" onclick="selectCertificateMisconfig('ESC3 - Certificate Request Agent', this)">
-              <span class="cert-tab-name">ESC3 - Certificate Request Agent</span>
-            </button>
-            <button class="cert-tab-item" type="button" onclick="selectCertificateMisconfig('ESC4 - Template ACL Abuse', this)">
-              <span class="cert-tab-name">ESC4 - Template ACL Abuse</span>
-            </button>
-            <button class="cert-tab-item" type="button" onclick="selectCertificateMisconfig('ESC6 - CA Flag Abuse', this)">
-              <span class="cert-tab-name">ESC6 - CA Flag Abuse</span>
-            </button>
-            <button class="cert-tab-item" type="button" onclick="selectCertificateMisconfig('ESC8 - NTLM Relay to Web Enrollment', this)">
-              <span class="cert-tab-name">ESC8 - NTLM Relay to Web Enrollment</span>
-            </button>
-          </div>
-          <div class="cert-selected">Selected: <strong id="cert-selected-name">ESC1 - Misconfigured Template</strong></div>
-        </div>
-      </div>
-    </div>
-
-    <div id="tab-reconnaissance" class="reconnaissance-wrap fade-in" style="display:none;">
-      <div class="reconnaissance-panel" id="reconnaissance-panel">
-        <div class="recon-host-panel" id="reconnaissance-placeholder">
-          <div class="recon-host-title">Host / Port Enumeration</div>
-          <div class="recon-host-grid">
-            <div class="form-group">
-              <label class="form-label" for="recon-target-ip">Target IP / Target Subnet</label>
-              <input class="form-input" id="recon-target-ip" type="text" placeholder="IP Regex input">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="recon-port-range">Specific Port or Range</label>
-              <input class="form-input" id="recon-port-range" type="text" placeholder="1-65535 input">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="recon-delay">Delay</label>
-              <input class="form-input" id="recon-delay" type="number" placeholder="int input">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="recon-thread">Thread</label>
-              <input class="form-input" id="recon-thread" type="number" placeholder="int input">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="recon-interface">Interface</label>
-              <select class="form-input" id="recon-interface">
-                <option value="auto">Auto (Default)</option>
-                <option value="eth0">eth0</option>
-                <option value="wlan0">wlan0</option>
-                <option value="tun0">tun0</option>
-                <option value="lo">lo</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="recon-source-port">Source Port</label>
-              <input class="form-input" id="recon-source-port" type="number" placeholder="1-65535">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="recon-min-rate">Min rate</label>
-              <input class="form-input" id="recon-min-rate" type="number" placeholder="int input">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="recon-stats-every">Stats Every</label>
-              <input class="form-input" id="recon-stats-every" type="number" placeholder="int input">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="recon-host-timeout">Host Timeout</label>
-              <input class="form-input" id="recon-host-timeout" type="number" placeholder="int input">
-            </div>
-          </div>
-          <div class="recon-check-grid">
-            <label class="recon-check"><input type="checkbox" id="recon-scan-without-ping"> Scan Without Ping</label>
-            <label class="recon-check"><input type="checkbox" id="recon-scan-without-ports"> Scan Without Ports</label>
-            <label class="recon-check"><input type="checkbox" id="recon-ack-scan"> ACK Scan</label>
-            <label class="recon-check"><input type="checkbox" id="recon-syn-scan"> SYN Scan</label>
-            <label class="recon-check"><input type="checkbox" id="recon-tcp-handshake-scan"> TCP Handshake Scan</label>
-            <label class="recon-check"><input type="checkbox" id="recon-udp-scan"> UDP Scan</label>
-            <label class="recon-check"><input type="checkbox" id="recon-null-scan"> Null Scan</label>
-            <label class="recon-check"><input type="checkbox" id="recon-idle-scan"> Idle Scan</label>
-            <label class="recon-check"><input type="checkbox" id="recon-disable-arp-ping"> Disable ARP Ping</label>
-            <label class="recon-check"><input type="checkbox" id="recon-packet-trace"> Packet Trace</label>
-            <label class="recon-check"><input type="checkbox" id="recon-reason"> Reason</label>
-            <label class="recon-check"><input type="checkbox" id="recon-disabled-dns-resolution"> Disabled DNS Resolution</label>
-          </div>
-          <div class="recon-terminal" id="recon-terminal">
-            <div class="recon-terminal-header">
-              <div class="recon-terminal-dot r"></div>
-              <div class="recon-terminal-dot y"></div>
-              <div class="recon-terminal-dot g"></div>
-              <div class="recon-terminal-title">reconnaissance.log</div>
-            </div>
-            <div class="recon-terminal-body" id="recon-terminal-body">
-              <div class="recon-line recon-info">[READY] Results will appear here...</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
   <div id="tab-users" class="users-wrap fade-in" style="display:none;">
 
-    <!-- Header row -->
     <div class="users-header">
       <div class="users-title-row">
         <div class="section-title">Domain Users</div>
@@ -1568,9 +1211,6 @@
           <button class="chip"        data-filter="nopwd" onclick="setFilter('nopwd',this)">
             <span class="chip-dot" style="background:#ff4455"></span>NoPwd
           </button>
-          <button class="chip"        data-filter="dcsync" onclick="setFilter('dcsync',this)">
-            <span class="chip-dot" style="background:linear-gradient(90deg,#ffcc33,#ff8a00)"></span>DCSync
-          </button>
           <button class="chip"        data-filter="delegation" onclick="setFilter('delegation',this)">
             <span class="chip-dot" style="background:#00bfff"></span>Delegation
           </button>
@@ -1588,10 +1228,8 @@
       </div>
     </div>
 
-    <!-- Split view -->
     <div class="users-split" id="users-split">
 
-      <!-- User table -->
       <div class="users-table-wrap" id="users-table-wrap">
         <div class="u-table-head">
           <div class="u-col u-col-name">Username</div>
@@ -1606,7 +1244,6 @@
           <div class="u-col u-col-flag u-center" title="Encryption Supported">ENC</div>
         </div>
         <div class="u-table-body" id="u-table-body">
-          <!-- rows injected by JS -->
           <div class="u-empty" id="u-empty">
             <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
               <circle cx="18" cy="12" r="7" stroke="currentColor" stroke-width="1.5"/>
@@ -1617,7 +1254,6 @@
         </div>
       </div>
 
-      <!-- Detail panel -->
       <div class="user-detail" id="user-detail" style="display:none;">
         <div class="detail-header">
           <div class="detail-avatar" id="d-avatar">—</div>
@@ -1628,159 +1264,20 @@
           <button class="detail-close" onclick="closeDetail()">✕</button>
         </div>
         <div class="detail-body" id="detail-body">
-          <!-- injected -->
         </div>
       </div>
 
-      <!-- DCSync Console overlay (covers users-split only) -->
-      <div class="dcsync-overlay" id="dcsync-overlay" style="display:none;">
-        <div class="dcsync-panel">
+    </div>
 
-          <!-- Panel header -->
-          <div class="dcsync-panel-header">
-            <div class="dcsync-panel-avatar">DS</div>
-            <div class="dcsync-panel-title-wrap">
-              <div class="dcsync-panel-title">DCSync Console</div>
-              <div class="dcsync-panel-sub">Replication credential extraction workflow</div>
-            </div>
-            <button class="dcsync-panel-close" onclick="closeDCSyncPanel()">✕</button>
-          </div>
-
-          <div class="dcsync-panel-body">
-
-            <!-- CONNECTION -->
-            <div class="dcsync-section-label">Connection</div>
-            <div class="dcsync-grid-2">
-              <div class="dcsync-field-group">
-                <label class="dcsync-label">Domain Name</label>
-                <input class="dcsync-input" id="dcs-domain" type="text" placeholder="domain.local" autocomplete="off">
-              </div>
-              <div class="dcsync-field-group">
-                <label class="dcsync-label">Target IP</label>
-                <input class="dcsync-input" id="dcs-ip" type="text" placeholder="192.168.1.1" autocomplete="off">
-              </div>
-              <div class="dcsync-field-group">
-                <label class="dcsync-label">Domain Controller IP</label>
-                <input class="dcsync-input" id="dcs-dc" type="text" placeholder="WIN-DC.domain.local" autocomplete="off">
-              </div>
-              <div class="dcsync-field-group">
-                <label class="dcsync-label">Username</label>
-                <input class="dcsync-input" id="dcs-user" type="text" placeholder="Administrator" autocomplete="off">
-              </div>
-              <div class="dcsync-field-group">
-                <label class="dcsync-label">Password</label>
-                <input class="dcsync-input" id="dcs-pass" type="password" placeholder="••••••••" autocomplete="off">
-              </div>
-              <div class="dcsync-field-group">
-                <label class="dcsync-label">Hashes</label>
-                <input class="dcsync-input" id="dcs-hash" type="text" placeholder="LMHASH:NTHASH or NTHASH" autocomplete="off">
-              </div>
-            </div>
-
-            <!-- KERBEROS KEY -->
-            <div class="dcsync-field-group" style="margin-top:4px;">
-              <label class="dcsync-label">Kerberos Key</label>
-              <div class="dcsync-key-row">
-                <button class="dcsync-file-btn" onclick="document.getElementById('dcs-key-file').click()">Choose Key File</button>
-                <span class="dcsync-key-hint" id="dcs-key-hint">Optional. Select a local file containing the key.</span>
-                <input type="file" id="dcs-key-file" style="display:none;" onchange="onDCSyncKeyFile(this)">
-              </div>
-              <input class="dcsync-input" id="dcs-key" type="text" placeholder="Paste key value (optional)" autocomplete="off" style="margin-top:6px;">
-            </div>
-
-            <!-- COLLECTION -->
-            <div class="dcsync-section-label" style="margin-top:8px;">Collection</div>
-            <div class="dcsync-check-grid">
-              <label class="dcsync-check-item">
-                <input type="checkbox" id="dcs-col-system">
-                <span class="dcsync-check-box"></span>
-                <span class="dcsync-check-lbl">SYSTEM</span>
-              </label>
-              <label class="dcsync-check-item">
-                <input type="checkbox" id="dcs-col-sam">
-                <span class="dcsync-check-box"></span>
-                <span class="dcsync-check-lbl">SAM</span>
-              </label>
-              <label class="dcsync-check-item">
-                <input type="checkbox" id="dcs-col-security">
-                <span class="dcsync-check-box"></span>
-                <span class="dcsync-check-lbl">SECURITY</span>
-              </label>
-              <label class="dcsync-check-item">
-                <input type="checkbox" id="dcs-col-ntds" checked>
-                <span class="dcsync-check-box"></span>
-                <span class="dcsync-check-lbl">NTDS</span>
-              </label>
-              <label class="dcsync-check-item">
-                <input type="checkbox" id="dcs-col-pwdhist">
-                <span class="dcsync-check-box"></span>
-                <span class="dcsync-check-lbl">Password History</span>
-              </label>
-            </div>
-
-            <!-- MODE -->
-            <div class="dcsync-section-label" style="margin-top:8px;">Mode</div>
-            <div class="dcsync-radio-stack">
-              <label class="dcsync-radio-item" id="dcs-mode-ntlm-wrap">
-                <input type="radio" name="dcs-mode" id="dcs-mode-ntlm" value="ntlm" onchange="dcsyncModeChange()">
-                <span class="dcsync-radio-box"></span>
-                <span class="dcsync-radio-lbl">Only NTLM Hashes</span>
-              </label>
-              <label class="dcsync-radio-item" id="dcs-mode-both-wrap">
-                <input type="radio" name="dcs-mode" id="dcs-mode-both" value="both" checked onchange="dcsyncModeChange()">
-                <span class="dcsync-radio-box"></span>
-                <span class="dcsync-radio-lbl">NTLM Hash and Kerberos Keys</span>
-              </label>
-            </div>
-
-            <!-- DUMP SELECTION -->
-            <div class="dcsync-section-label" style="margin-top:8px;">Dump Selection</div>
-            <div class="dcsync-radio-grid">
-              <label class="dcsync-radio-item" id="dcs-dump-full-wrap">
-                <input type="radio" name="dcs-dump" id="dcs-dump-full" value="full" checked onchange="dcsyncDumpChange()">
-                <span class="dcsync-radio-box"></span>
-                <span class="dcsync-radio-lbl">Full Dump (All NTDS)</span>
-              </label>
-              <label class="dcsync-radio-item" id="dcs-dump-user-wrap">
-                <input type="radio" name="dcs-dump" id="dcs-dump-user" value="user" onchange="dcsyncDumpChange()">
-                <span class="dcsync-radio-box"></span>
-                <span class="dcsync-radio-lbl">Specific User</span>
-              </label>
-            </div>
-            <div id="dcs-specific-user-row" style="display:none;margin-top:6px;">
-              <input class="dcsync-input" id="dcs-specific-user" type="text" placeholder="e.g. krbtgt or DOMAIN\\user" autocomplete="off">
-            </div>
-
-            <!-- RESULT -->
-            <div class="dcsync-section-label" style="margin-top:8px;">Result</div>
-            <div class="dcsync-result-status" id="dcs-result-status">Waiting for execution…</div>
-            <div class="dcsync-result-box" id="dcs-result-box"></div>
-
-          </div><!-- /body -->
-
-          <!-- Footer -->
-          <div class="dcsync-panel-footer">
-            <button class="dcsync-run-btn" id="dcs-run-btn" onclick="runDCSyncExec()">Run DCSync</button>
-            <button class="dcsync-hist-btn" onclick="loadDCSyncHistory()">History</button>
-          </div>
-
-        </div>
-      </div>
-
-    </div><!-- /users-split -->
-
-    <!-- Loading overlay -->
     <div class="users-loading" id="users-loading" style="display:none;">
       <div class="loading-ring"></div>
       <span>Enumerating users…</span>
     </div>
 
-  </div><!-- /tab-users -->
+  </div>
 
-  <!-- COMPUTERS TAB -->
   <div id="tab-computers" class="computers-wrap fade-in" style="display:none;">
 
-    <!-- Header row -->
     <div class="computers-header">
       <div class="computers-title-row">
         <div class="section-title">Domain Computers</div>
@@ -1841,10 +1338,8 @@
       </div>
     </div>
 
-    <!-- Split view -->
     <div class="computers-split" id="computers-split">
 
-      <!-- Computer table -->
       <div class="computers-table-wrap" id="computers-table-wrap">
         <div class="c-table-head">
           <div class="c-col c-col-name">Computer Name</div>
@@ -1856,7 +1351,6 @@
           <div class="c-col c-col-flag u-center" title="Resource-based constrained delegation">RBCD</div>
         </div>
         <div class="c-table-body" id="c-table-body">
-          <!-- rows injected by JS -->
           <div class="c-empty" id="c-empty">
             <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
               <rect x="6" y="8" width="24" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/>
@@ -1867,7 +1361,6 @@
         </div>
       </div>
 
-      <!-- Detail panel -->
       <div class="computer-detail" id="computer-detail" style="display:none;">
         <div class="detail-header">
           <div class="detail-avatar" id="cd-avatar">?</div>
@@ -1878,11 +1371,10 @@
           <button class="detail-close" onclick="closeComputerDetail()">✕</button>
         </div>
         <div class="detail-body" id="computer-detail-body">
-          <!-- injected -->
         </div>
       </div>
 
-    </div><!-- /computers-split -->
+    </div>
 
     <!-- Loading overlay -->
     <div class="computers-loading" id="computers-loading" style="display:none;">
@@ -1890,11 +1382,10 @@
       <span>Enumerating computers…</span>
     </div>
 
-  </div><!-- /tab-computers -->
+  </div>
 
   <div id="tab-ous" class="ous-wrap fade-in" style="display:none;">
 
-    <!-- Header row -->
     <div class="ous-header">
       <div class="ous-title-row">
         <div class="section-title">Organizational Units</div>
@@ -1949,10 +1440,8 @@
       </div>
     </div>
 
-    <!-- Split view -->
     <div class="ous-split" id="ous-split">
 
-      <!-- OUs table -->
       <div class="ous-table-wrap" id="ous-table-wrap">
         <div class="o-table-head">
           <div class="o-col o-col-name">OU Name</div>
@@ -1962,7 +1451,6 @@
           <div class="o-col o-col-managed">Managed By</div>
         </div>
         <div class="o-table-body" id="o-table-body">
-          <!-- rows injected by JS -->
           <div class="o-empty" id="o-empty">
             <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
               <path d="M7 10c0-1 1-2 2-2h18c1 0 2 1 2 2v6h-3V9H9v16h8v3H9c-1 0-2-1-2-2V10Z" stroke="currentColor" stroke-width="1.5"/>
@@ -1972,7 +1460,6 @@
         </div>
       </div>
 
-      <!-- Detail panel -->
       <div class="ou-detail" id="ou-detail" style="display:none;">
         <div class="detail-header">
           <div class="detail-avatar" id="od-avatar" style="background:var(--accent)">⊡</div>
@@ -1983,13 +1470,11 @@
           <button class="detail-close" onclick="closeOUDetail()">✕</button>
         </div>
         <div class="detail-body" id="ou-detail-body">
-          <!-- injected -->
         </div>
       </div>
 
-    </div><!-- /ous-split -->
+    </div>
 
-    <!-- Bottom status bar -->
     <div class="ou-status-bar" id="ou-status-bar" style="display:none;">
       <div class="ou-sb-item">
         <span class="ou-sb-label">OU Name</span>
@@ -2022,17 +1507,15 @@
       </div>
     </div>
 
-    <!-- Loading overlay -->
     <div class="ous-loading" id="ous-loading" style="display:none;">
       <div class="loading-ring"></div>
       <span>Enumerating OUs…</span>
     </div>
 
-  </div><!-- /tab-ous -->
+  </div>
 
   <div id="tab-gpo" class="gpos-wrap fade-in" style="display:none;">
 
-    <!-- Header row -->
     <div class="gpos-header">
       <div class="gpos-title-row">
         <div class="section-title">Group Policy Objects</div>
@@ -2090,10 +1573,8 @@
       </div>
     </div>
 
-    <!-- Split view -->
     <div class="gpos-split" id="gpos-split">
 
-      <!-- GPOs table -->
       <div class="gpos-table-wrap" id="gpos-table-wrap">
         <div class="g-table-head">
           <div class="g-col g-col-name">GPO Name</div>
@@ -2102,7 +1583,6 @@
           <div class="g-col g-col-owner">Modified</div>
         </div>
         <div class="g-table-body" id="g-table-body">
-          <!-- rows injected by JS -->
           <div class="g-empty" id="g-empty">
             <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
               <path d="M7 10c0-1 1-2 2-2h18c1 0 2 1 2 2v6h-3V9H9v16h8v3H9c-1 0-2-1-2-2V10Z" stroke="currentColor" stroke-width="1.5"/>
@@ -2112,7 +1592,6 @@
         </div>
       </div>
 
-      <!-- Detail panel -->
       <div class="gpo-detail" id="gpo-detail" style="display:none;">
         <div class="detail-header">
           <div class="detail-avatar" id="gd-avatar" style="background:var(--accent)">⊡</div>
@@ -2123,19 +1602,17 @@
           <button class="detail-close" onclick="closeGPODetail()">✕</button>
         </div>
         <div class="detail-body" id="gpo-detail-body">
-          <!-- injected -->
         </div>
       </div>
 
-    </div><!-- /gpos-split -->
+    </div>
 
-    <!-- Loading overlay -->
     <div class="gpos-loading" id="gpos-loading" style="display:none;">
       <div class="loading-ring"></div>
       <span>Enumerating GPOs…</span>
     </div>
 
-  </div><!-- /tab-gpo -->
+  </div>
 
   <div id="tab-groups" class="groups-wrap fade-in" style="display:none;">
     <div class="groups-header">
@@ -2221,7 +1698,7 @@
       <div class="loading-ring"></div>
       <span>Enumerating groups...</span>
     </div>
-  </div><!-- /tab-groups -->
+  </div>
 
   <div id="tab-trusts" class="trusts-wrap fade-in" style="display:none;">
     <div class="trusts-header">
@@ -2288,7 +1765,7 @@
       <div class="loading-ring"></div>
       <span>Enumerating trusts...</span>
     </div>
-  </div><!-- /tab-trusts -->
+  </div>
 
   <div id="tab-acl" class="acl-wrap fade-in" style="display:none;">
     <div class="acl-header">
@@ -2363,7 +1840,6 @@
       </div>
     </div>
 
-    <!-- ── ACE DB stat satırı ── -->
     <div id="acl-db-stat" style="
         display:none;
         align-items:center;
@@ -2382,10 +1858,10 @@
         <path d="M2 3.5v3c0 1.1 2 2 4.5 2s4.5-.9 4.5-2v-3" stroke="currentColor" stroke-width="1.2"/>
         <path d="M2 6.5v3c0 1.1 2 2 4.5 2s4.5-.9 4.5-2v-3" stroke="currentColor" stroke-width="1.2"/>
       </svg>
-      <span>DB-də cəmi ACE:</span>
+      <span>Total ACE in DB:</span>
       <span id="acl-db-total" style="color:var(--accent);font-weight:600;">—</span>
       <span style="opacity:.5">·</span>
-      <span>Yüklənib:</span>
+      <span>Uploaded:</span>
       <span id="acl-db-loaded" style="color:var(--text-hi);">0</span>
       <span style="opacity:.4;margin-left:auto;font-size:10px;" id="acl-db-pct"></span>
     </div>
@@ -2426,7 +1902,6 @@
       </div>
     </div>
 
-    <!-- ── Load More düyməsi — acl-split-dən KƏNARDA, həmişə görünür ── -->
     <div id="acl-load-more-wrap" style="display:none; padding:10px 0 2px; text-align:center; flex-shrink:0;">
       <button
         id="acl-load-more-btn"
@@ -2463,11 +1938,10 @@
       <div class="loading-ring"></div>
       <span>Enumerating ACL entries...</span>
     </div>
-  </div><!-- /tab-acl -->
+  </div>
 
   </main>
 
-  <!-- RIGHT PANEL -->
   <aside class="right-panel">
     <div class="panel-header">Environment Status</div>
 
@@ -2590,7 +2064,6 @@
   </div>
 </div>
 
-<!-- TOAST CONTAINER -->
 <div class="toast-container" id="toasts"></div>
 
 <div class="status-modal-backdrop" id="status-modal-backdrop" style="display:none;" onclick="closeSecurityStatusPanel()">
@@ -2628,7 +2101,6 @@
 <script src="JavaScript/14-zip-import.js"></script>
 
 <script>
-// ── ACL dangerous row highlighter ───────────────────────────────────────────
 
 
 const _ACL_DANGER_RIGHTS = new Set([
@@ -2645,13 +2117,11 @@ function _aclMarkDangerousRow(row) {
     if (isDangerous) row.classList.add('dangerous');
 }
 
-// Movcud row-lari da islet (ilk yuklenme)
 function _aclMarkAllDangerous() {
   if (aclFilter === 'extended-rights') return;
     document.querySelectorAll('#acl-table-body .acl-row').forEach(_aclMarkDangerousRow);
 }
 
-// MutationObserver — yeni row-lar elave olunanda avtomatik islet
 const _aclObserver = new MutationObserver((mutations) => {
   if (aclFilter === 'extended-rights') return;
     for (const m of mutations) {
@@ -2677,6 +2147,5 @@ function _aclStartObserver() {
 }
 
 document.addEventListener('DOMContentLoaded', _aclStartObserver);
-// ─────────────────────────────────────────────────────────────────────────────
 </script>
 </body>

@@ -1,12 +1,3 @@
-"""
-Group Policy Objects (GPO) - Tam Enumeration Modulu
-Əhatə edir: GPO Link, Scope, Inheritance, Enforcement, Block Inheritance,
-GPP Passwords (cPassword), Scheduled Tasks, Immediate Tasks, Restricted Groups,
-Files & Scripts, Registry Settings, All XML files, GPP-decrypt,
-Software Installation, Drive Mappings, GPO Creator/Owner,
-Description, gPCFileSysPath, SYSVOL ACL
-"""
-
 import re
 import os
 import base64
@@ -26,10 +17,6 @@ try:
 except ImportError:
     HAS_IMPACKET = False
 
-# ─────────────────────────────────────────────
-# AES-256-CBC key — Microsoft tərəfindən public
-# MS-GPPREF spec-dən: https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-gppref
-# ─────────────────────────────────────────────
 GPP_AES_KEY = bytes([
     0x4e, 0x99, 0x06, 0xe8, 0xfc, 0xb6, 0x6c, 0xc9,
     0xfa, 0xf4, 0x93, 0x10, 0x62, 0x0f, 0xfe, 0xe8,
@@ -38,8 +25,6 @@ GPP_AES_KEY = bytes([
 ])
 GPP_AES_IV = b"\x00" * 16
 
-# gPCUserExtensionNames / gPCMachineExtensionNames içindəki GUID-lərin
-# insan oxuya biləcək adlara map-i (ən çox rast gəlinənlər)
 EXTENSION_GUID_MAP = {
     "{35378EAC-683F-11D2-A89A-00C04FBBCFA2}": "Registry Settings",
     "{827D319E-6EAC-11D2-A4EA-00C04F79F83A}": "Security Settings",
@@ -91,7 +76,6 @@ EXTENSION_GUID_MAP = {
     "{FD500BEF-9F03-4F58-97B8-2e51C2218566}": "Group Policy Local Users and Groups",
 }
 
-# nTSecurityDescriptor ACE Rights (en çox rast gəlinənlər)
 ACE_RIGHTS_MAP = {
     0x00000001: "CC",   # CreateChild
     0x00000002: "DC",   # DeleteChild
@@ -113,10 +97,6 @@ ACE_RIGHTS_MAP = {
     0x00120116: "FW",   # FileWriteAccess (SYSVOL üçün)
 }
 
-
-# ═══════════════════════════════════════════════════════
-#  YARDIMÇI FUNKSIYALAR
-# ═══════════════════════════════════════════════════════
 
 def is_ntlm_hash(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Fa-f0-9]{32}", value or ""))
@@ -183,15 +163,7 @@ def ldap_timestamp_to_iso(timestamp_value):
         return "Unknown"
 
 
-# ═══════════════════════════════════════════════════════
-#  GPP cPASSWORD DECRYPT
-# ═══════════════════════════════════════════════════════
-
 def _gpp_b64decode(cpassword: str) -> bytes:
-    """
-    Base64 padding-i düzəldib decode edir.
-    GPP cPassword-lər bəzən trailing '=' olmadan gəlir.
-    """
     pad = 4 - len(cpassword) % 4
     if pad != 4:
         cpassword += "=" * pad
@@ -199,7 +171,6 @@ def _gpp_b64decode(cpassword: str) -> bytes:
 
 
 def _gpp_strip_pkcs7(data: bytes) -> bytes:
-    """PKCS7 padding-i silir; etibarsız padding halında orijinalı qaytarır."""
     if not data:
         return data
     pad_len = data[-1]
@@ -209,18 +180,6 @@ def _gpp_strip_pkcs7(data: bytes) -> bytes:
 
 
 def _gpp_decrypt(cpassword: str) -> str:
-    """
-    GPP cPassword-i AES-256-CBC ilə decrypt edir.
-    Microsoft-un public AES-256-CBC key-i istifadə olunur (MS-GPPREF).
-
-    Fallback sırası:
-      1. pycryptodome  (Crypto.Cipher.AES)
-      2. cryptography  (cryptography.hazmat.primitives.ciphers)
-      3. [DECRYPT_UNAVAILABLE] xəta mesajı
-
-    Köhnə impacket AESDECRYPTBlock yanaşması silindi — o, xəta halında
-    bloğu dəyişmədən qaytarır, XOR sonrası saçma mətn hasil olur.
-    """
     if not cpassword:
         return ""
     try:
@@ -228,7 +187,6 @@ def _gpp_decrypt(cpassword: str) -> str:
     except Exception:
         return f"[DECRYPT_ERROR: invalid base64 — {cpassword[:20]}...]"
 
-    # ── Tier 1: pycryptodome ────────────────────────────────────────────
     try:
         from Crypto.Cipher import AES as _AES
         cipher = _AES.new(GPP_AES_KEY, _AES.MODE_CBC, GPP_AES_IV)
@@ -239,7 +197,6 @@ def _gpp_decrypt(cpassword: str) -> str:
     except Exception as e:
         return f"[DECRYPT_ERROR: {e}]"
 
-    # ── Tier 2: cryptography paketi ─────────────────────────────────────
     try:
         from cryptography.hazmat.primitives.ciphers import (
             Cipher as _Cipher, algorithms as _alg, modes as _mode
@@ -255,16 +212,9 @@ def _gpp_decrypt(cpassword: str) -> str:
     except Exception as e:
         return f"[DECRYPT_ERROR: {e}]"
 
-    # ── Tier 3: heç bir paket yoxdur ────────────────────────────────────
     return "[DECRYPT_UNAVAILABLE: pip install pycryptodome  OR  pip install cryptography]"
 
-
-# ═══════════════════════════════════════════════════════
-#  LDAP SECURITY DESCRIPTOR PARSE
-# ═══════════════════════════════════════════════════════
-
 def _parse_isaclprotected(sd_raw) -> bool:
-    """SE_DACL_PROTECTED (0x1000) bitini yoxlayır."""
     if isinstance(sd_raw, (bytearray, memoryview)):
         sd_raw = bytes(sd_raw)
     if not isinstance(sd_raw, bytes) or len(sd_raw) < 4:
@@ -277,17 +227,6 @@ def _parse_isaclprotected(sd_raw) -> bool:
 
 
 def _parse_sd_owner(sd_raw: bytes) -> str:
-    """
-    nTSecurityDescriptor-dan Owner SID-ini çıxarır.
-    Security Descriptor binary formatı:
-      Offset 0: Revision (1 byte)
-      Offset 1: Sbz1 (1 byte)
-      Offset 2-3: Control (2 bytes, LE)
-      Offset 4-7: OffsetOwner (4 bytes, LE)
-      Offset 8-11: OffsetGroup (4 bytes, LE)
-      Offset 12-15: OffsetSacl (4 bytes, LE)
-      Offset 16-19: OffsetDacl (4 bytes, LE)
-    """
     if not isinstance(sd_raw, bytes) or len(sd_raw) < 20:
         return ""
     try:
@@ -300,10 +239,6 @@ def _parse_sd_owner(sd_raw: bytes) -> str:
 
 
 def _sid_bytes_to_str(data: bytes) -> str:
-    """
-    Binary SID-i S-R-X-Y... formatına çevirir.
-    SID struktur: Revision(1) + SubAuthorityCount(1) + IdentifierAuthority(6) + SubAuthorities(4 each)
-    """
     if not data or len(data) < 8:
         return ""
     try:
@@ -322,10 +257,6 @@ def _sid_bytes_to_str(data: bytes) -> str:
 
 
 def _parse_dacl_aces(sd_raw: bytes) -> list:
-    """
-    DACL-dən ACE siyahısını çıxarır.
-    Hər ACE üçün: type, rights, trustee_sid, inherited.
-    """
     aces = []
     if not isinstance(sd_raw, bytes) or len(sd_raw) < 20:
         return aces
@@ -338,21 +269,10 @@ def _parse_dacl_aces(sd_raw: bytes) -> list:
         if offset_dacl == 0 or offset_dacl + 8 > len(sd_raw):
             return aces
 
-        # ACL header: AclRevision(1) Sbz1(1) AclSize(2) AceCount(2) Sbz2(2)
         ace_count = struct.unpack_from("<H", sd_raw, offset_dacl + 4)[0]
         pos = offset_dacl + 8
 
-        # FIX #6: ACCESS_ALLOWED_OBJECT (type=5) və ACCESS_DENIED_OBJECT (type=6)
-        # ACE-lərinin strukturu fərqlidir:
-        #   Offset 0:  AceType  (1 byte)
-        #   Offset 1:  AceFlags (1 byte)
-        #   Offset 2:  AceSize  (2 bytes)
-        #   Offset 4:  Mask     (4 bytes)
-        #   Offset 8:  Flags    (4 bytes) ← OBJECT ACE-yə məxsus
-        #   Offset 12: ObjectType GUID    (16 bytes, əgər Flags & 1)
-        #   Offset 12 or 28: InheritedObjectType GUID (16 bytes, əgər Flags & 2)
-        # Sonra SID gəlir — sabit 8 deyil, dinamik offset lazımdır.
-        OBJECT_ACE_TYPES = {5, 6, 11, 12}  # *_OBJECT variantları
+        OBJECT_ACE_TYPES = {5, 6, 11, 12}  
         ace_type_names = {
             0: "ACCESS_ALLOWED", 1: "ACCESS_DENIED",
             5: "ACCESS_ALLOWED_OBJECT", 6: "ACCESS_DENIED_OBJECT",
@@ -369,14 +289,12 @@ def _parse_dacl_aces(sd_raw: bytes) -> list:
 
             access_mask = struct.unpack_from("<I", sd_raw, pos + 4)[0]
 
-            # SID offset-i ACE tipinə görə hesabla
             if ace_type in OBJECT_ACE_TYPES and ace_size >= 12:
-                # Flags field (4 bytes) @ pos+8
                 obj_flags = struct.unpack_from("<I", sd_raw, pos + 8)[0]
                 sid_offset = pos + 12
-                if obj_flags & 0x1:   # ACE_OBJECT_TYPE_PRESENT
+                if obj_flags & 0x1:  
                     sid_offset += 16
-                if obj_flags & 0x2:   # ACE_INHERITED_OBJECT_TYPE_PRESENT
+                if obj_flags & 0x2:   
                     sid_offset += 16
             else:
                 sid_offset = pos + 8
@@ -384,7 +302,7 @@ def _parse_dacl_aces(sd_raw: bytes) -> list:
             sid_data = sd_raw[sid_offset: pos + ace_size]
             trustee  = _sid_bytes_to_str(sid_data)
 
-            inherited = bool(ace_flags & 0x10)  # INHERITED_ACE
+            inherited = bool(ace_flags & 0x10) 
 
             rights = []
             for bit, name in ACE_RIGHTS_MAP.items():
@@ -404,19 +322,7 @@ def _parse_dacl_aces(sd_raw: bytes) -> list:
     return aces
 
 
-# ═══════════════════════════════════════════════════════
-#  SYSVOL SMB FUNKSIYALARI
-# ═══════════════════════════════════════════════════════
-
 def _smb_connect(ip: str, domain: str, username: str, password: str):
-    """
-    SMB connection qurur. impacket tələb olunur.
-    NTLM hash destəyi: password 'LM:NT' formatinda olmalidir.
-
-    FIX #1/#2: Əvvəl xeta yutulurdu ve None qayidirdi — indi
-    (smb, error) tuple qaytarilir ki, çağiran kod neyin baş verdiyini bilsin.
-    Returns: (SMBConnection | None, error_str | None)
-    """
     if not HAS_IMPACKET:
         return None, "impacket not installed"
     try:
@@ -442,7 +348,6 @@ def _smb_connect(ip: str, domain: str, username: str, password: str):
 
 
 def _probe_sysvol_access(smb, domain: str) -> bool:
-    """Check whether the SYSVOL share is actually readable."""
     if not smb:
         return False
     try:
@@ -455,7 +360,6 @@ def _probe_sysvol_access(smb, domain: str) -> bool:
 
 
 def _smb_list_files(smb, share: str, path: str) -> list:
-    """SMB share-dəki faylları siyahıya alır. Xəta halında boş list qaytarır."""
     try:
         entries = smb.listPath(share, path + "\\*")
         return [
@@ -472,7 +376,6 @@ def _smb_list_files(smb, share: str, path: str) -> list:
 
 
 def _smb_read_file(smb, share: str, path: str, max_bytes: int = 512 * 1024) -> bytes:
-    """SMB share-dən fayl məzmununu oxuyur. max_bytes limitini keçməz."""
     content = []
     total = 0
 
@@ -491,20 +394,15 @@ def _smb_read_file(smb, share: str, path: str, max_bytes: int = 512 * 1024) -> b
 
 
 def _smb_get_acl(smb, share: str, path: str) -> list:
-    """
-    SYSVOL path-ının ACL-ini oxuyur (Security Descriptor).
-    impacket SMBConnection.queryPathInfo + SEC_INFO_ALL istifadə edir.
-    """
     acl_entries = []
     try:
         tid = smb.connectTree(share)
         fid = smb.openFile(
             tid, path,
-            desiredAccess=0x00020000,  # READ_CONTROL
+            desiredAccess=0x00020000, 
             shareMode=0x00000003,
         )
-        # QuerySecurityInfo
-        sd_data = smb.querySecurityInfo(tid, fid, 0x04)  # DACL_SECURITY_INFORMATION
+        sd_data = smb.querySecurityInfo(tid, fid, 0x04) 
         smb.closeFile(tid, fid)
         smb.disconnectTree(tid)
         if sd_data:
@@ -517,10 +415,6 @@ def _smb_get_acl(smb, share: str, path: str) -> list:
 
 
 def _walk_sysvol(smb, share: str, base_path: str, max_depth: int = 6) -> list:
-    """
-    SYSVOL-u rekursiv gəzir, bütün fayl path-larını qaytarır.
-    max_depth ilə sonsuz rekursiyanın qarşısı alınır.
-    """
     results = []
 
     def _walk(path, depth):
@@ -538,12 +432,7 @@ def _walk_sysvol(smb, share: str, base_path: str, max_depth: int = 6) -> list:
     return results
 
 
-# ═══════════════════════════════════════════════════════
-#  XML PARSE FUNKSIYALARI
-# ═══════════════════════════════════════════════════════
-
 def _safe_xml_parse(content: bytes):
-    """XML məzmununu parse edir. Xəta halında None qaytarır."""
     try:
         return ET.fromstring(content.decode("utf-8", errors="replace"))
     except ET.ParseError:
@@ -556,12 +445,6 @@ def _safe_xml_parse(content: bytes):
 
 
 def _parse_groups_xml(content: bytes) -> dict:
-    """
-    Groups.xml — Local Groups ve Users (her ikisi eyni faylda ola biler).
-    cPassword tapilirsa decrypt edilir.
-    FIX #9: <User> elementleri de parse edilir — kod yalniz <Group> ariyirdi.
-    cPassword hem <Properties>-de, hem de <Member>-de ola biler (FIX #8).
-    """
     result = {
         "type": "Groups",
         "groups": [],
@@ -574,7 +457,6 @@ def _parse_groups_xml(content: bytes) -> dict:
         return result
 
     def _extract_cpasswords_from_props(props, context, name):
-        """Properties ve Member elementlerinden cPassword-leri topla."""
         # <Properties cPassword="...">
         cp = props.get("cpassword", "") or props.get("cPassword", "")
         uname = props.get("userName", "") or props.get("username", "") or name
@@ -586,7 +468,6 @@ def _parse_groups_xml(content: bytes) -> dict:
                 "cpassword": cp,
                 "plaintext": _gpp_decrypt(cp),
             })
-        # <Member cPassword="..."> (Groups.xml-de member sifreleri)
         for member in props.findall(".//Member"):
             m_cp = member.get("cpassword", "") or member.get("cPassword", "")
             if m_cp:
@@ -599,7 +480,6 @@ def _parse_groups_xml(content: bytes) -> dict:
                     "plaintext": _gpp_decrypt(m_cp),
                 })
 
-    # <Group> elementleri
     for group in root.iter("Group"):
         props = group.find("Properties")
         if props is None:
@@ -620,7 +500,6 @@ def _parse_groups_xml(content: bytes) -> dict:
                                    "backup operators", "power users"):
             result["restricted_groups"].append(group_info)
 
-    # <User> elementleri — local user yaratmaq/sifreni deyismek ucun
     for user_el in root.iter("User"):
         props = user_el.find("Properties")
         if props is None:
@@ -639,10 +518,6 @@ def _parse_groups_xml(content: bytes) -> dict:
 
 
 def _parse_scheduledtasks_xml(content: bytes) -> dict:
-    """
-    ScheduledTasks.xml — Task name, command, RunAs user, cPassword.
-    Immediate Tasks da eyni fayldan çıxarılır (ImmediateTask elementi).
-    """
     result = {
         "type": "ScheduledTasks",
         "tasks": [],
@@ -695,9 +570,6 @@ def _parse_scheduledtasks_xml(content: bytes) -> dict:
 
 
 def _parse_drives_xml(content: bytes) -> dict:
-    """
-    Drives.xml — Drive Mappings (letter, path, label, cPassword).
-    """
     result = {
         "type": "DriveMappings",
         "drives": [],
@@ -744,7 +616,6 @@ def _parse_drives_xml(content: bytes) -> dict:
 
 
 def _parse_datasources_xml(content: bytes) -> dict:
-    """DataSources.xml — ODBC DSN cPassword."""
     result = {"type": "DataSources", "sources": [], "cpasswords_found": []}
     root = _safe_xml_parse(content)
     if root is None:
@@ -772,7 +643,6 @@ def _parse_datasources_xml(content: bytes) -> dict:
 
 
 def _parse_printers_xml(content: bytes) -> dict:
-    """Printers.xml — cPassword."""
     result = {"type": "Printers", "printers": [], "cpasswords_found": []}
     root = _safe_xml_parse(content)
     if root is None:
@@ -800,7 +670,6 @@ def _parse_printers_xml(content: bytes) -> dict:
 
 
 def _parse_services_xml(content: bytes) -> dict:
-    """Services.xml — Service runAs cPassword."""
     result = {"type": "Services", "services": [], "cpasswords_found": []}
     root = _safe_xml_parse(content)
     if root is None:
@@ -828,7 +697,6 @@ def _parse_services_xml(content: bytes) -> dict:
 
 
 def _parse_registry_xml(content: bytes) -> dict:
-    """Registry.xml — Registry key/value settings."""
     result = {"type": "RegistrySettings", "entries": []}
     root = _safe_xml_parse(content)
     if root is None:
@@ -850,7 +718,6 @@ def _parse_registry_xml(content: bytes) -> dict:
 
 
 def _parse_files_xml(content: bytes) -> dict:
-    """Files.xml — File copy/script policies."""
     result = {"type": "Files", "files": []}
     root = _safe_xml_parse(content)
     if root is None:
@@ -872,7 +739,6 @@ def _parse_files_xml(content: bytes) -> dict:
 
 
 def _parse_shortcuts_xml(content: bytes) -> dict:
-    """Shortcuts.xml — Shortcut targets."""
     result = {"type": "Shortcuts", "shortcuts": []}
     root = _safe_xml_parse(content)
     if root is None:
@@ -892,10 +758,6 @@ def _parse_shortcuts_xml(content: bytes) -> dict:
 
 
 def _parse_software_xml(content: bytes) -> dict:
-    """
-    Software Installation — .msi/.msp paketlərinin path-ları.
-    GPT.INI-dən deyil, Packages qovluğundan oxunur (ayrıca parse).
-    """
     result = {"type": "SoftwareInstallation", "packages": []}
     root = _safe_xml_parse(content)
     if root is None:
@@ -910,10 +772,6 @@ def _parse_software_xml(content: bytes) -> dict:
 
 
 def _parse_gpt_ini(content: bytes) -> dict:
-    """
-    GPT.INI — GPO version nömrəsi (UserVersion, MachineVersion).
-    Format: [General]\nVersion=NNNN
-    """
     result = {"version": 0, "display_name": ""}
     try:
         text = content.decode("utf-8", errors="replace")
@@ -929,10 +787,6 @@ def _parse_gpt_ini(content: bytes) -> dict:
 
 
 def _parse_scripts_ini(content: bytes, script_type: str) -> dict:
-    """
-    scripts.ini — Startup/Shutdown/Logon/Logoff skriptlər.
-    Format: [Startup]\n0CmdLine=script.bat\n0Parameters=args
-    """
     result = {"type": f"Scripts_{script_type}", "scripts": []}
     try:
         text = content.decode("utf-8", errors="replace")
@@ -964,10 +818,6 @@ def _parse_scripts_ini(content: bytes, script_type: str) -> dict:
 
 
 def _parse_gptmpl_inf(content: bytes) -> dict:
-    """
-    GptTmpl.inf — Security Settings: Restricted Groups, Password Policy,
-    Audit Policy, User Rights Assignment.
-    """
     result = {
         "type": "SecuritySettings",
         "restricted_groups": [],
@@ -988,7 +838,6 @@ def _parse_gptmpl_inf(content: bytes) -> dict:
                 continue
 
             if current_section == "group membership":
-                # Format: *SID__Memberof = *SID veya GroupName__Members = user1,user2
                 if "=" in line:
                     left, right = line.split("=", 1)
                     result["restricted_groups"].append({
@@ -1022,11 +871,6 @@ def _parse_gptmpl_inf(content: bytes) -> dict:
         pass
     return result
 
-
-# ═══════════════════════════════════════════════════════
-#  LDAP YARDIMÇI FUNKSIYALAR
-# ═══════════════════════════════════════════════════════
-
 def _extract_domainsid(domain_dn: str, conn) -> str:
     try:
         conn.search(domain_dn, "(objectClass=domain)", attributes=["objectSid"])
@@ -1053,7 +897,6 @@ def _is_gpo_enforced(gp_link_text: str, gpo_guid: str) -> bool:
 
 
 def _is_gpo_link_disabled(gp_link_text: str, gpo_guid: str) -> bool:
-    """gPLink-dən bu GPO-nun link-inin disabled olub-olmadığını yoxlayır (flag & 1)."""
     if not gp_link_text or not gpo_guid:
         return False
     pattern = re.compile(
@@ -1068,7 +911,6 @@ def _is_gpo_link_disabled(gp_link_text: str, gpo_guid: str) -> bool:
 
 
 def _parse_extension_guids(ext_str: str) -> list:
-    """gPCUserExtensionNames / gPCMachineExtensionNames içindəki GUID-ləri parse edir."""
     if not ext_str:
         return []
     guids = re.findall(r'\{[0-9A-Fa-f\-]{36}\}', ext_str)
@@ -1086,10 +928,6 @@ def _parse_extension_guids(ext_str: str) -> list:
 
 
 def _resolve_sid_to_name(sid: str, conn, domain_dn: str) -> str:
-    """
-    SID-i LDAP-da axtarıb display name-ə çevirir.
-    Məlum well-known SID-lər üçün birbaşa qaytarır.
-    """
     WELL_KNOWN = {
         "S-1-1-0": "Everyone",
         "S-1-5-7": "Anonymous Logon",
@@ -1124,24 +962,8 @@ def _resolve_sid_to_name(sid: str, conn, domain_dn: str) -> str:
         pass
     return sid
 
-
-# ═══════════════════════════════════════════════════════
-#  SYSVOL GPO QOVLUĞUNU TAM TARA
-# ═══════════════════════════════════════════════════════
-
 def _enumerate_sysvol_gpo(smb, share: str, gpo_guid: str, domain: str,
                           gpc_fs_path: str = "") -> dict:
-    """
-    Bir GPO-nun SYSVOL qovluğunu tam tara:
-    - GPT.INI
-    - User\\  və Machine\\ altındakı bütün XML faylları
-    - scripts.ini
-    - GptTmpl.inf
-    - Packages qovluğu (.msi/.msp)
-    - SYSVOL ACL
-    """
-    # FIX #7: base path-i gPCFileSysPath-dan cixar
-    # \\server\SysVol\domain\Policies\{guid} -> \domain\Policies\{guid}
     if gpc_fs_path:
         norm = gpc_fs_path.replace("/", "\\")
         parts = [p for p in norm.split("\\") if p]
@@ -1164,19 +986,15 @@ def _enumerate_sysvol_gpo(smb, share: str, gpo_guid: str, domain: str,
         "parse_errors": [],
     }
 
-    # GPT.INI
     gpt_content = _smb_read_file(smb, share, base + "\\GPT.INI")
     if gpt_content:
         sysvol_data["gpt_ini"] = _parse_gpt_ini(gpt_content)
 
-    # SYSVOL ACL
     sysvol_data["sysvol_acl"] = _smb_get_acl(smb, share, base)
 
-    # Bütün faylları tap
     all_files = _walk_sysvol(smb, share, base)
     sysvol_data["all_files"] = [f["path"] for f in all_files]
 
-    # XML fayl adlarına görə parse funksiyası seç
     XML_PARSERS = {
         "groups.xml": _parse_groups_xml,
         "scheduledtasks.xml": _parse_scheduledtasks_xml,
@@ -1194,7 +1012,6 @@ def _enumerate_sysvol_gpo(smb, share: str, gpo_guid: str, domain: str,
         fpath = file_info["path"]
         fname = fpath.split("\\")[-1].lower()
 
-        # XML faylları
         if fname.endswith(".xml") and fname in XML_PARSERS:
             content = _smb_read_file(smb, share, fpath)
             if content:
@@ -1204,7 +1021,6 @@ def _enumerate_sysvol_gpo(smb, share: str, gpo_guid: str, domain: str,
                         "path": fpath,
                         "data": parsed,
                     })
-                    # cPassword topla
                     for cp in parsed.get("cpasswords_found", []):
                         sysvol_data["cpasswords_found"].append(cp)
                 except Exception as ex:
@@ -1213,7 +1029,6 @@ def _enumerate_sysvol_gpo(smb, share: str, gpo_guid: str, domain: str,
                     )
             continue
 
-        # scripts.ini
         if fname == "scripts.ini":
             content = _smb_read_file(smb, share, fpath)
             if content:
@@ -1225,14 +1040,12 @@ def _enumerate_sysvol_gpo(smb, share: str, gpo_guid: str, domain: str,
                 })
             continue
 
-        # GptTmpl.inf — Security Settings
         if fname == "gpttmpl.inf":
             content = _smb_read_file(smb, share, fpath)
             if content:
                 sysvol_data["security_settings"] = _parse_gptmpl_inf(content)
             continue
 
-        # .msi / .msp — Software Installation
         if fname.endswith((".msi", ".msp", ".mst")):
             sysvol_data["software_packages"].append({
                 "path": fpath,
@@ -1243,52 +1056,8 @@ def _enumerate_sysvol_gpo(smb, share: str, gpo_guid: str, domain: str,
     return sysvol_data
 
 
-# ═══════════════════════════════════════════════════════
-#  ANA FUNKSIYA: get_domain_gpos
-# ═══════════════════════════════════════════════════════
 
 def get_domain_gpos(ip, domain, username, password, config):
-    """
-    Active Directory-dən GPO-ları tam enumerate edir.
-
-    Yoxlanan sahələr:
-      1.  GPO Link (linked_containers, linked_count)
-      2.  Scope of Management (user_version, computer_version, extensions)
-      3.  Inheritance (inheritance_blocked OUs)
-      4.  Enforcement (enforced flag, link_disabled)
-      5.  Block Inheritance (gpOptions=1 olan container-lər)
-      6.  GPP Passwords/cPassword (Groups, Tasks, Drives, Services...)
-      7.  Scheduled Tasks – RunAs, cPassword
-      8.  GPO Immediate Tasks
-      9.  Restricted Groups (Groups.xml + GptTmpl.inf)
-      10. Files & Scripts (Files.xml, scripts.ini)
-      11. Registry Settings (Registry.xml)
-      12. All .xml files (SYSVOL-da bütün XML-lər)
-      13. GPP-decrypt (AES-256-CBC ilə avtomatik decrypt)
-      14. Software Installation (Packages, .msi)
-      16. Drive Mappings (Drives.xml)
-      17. GPO Creator/Owner (nTSecurityDescriptor Owner SID)
-      18. Description (description atributu)
-      19. gPCFileSysPath
-      20. SYSVOL ACL (DACL ACE-ləri)
-
-    Args:
-        ip: Domain Controller IP
-        domain: Domain adı (məs. 'example.com')
-        username: LDAP bind üçün istifadəçi adı
-        password: Şifrə və ya NTLM hash (32 hex)
-        config: LDAP_CONNECT_TIMEOUT və LDAP_RECEIVE_TIMEOUT olan konfiqurasiya
-
-    Returns:
-        dict: {
-            'success': bool,
-            'count': int,
-            'sysvol_available': bool,
-            'gpos': [ ... ],
-            'all_cpasswords': [ ... ],   # Bütün GPO-lardakı cPassword-lər
-            'inheritance_blocked': [ ... ], # gpOptions=1 olan container-lər
-        }
-    """
     if not all([ip, domain, username, password]):
         return {
             "success": False,
@@ -1319,15 +1088,14 @@ def get_domain_gpos(ip, domain, username, password, config):
             receive_timeout=config.LDAP_RECEIVE_TIMEOUT,
         ) as conn:
 
-            # ── 1. GPO-ları LDAP-dan çək ─────────────────────────────────
             conn.search(
                 gpo_container,
                 "(objectClass=groupPolicyContainer)",
                 attributes=[
                     "name",
                     "displayName",
-                    "description",           # 18. Description
-                    "gPCFileSysPath",        # 19. gPCFileSysPath
+                    "description",           
+                    "gPCFileSysPath",        
                     "whenCreated",
                     "whenChanged",
                     "versionNumber",
@@ -1335,12 +1103,11 @@ def get_domain_gpos(ip, domain, username, password, config):
                     "gPCMachineExtensionNames",
                     "flags",
                     "objectGUID",
-                    "ntSecurityDescriptor",  # 17. Creator/Owner + 20. ACL
+                    "ntSecurityDescriptor",  
                     "managedBy",
                 ],
             )
 
-            # Preserve GPO search result before any other LDAP query rewrites conn.entries.
             gpo_entries = list(conn.entries)
 
             domainsid = _extract_domainsid(domain_dn, conn)
@@ -1352,7 +1119,6 @@ def get_domain_gpos(ip, domain, username, password, config):
 
                 gpo_name     = normalize_value(get_attr("name"))
                 gpo_guid_raw = normalize_value(get_attr("objectGUID"))
-                # GUID-i {...} formatına normallaşdır
                 gpo_guid = gpo_guid_raw.upper()
                 if not gpo_guid.startswith("{"):
                     gpo_guid = "{" + gpo_guid + "}"
@@ -1366,7 +1132,6 @@ def get_domain_gpos(ip, domain, username, password, config):
                 user_version     = (version_num >> 16) & 0xFFFF
                 computer_version = version_num & 0xFFFF
 
-                # ── Security Descriptor ──────────────────────────────────
                 ntsd_attr = get_attr("ntSecurityDescriptor")
                 ntsd_raw  = getattr(ntsd_attr, "value", None) if ntsd_attr else None
                 if isinstance(ntsd_raw, (bytearray, memoryview)):
@@ -1375,25 +1140,18 @@ def get_domain_gpos(ip, domain, username, password, config):
                     ntsd_raw = b""
 
                 isaclprotected = _parse_isaclprotected(ntsd_raw)
-                owner_sid      = _parse_sd_owner(ntsd_raw)          # 17. Owner
-                dacl_aces      = _parse_dacl_aces(ntsd_raw)         # 20. ACL
+                owner_sid      = _parse_sd_owner(ntsd_raw)          
+                dacl_aces      = _parse_dacl_aces(ntsd_raw)        
 
-                # Owner SID-i LDAP-dan resolve et
                 owner_name = _resolve_sid_to_name(owner_sid, conn, domain_dn) if owner_sid else ""
 
-                # ── Extension GUID-lər ────────────────────────────────────
                 user_extensions    = _parse_extension_guids(user_ext)
                 machine_extensions = _parse_extension_guids(machine_ext)
 
-                # ── Flags / GPO Status ─────────────────────────────────────
-                # flags: 0=All enabled, 1=User disabled, 2=Computer disabled, 3=All disabled
                 gpo_flags = safe_int(get_attr("flags"), 0)
                 user_settings_disabled     = bool(gpo_flags & 1)
                 computer_settings_disabled = bool(gpo_flags & 2)
 
-                # ── highvalue ─────────────────────────────────────────────
-                # FIX #5: gPLink GUID = CN (gpo_name), objectGUID (gpo_guid) deyil.
-                # HIGH_VALUE_GUIDS-i gpo_name (CN) ilə müqayisə et.
                 HIGH_VALUE_GUIDS = {
                     "{31B2F340-016D-11D2-945F-00C04FB984F9}",
                     "{6AC1786C-016F-11D2-945F-00C04FB984F9}",
@@ -1411,7 +1169,7 @@ def get_domain_gpos(ip, domain, username, password, config):
                 )
 
                 gpo_info = {
-                    # Əsas identifikasiya
+
                     "name":         gpo_name,
                     "guid":         gpo_guid,
                     "display_name": normalize_value(get_attr("displayName")) or gpo_name,
@@ -1421,52 +1179,40 @@ def get_domain_gpos(ip, domain, username, password, config):
                     "domain":       domain,
                     "domainsid":    domainsid,
 
-                    # Zaman damğaları
                     "created":  ldap_timestamp_to_iso(get_attr("whenCreated")),
                     "modified": ldap_timestamp_to_iso(get_attr("whenChanged")),
 
-                    # Versiya
                     "version":          version_num,
                     "user_version":     user_version,
                     "computer_version": computer_version,
 
-                    # Status flags
                     "flags":                      gpo_flags,
                     "user_settings_disabled":     user_settings_disabled,     # 2. Scope
                     "computer_settings_disabled": computer_settings_disabled,  # 2. Scope
 
-                    # Link məlumatları (sonra doldurulur)
-                    "linked_containers": [],  # 1. GPO Link
+                    "linked_containers": [],  
                     "linked_count":      0,
-                    "enforced":          False,   # 4. Enforcement
-                    "link_disabled":     False,   # 4. Enforcement
+                    "enforced":          False,   
+                    "link_disabled":     False,   
                     "isaclprotected":    isaclprotected,
 
-                    # 17. Creator/Owner
                     "owner_sid":  owner_sid,
                     "owner_name": owner_name,
 
-                    # 20. SYSVOL ACL (LDAP SD-dən)
                     "ldap_dacl_aces": dacl_aces,
 
-                    # Extension-lər (2. Scope of Management)
                     "user_extensions":    user_extensions,
                     "machine_extensions": machine_extensions,
 
-                    # highvalue
                     "highvalue": highvalue,
 
-                    # SYSVOL məlumatları (SMB-dən sonra doldurulur)
                     "sysvol": {},
 
-                    # Yığılmış risk qeydləri
                     "risk_controls": [],
                 }
 
                 gpos.append(gpo_info)
 
-            # ── 2. gPLink-dən Link + Enforcement + Inheritance ────────────
-            # Hər container-ın gPLink-i oxunur
             conn.search(
                 domain_dn,
                 "(gPLink=*)",
@@ -1477,10 +1223,6 @@ def get_domain_gpos(ip, domain, username, password, config):
             guid_pattern  = re.compile(r'\{([0-9A-Fa-f\-]{36})\}')
             link_map      = {}
             link_text_map = {}
-            # 5. Block Inheritance: gpOptions=1 olan container-lər
-            # FIX #3: gPLink=* filtri yalnız link-i olan container-ları qaytarır.
-            # gPOptions=1 olan amma gPLink-i olmayan OU-lar qaçırılır.
-            # Buna görə inheritance_blocked-ı ayrıca sorğu ilə doldururuq (aşağıda).
             inheritance_blocked = []
 
             for entry in conn.entries:
@@ -1488,7 +1230,6 @@ def get_domain_gpos(ip, domain, username, password, config):
                 gp_link  = normalize_value(getattr(entry, "gPLink",   None))
                 gp_opts  = safe_int(getattr(entry, "gPOptions", None), 0)
 
-                # gPLink-i olan container-larda da gpOptions=1 ola bilər — onları da yaz
                 if gp_opts & 1:
                     inheritance_blocked.append(container_dn)
 
@@ -1501,8 +1242,6 @@ def get_domain_gpos(ip, domain, username, password, config):
                     link_map.setdefault(gu, []).append(container_dn)
                     link_text_map.setdefault(gu, []).append(text)
 
-            # FIX #3 (davam): gPLink-i olmayan amma gpOptions=1 olan bütün container-ları tap
-            # Bunlar: OU-lar, domain kökü — istənilən gpOptions=1 olan obyekt
             conn.search(
                 domain_dn,
                 "(&(gpOptions=1)(!(gPLink=*)))",
@@ -1514,8 +1253,6 @@ def get_domain_gpos(ip, domain, username, password, config):
                 if dn not in inheritance_blocked:
                     inheritance_blocked.append(dn)
 
-            # ── 3. Inheritance — OU-ların inherit/block vəziyyəti ─────────
-            # Bütün OU-ları çəkib gpOptions yoxla
             conn.search(
                 domain_dn,
                 "(objectClass=organizationalUnit)",
@@ -1530,11 +1267,7 @@ def get_domain_gpos(ip, domain, username, password, config):
                     "block_inheritance": bool(gp_opts & 1),
                 })
 
-            # ── GPO-lara Link + Enforcement məlumatlarını yaz ─────────────
-            # FIX #4: gPLink-dəki GUID CN-dəki GUID-dir (objectGUID deyil).
-            # Buna görə link_map-i "name" (CN) ilə yoxlamalıyıq.
             for gpo in gpos:
-                # gpo["name"] = CN, yəni {31B2F340-...} — gPLink-dəki GUID ilə uyğundur
                 cn_guid = gpo["name"].upper()
                 if not cn_guid.startswith("{"):
                     cn_guid = "{" + cn_guid + "}"
@@ -1547,7 +1280,6 @@ def get_domain_gpos(ip, domain, username, password, config):
                 gpo["enforced"]      = any(_is_gpo_enforced(t, cn_guid) for t in texts)
                 gpo["link_disabled"] = any(_is_gpo_link_disabled(t, cn_guid) for t in texts)
 
-                # Risk qeydləri
                 rc = gpo["risk_controls"]
                 if gpo["highvalue"]:
                     rc.append("High Value Target")
@@ -1560,30 +1292,24 @@ def get_domain_gpos(ip, domain, username, password, config):
                 if gpo["computer_settings_disabled"]:
                     rc.append("Computer Settings Disabled")
 
-        # ── SMB / SYSVOL tara ────────────────────────────────────────────
-        # FIX #1: _smb_connect indi (smb, error) tuple qaytarır
         smb, smb_error = _smb_connect(ip, domain, bind_user.split("\\")[-1], smb_password)
         sysvol_available = _probe_sysvol_access(smb, domain)
 
         all_cpasswords = []
 
         if smb:
-            # FIX #1/#2: GPO CN adından (name) GUID-i götür, objectGUID deyil
             for gpo in gpos:
-                # gpo["name"] = CN = SYSVOL-dakı qovluq adı, məs. {31B2F340-...}
                 cn_raw = gpo["name"].strip("{}")
                 try:
                     sv = _enumerate_sysvol_gpo(smb, "SYSVOL", cn_raw, domain,
                                                        gpc_fs_path=gpo.get("path", ""))
                     gpo["sysvol"] = sv
 
-                    # cPassword-ləri qlobal siyahıya əlavə et
                     for cp in sv.get("cpasswords_found", []):
                         cp["gpo_name"] = gpo["display_name"]
-                        cp["gpo_guid"] = gpo["name"]  # CN GUID (SYSVOL ilə uyğun)
+                        cp["gpo_guid"] = gpo["name"]  
                         all_cpasswords.append(cp)
 
-                    # Risk qeydlərini yenilə
                     rc = gpo["risk_controls"]
                     if sv.get("cpasswords_found"):
                         rc.append("GPP cPassword Found")
@@ -1598,7 +1324,6 @@ def get_domain_gpos(ip, domain, username, password, config):
                     gpo["sysvol"] = {"error": str(ex)}
             smb.logoff()
         else:
-            # FIX #1/#2: SMB bağlantısı uğursuz olduqda səbəbi hər GPO-ya yaz
             for gpo in gpos:
                 gpo["sysvol"] = {
                     "error": f"SMB connection failed: {smb_error}",
@@ -1619,27 +1344,22 @@ def get_domain_gpos(ip, domain, username, password, config):
             "ou_inheritance":      ou_inheritance,
         }
 
-        # ── domain_gpos.jsonl-a yaz ──────────────────────────────────────────
         try:
             output_path = os.path.join(
                 str(config.DOMAIN_OBJECT_DIR), "domain_gpos.jsonl"
             )
             with open(output_path, "w", encoding="utf-8") as f:
-                # Meta sətir: success, count, sysvol_available
                 meta = {
                     "success":          result["success"],
                     "count":            result["count"],
                     "sysvol_available": result["sysvol_available"],
                 }
                 f.write(_json.dumps(meta, ensure_ascii=False, default=str) + "\n")
-                # Hər GPO ayrı sətirdə
                 for gpo in result["gpos"]:
                     f.write(_json.dumps(gpo, ensure_ascii=False, default=str) + "\n")
-                # all_cpasswords — tək sətir (ayrıca axtarış üçün)
                 if result["all_cpasswords"]:
                     cp_line = {"all_cpasswords": result["all_cpasswords"]}
                     f.write(_json.dumps(cp_line, ensure_ascii=False, default=str) + "\n")
-                # inheritance_blocked + ou_inheritance — tək sətir
                 inh_line = {
                     "inheritance_blocked": result["inheritance_blocked"],
                     "ou_inheritance":      result["ou_inheritance"],
@@ -1655,16 +1375,7 @@ def get_domain_gpos(ip, domain, username, password, config):
     except Exception as e:
         return {"success": False, "error": f"Error: {e}", "count": 0, "gpos": []}
 
-
-# ═══════════════════════════════════════════════════════
-#  get_gpo_scope  (köhnə API ilə uyğunluq)
-# ═══════════════════════════════════════════════════════
-
 def get_gpo_scope(ip, gpo_guid, domain, username, password, config):
-    """
-    GPO-nun linked olduğu container-ları qaytarır.
-    get_domain_gpos ilə eyni NTLM hash dəstəyi.
-    """
     if not all([ip, gpo_guid, domain, username, password]):
         return []
     try:

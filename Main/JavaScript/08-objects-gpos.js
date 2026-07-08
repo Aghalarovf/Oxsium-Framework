@@ -1,19 +1,8 @@
-/* ═══════════════════════════════════════════════════
-   08-objects-gpos.js
-   GPOs tab: load, render, filter, detail panel.
-   Depends on: 00-globals.js, 01-core.js
-   ═══════════════════════════════════════════════════ */
-
 let gposFilter = 'all';
 let gposSearch = '';
 
-/* ── Select Domains (GPOs tab) ──
-   Users tabındakı domen siyahısı (cari domen + trusts) paylaşılan
-   domainsListCache/ensureDomainsListLoaded() (03-objects-users.js) üzərindən
-   gəlir — yalnız GPOs tabına aid seçim state-i (gposDomainsSelected) və
-   dropdown UI-si burada saxlanılır. GPO qeydlərində domain_sid sütunu
-   olmadığından uyğunluq DN son hissəsinə (dc=...) görə yoxlanılır. */
-let gposDomainsSelected     = null;   // Set<string> (lowercased domain names) — null = hamısı seçili
+
+let gposDomainsSelected     = null;
 let gposDomainsDropdownOpen = false;
 
 function gpoBelongsToDomain(gpo, domain) {
@@ -139,8 +128,7 @@ async function loadGPOs() {
   document.getElementById('g-table-body').innerHTML = '';
   closeGPODetail();
 
-  // Domen seçimi reconnect zamanı yenidən qiymətləndirilsin (domainsListCache
-  // özü Users tabı tərəfindən paylaşılır və artıq null-a sıfırlanıb olacaq).
+
   gposDomainsSelected = null;
 
   try {
@@ -152,13 +140,13 @@ async function loadGPOs() {
     const resp = await fetch(url, { method: 'GET' });
     const data = await resp.json().catch(() => null);
     if (!resp.ok || !data) {
-      throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine xətası (HTTP ${resp.status})`);
+      throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine error (HTTP ${resp.status})`);
     }
 
     const raw = Array.isArray(data.records) ? data.records : (Array.isArray(data.rows) ? data.rows : []);
     gposData = raw.map(g => ({
       ...g,
-      /* linked_containers DB-də JSON string ola bilər — normallaşdır */
+
       linked_containers: Array.isArray(g.linked_containers)
         ? g.linked_containers
         : (typeof g.linked_containers === 'string'
@@ -169,7 +157,7 @@ async function loadGPOs() {
         : (typeof g.risk_controls === 'string'
             ? (() => { try { return JSON.parse(g.risk_controls); } catch { return []; } })()
             : []),
-      /* has_settings_markers: machine_extensions və ya user_extensions varsa true */
+
       has_settings_markers: g.has_settings_markers ??
         ((() => {
           const me = Array.isArray(g.machine_extensions) ? g.machine_extensions
@@ -182,9 +170,9 @@ async function loadGPOs() {
                 : []);
           return me.length > 0 || ue.length > 0;
         })()),
-      /* vulnerable: highvalue və ya high_risk varsa */
+
       vulnerable: g.vulnerable ?? (g.highvalue || g.high_risk || false),
-      /* has_cpasswords: all_cpasswords massivində element varsa true */
+
       has_cpasswords: (() => {
         const cp = Array.isArray(g.all_cpasswords) ? g.all_cpasswords
           : (typeof g.all_cpasswords === 'string'
@@ -199,10 +187,10 @@ async function loadGPOs() {
     setObjectCountStat('cnt-gpos', total);
     document.getElementById('nav-gpo-count').textContent = total;
     document.getElementById('gpos-meta').textContent =
-      `${total} GPOs · mənbə: Oxsium SQLite Engine (.db)`;
+      `${total} GPOs · source: Oxsium SQLite Engine (.db)`;
 
     renderGPOs();
-    addLog(`GPOs sqlite_reader.py-dən yükləndi: ${total} GPO (Oxsium SQLite Engine)`, 'ok');
+    addLog(`GPOs loaded from sqlite_reader.py: ${total} GPO (Oxsium SQLite Engine)`, 'ok');
   } catch (err) {
     addLog(`GPOs: ${err.message}`, 'err');
     document.getElementById('g-table-body').innerHTML = `<div class="g-empty"><p>${escapeHtml(err.message)}</p></div>`;
@@ -213,7 +201,7 @@ async function loadGPOs() {
 
 function renderGPOs() {
   const body = document.getElementById('g-table-body');
-  let list = gposData;
+  let list = gposData.filter(gpo => gpo.name != null || gpo.guid != null || gpo.display_name != null);
   if (domainsListCache && gposDomainsSelected && gposDomainsSelected.size < domainsListCache.length) {
     const activeDomains = domainsListCache.filter(d => gposDomainsSelected.has(d.name.toLowerCase()));
     list = list.filter(gpo => activeDomains.some(d => gpoBelongsToDomain(gpo, d)));
@@ -288,7 +276,7 @@ function showGPODetail(gpo, row) {
     detailBody.innerHTML += `<div class="detail-section"><div class="detail-section-title">Risk Controls</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 0;">${riskControls.map(r => `<div class="badge amber">${escapeHtml(r)}</div>`).join('')}</div></div>`;
   }
 
-  /* ── Cpasswords (GPP Credentials) ───────────────────────────────────────── */
+
   const cpasswords = parseJsonField(gpo.all_cpasswords);
   if (cpasswords.length > 0) {
     const cpHtml = cpasswords.map(cp => `
@@ -309,7 +297,7 @@ function showGPODetail(gpo, row) {
     detailBody.innerHTML += `<div class="detail-section"><div class="detail-section-title" style="color:var(--red);">⚠ Cpasswords — Cleartext Credentials (${cpasswords.length})</div><div class="spn-list" style="padding:0;">${cpHtml}</div></div>`;
   }
 
-  /* ── CSE Extensions (machine + user) ──────────────────────────────────── */
+
   const parseJsonField = v => {
     if (Array.isArray(v)) return v;
     if (typeof v === 'string') { try { return JSON.parse(v); } catch { return []; } }
@@ -335,10 +323,10 @@ function showGPODetail(gpo, row) {
     detailBody.innerHTML += `<div class="detail-section"><div class="detail-section-title">CSE Extensions (${extRows.length})</div><div class="spn-list">${extHtml}</div></div>`;
   }
 
-  /* ── Sysvol ───────────────────────────────────────────────────────────── */
+
   const sysvol = parseObjField(gpo.sysvol);
   if (sysvol) {
-    /* Scripts */
+
     const scripts = parseJsonField(sysvol.scripts);
     if (scripts.length > 0) {
       const sHtml = scripts.map(s =>
@@ -347,7 +335,7 @@ function showGPODetail(gpo, row) {
       detailBody.innerHTML += `<div class="detail-section"><div class="detail-section-title">Scripts (${scripts.length})</div><div class="spn-list">${sHtml}</div></div>`;
     }
 
-    /* Security Settings */
+
     const sec = parseObjField(sysvol.security_settings);
     if (sec) {
       const secRows = [];
@@ -364,7 +352,7 @@ function showGPODetail(gpo, row) {
       }
     }
 
-    /* Software Packages */
+
     const pkgs = parseJsonField(sysvol.software_packages);
     if (pkgs.length > 0) {
       const pkgHtml = pkgs.map(p =>
@@ -373,7 +361,7 @@ function showGPODetail(gpo, row) {
       detailBody.innerHTML += `<div class="detail-section"><div class="detail-section-title">Software Packages (${pkgs.length})</div><div class="spn-list">${pkgHtml}</div></div>`;
     }
 
-    /* XML / Preference files */
+
     const xmlFiles = parseJsonField(sysvol.xml_files);
     if (xmlFiles.length > 0) {
       const xmlHtml = xmlFiles.map(f => {
@@ -383,7 +371,7 @@ function showGPODetail(gpo, row) {
       detailBody.innerHTML += `<div class="detail-section"><div class="detail-section-title">XML / Preference Files (${xmlFiles.length})</div><div class="spn-list">${xmlHtml}</div></div>`;
     }
 
-    /* All Files */
+
     const allFiles = parseJsonField(sysvol.all_files);
     if (allFiles.length > 0) {
       const fHtml = allFiles.map(f =>
@@ -392,7 +380,7 @@ function showGPODetail(gpo, row) {
       detailBody.innerHTML += `<div class="detail-section"><div class="detail-section-title">Sysvol Files (${allFiles.length})</div><div class="spn-list">${fHtml}</div></div>`;
     }
 
-    /* Parse errors */
+
     const parseErrors = parseJsonField(sysvol.parse_errors);
     if (parseErrors.length > 0) {
       detailBody.innerHTML += `<div class="detail-section"><div class="detail-section-title" style="color:var(--red);">Sysvol Parse Errors (${parseErrors.length})</div><div class="spn-list">${parseErrors.map(e => `<div class="group-item" style="color:var(--red);">${escapeHtml(String(e))}</div>`).join('')}</div></div>`;

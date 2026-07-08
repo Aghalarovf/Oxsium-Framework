@@ -8,20 +8,15 @@ load_dotenv()
 
 
 class Config:
-    # ── Project root və data directories ──────────────────────────────────
-    # PROJECT_ROOT = /Main (connect/config.py-dən iki səviyyə yuxarı)
     PROJECT_ROOT = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    
-    # Domain Object qovluğunun yolu environment variable-dən və ya default-dən oxunur
-    # DOMAIN_OBJECT_DIR={PROJECT_ROOT}/Domain Object = /Main/Domain Object
+
     DOMAIN_OBJECT_DIR = Path(
         os.getenv(
             "DOMAIN_OBJECT_DIR",
             str(PROJECT_ROOT / "Domain Object")
         )
     )
-    
-    # ACL output files
+
     DOMAIN_ACES_PARQUET = DOMAIN_OBJECT_DIR / "domain_aces.parquet"
     DOMAIN_ACES_JSON = DOMAIN_OBJECT_DIR / "domain_aces.json"
     DOMAIN_EXTENDED_RIGHTS_JSON = DOMAIN_OBJECT_DIR / "domain_extended_rights.json"
@@ -45,15 +40,6 @@ class Config:
         "sqlite_reader": int(os.getenv("SQLITE_READER_PORT", 8800)),
     }
 
-    # DÜZƏLİŞ: bu default-lar əvvəllər `acl/models.py`-dəki LdapConfig-in
-    # VPN-üçün tənzimlənmiş default-larını (receive_timeout=120,
-    # page_size=200) SƏSSİZCƏ üstələyirdi — `LdapConfig.from_app_config`
-    # `getattr(config, "LDAP_RECEIVE_TIMEOUT", 120)` çağırsa da, bu `Config`
-    # sinfi HƏMİŞƏ öz atributuna malik olduğu üçün `getattr`-ın 120 fallback-i
-    # heç vaxt işə düşmürdü — əsl runtime dəyəri 10 saniyə idi, 120 yox.
-    # İndi hər iki qat (Config + LdapConfig) eyni VPN-dözümlü dəyərləri
-    # paylaşır. `connect_timeout` da 5-dən 15-ə qaldırıldı — VPN-də ilkin
-    # TCP/TLS handshake 5 saniyəyə həmişə çatmaya bilər.
     LDAP_CONNECT_TIMEOUT: int = int(os.getenv("LDAP_CONNECT_TIMEOUT", 15))
     LDAP_RECEIVE_TIMEOUT: int = int(os.getenv("LDAP_RECEIVE_TIMEOUT", 120))
     PORT_CHECK_TIMEOUT:   int = int(os.getenv("PORT_CHECK_TIMEOUT",   2))

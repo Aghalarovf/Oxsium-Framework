@@ -1,57 +1,39 @@
-/* ═══════════════════════════════════════════════════
-   09-objects-groups.js
-   Groups tab: load, render, filter, members tree, detail panel.
-   Depends on: 00-globals.js, 01-core.js
-
-   DATA SOURCE: sqlite_reader.py (DB_BASE, port 8800)
-   ─ loadGroups()         → GET ${DB_BASE}/api/list/groups
-   ─ group members        → GET ${DB_BASE}/api/object/groups/<id>
-   JSONL/snapshot oxunmur, canlı LDAP fallback yoxdur.
-   ═══════════════════════════════════════════════════ */
-
-/* ═══════ Privileged Group SID/Name lookup ═══════ */
-// Builtin qruplar — domain-independent fixed SID-lər (S-1-5-32-xxx)
 const PRIVILEGED_SIDS = new Set([
-  'S-1-5-32-544', // Builtin Administrators
-  'S-1-5-32-548', // Account Operators
-  'S-1-5-32-549', // Server Operators
-  'S-1-5-32-550', // Print Operators
-  'S-1-5-32-551', // Backup Operators
-  'S-1-5-32-552', // Replicator
-  'S-1-5-32-569', // Cryptographic Operators
-  'S-1-5-32-578', // Hyper-V Administrators
-  'S-1-5-32-582', // Storage Replica Administrators
+  'S-1-5-32-544',
+  'S-1-5-32-548',
+  'S-1-5-32-549',
+  'S-1-5-32-550',
+  'S-1-5-32-551',
+  'S-1-5-32-552',
+  'S-1-5-32-569',
+  'S-1-5-32-578',
+  'S-1-5-32-582',
 ]);
 
-// Domain qrupları — S-1-5-21-<domain>-<RID> formatında SID suffix-i
+
 const PRIVILEGED_RID_SUFFIXES = [
-  '-512', // Domain Admins
-  '-519', // Enterprise Admins
-  '-518', // Schema Admins
-  '-516', // Domain Controllers
-  '-521', // Read-only Domain Controllers
-  '-520', // Group Policy Creator Owners
-  '-525', // Protected Users
-  '-526', // Key Admins
-  '-527', // Enterprise Key Admins
-  '-498', // Enterprise Read-only Domain Controllers
-  '-517', // Cert Publishers
-  '-553', // RAS and IAS Servers
-  '-548', // Account Operators (domain-scoped)
-  '-549', // Server Operators  (domain-scoped)
-  '-550', // Print Operators   (domain-scoped)
-  '-551', // Backup Operators  (domain-scoped)
-  '-557', // Enterprise Read-Only Domain Controllers
-  '-578', // Hyper-V Administrators (domain-scoped)
-  '-582', // Storage Replica Administrators (domain-scoped)
+  '-512',
+  '-519',
+  '-518',
+  '-516',
+  '-521',
+  '-520',
+  '-525',
+  '-526',
+  '-527',
+  '-498',
+  '-517',
+  '-553',
+  '-548',
+  '-549',
+  '-550',
+  '-551',
+  '-557',
+  '-578',
+  '-582',
 ];
 
-// Ad əsaslı yoxlama — SID məlum olmadıqda (fallback)
-// QEYD: bütün pattern-lər ^...$ ilə anchor edilib ki, ad tam uyğun gəlsin —
-// əks halda "Domain Controllers" kimi unanchored regex "Cloneable Domain
-// Controllers" və ya "Read-only Domain Controllers" kimi ALAQA olmayan
-// adların İÇİNDƏ substring kimi tapılır və onları da yanlış olaraq
-// Privileged kimi işarələyir.
+
 const PRIVILEGED_NAME_PATTERNS = [
   /^domain admins$/i,
   /^enterprise admins$/i,
@@ -86,17 +68,12 @@ function isPrivilegedGroup(sid, name) {
   return false;
 }
 
-/* ═══════ Groups state ═══════ */
+
 let groupsFilter = 'all';
 let groupsSearch = '';
 
-/* ── Select Domains (Groups tab) ──
-   Users tabındakı paylaşılan domainsListCache/ensureDomainsListLoaded()
-   (03-objects-users.js) istifadə olunur; Groups tabına aid yalnız seçim
-   state-i (groupsDomainsSelected) və dropdown UI-si burada saxlanılır.
-   Uyğunluq group_sid (domain SID prefiksi) və ya group_dn son hissəsinə
-   (dc=...) görə yoxlanılır. */
-let groupsDomainsSelected     = null;   // Set<string> (lowercased domain names) — null = hamısı seçili
+
+let groupsDomainsSelected     = null;
 let groupsDomainsDropdownOpen = false;
 
 function groupBelongsToDomain(group, domain) {
@@ -218,15 +195,13 @@ function resetGroupsDomainsSelection() {
   renderGroups();
 }
 
-/* ────────────────────────────────────────────────────
-   LOAD  (yalnız DB_BASE — JSONL/snapshot yoxdur)
-   ──────────────────────────────────────────────────── */
+
 async function loadGroups() {
   setGroupsLoading(true, 'Loading groups from DB...');
   document.getElementById('gr-table-body').innerHTML = '';
   closeGroupDetail();
 
-  // Domen seçimi reconnect zamanı yenidən qiymətləndirilsin.
+
   groupsDomainsSelected = null;
 
   try {
@@ -237,16 +212,16 @@ async function loadGroups() {
     if (!resp.ok || !data) {
       throw new Error(
         (data && (data.error || data.detail)) ||
-        `SQLite Engine xətası (HTTP ${resp.status})`
+        `SQLite Engine error (HTTP ${resp.status})`
       );
     }
 
-    /* /api/list/<table> → { records, total }  veya { rows } */
+
     const raw = Array.isArray(data.records) ? data.records
               : Array.isArray(data.rows)    ? data.rows
               : [];
 
-    /* Sahə adlarını normalize et: DB-dəki sam_account_name → sam_name, name → name */
+
     groupsData = raw.map(normalizeGroupRecord);
     enumCacheLoaded.groups = true;
 
@@ -254,9 +229,9 @@ async function loadGroups() {
     setObjectCountStat('cnt-groups', total);
     document.getElementById('nav-groups-count').textContent = total;
     document.getElementById('groups-meta').textContent =
-      `${total} groups · mənbə: Oxsium SQLite Engine (.db)`;
+      `${total} groups · source: Oxsium SQLite Engine (.db)`;
 
-    addLog(`Groups sqlite_reader.py-dən yükləndi: ${total} qrup`, 'ok');
+    addLog(`Groups loaded from sqlite_reader.py: ${total} groups`, 'ok');
     renderGroups();
   } catch (err) {
     addLog(`Groups: ${err.message}`, 'err');
@@ -267,37 +242,27 @@ async function loadGroups() {
   }
 }
 
-/**
- * DB sütun adlarını frontend-in gözləntilərinə uyğunlaşdırır.
- *
- * Real DB sxemi (groups cədvəli):
- *   id, group_name, group_dn, group_sid,
- *   member_count, member_users_count, is_empty
- *
- * Mövcud olmayan field-lər (is_privileged, is_protected, is_nested,
- * group_type, sam_name, managed_by, description, risk_controls)
- * undefined qalır — render funksiyaları bunları "—" ilə göstərir.
- */
+
 function normalizeGroupRecord(g) {
   if (!g || typeof g !== 'object') return g;
   const out = Object.assign({}, g);
 
-  /* name — əsl ad group_name sütunundadır */
+
   out.name = out.group_name || out.name || '';
 
-  /* sid — əsl SID group_sid sütunundadır */
+
   out.sid = out.group_sid || out.sid || '';
 
-  /* dn — group_dn mövcuddur; member-toggle/cache açarı üçün istifadə olunur */
+
   out.dn = out.group_dn || (out.rowid != null ? `groups:${out.rowid}` : out.id != null ? `groups:${out.id}` : '');
 
-  /* is_empty — DB INTEGER 0/1-dən boolean-a çevir */
+
   out.is_empty = Boolean(out.is_empty);
 
-  /* is_privileged — DB-də sütun yoxdur; SID-ə və ya ada görə hesablanır */
+
   out.is_privileged = isPrivilegedGroup(out.group_sid || out.sid || '', out.group_name || out.name || '');
 
-  /* member_count — DB-dən gəlir, tip yoxlaması */
+
   if (typeof out.member_count !== 'number') out.member_count = undefined;
   if (typeof out.member_users_count !== 'number') out.member_users_count = undefined;
 
@@ -305,15 +270,13 @@ function normalizeGroupRecord(g) {
   return out;
 }
 
-/* ────────────────────────────────────────────────────
-   ALL MEMBERS — DB object API vasitəsilə
-   ──────────────────────────────────────────────────── */
+
 async function loadAllGroupMembers() {
   if (!groupsData.length) await loadGroups();
   if (!groupsData.length) { showToast('No groups found', 'info'); return; }
 
   setGroupsLoading(true, 'Loading all group members from DB...');
-  addLog(`Groups: ${groupsData.length} qrup üçün üzvlər yüklənir (DB)...`, 'info');
+  addLog(`Groups: loading members for ${groupsData.length} groups (DB)...`, 'info');
 
   let loaded = 0;
   for (const group of groupsData) {
@@ -321,27 +284,18 @@ async function loadAllGroupMembers() {
     try {
       await ensureGroupMembersLoaded(group);
       loaded++;
-    } catch (_) { /* individual xəta → davam et */ }
+    } catch (_) {  }
   }
 
   renderGroups();
-  addLog(`Groups: bütün üzvlər yükləndi (${loaded}/${groupsData.length}).`, 'ok');
+  addLog(`Groups: all members loaded (${loaded}/${groupsData.length}).`, 'ok');
   showToast('All group members loaded', 'success');
   setGroupsLoading(false);
 }
 
-/* ────────────────────────────────────────────────────
-   MEMBER FETCH — yalnız DB_BASE /api/object/groups/<id>
-   ──────────────────────────────────────────────────── */
 
-/**
- * Bir qrupun birbaşa üzvlərini DB-dən gətirir.
- * sqlite_reader.py: GET /api/object/groups/<id>
- *   → { attributes: {...}, children: { group_direct_members: { rows: [...] } } }
- */
 async function fetchGroupMembersFromDB(group) {
-  /* rowid = groups cədvəlinin fiziki sətir ID-si; sqlite_reader.py
-     /api/list-də SELECT *, rowid ilə gəlir, /api/object rowid-ə görə axtarır */
+
   const rowid = group?.rowid ?? group?.id;
   if (rowid == null) return [];
 
@@ -349,7 +303,7 @@ async function fetchGroupMembersFromDB(group) {
   const data = await resp.json().catch(() => null);
   if (!resp.ok || !data) return [];
 
-  /* sqlite_reader: children → { group_direct_members: { rows: [...] } } */
+
   const rows = data?.children?.group_direct_members?.rows || [];
   return rows.map(r => ({
     name:     r.member_name || r.name   || r.member_dn || '—',
@@ -360,14 +314,9 @@ async function fetchGroupMembersFromDB(group) {
   }));
 }
 
-/* nestedGroupMembersCache/Loading artıq 00-globals.js-dədir */
 
-/**
- * Qrupun üzvlərini yükləyir; eyni dn üçün paralel sorğuları önləyir.
- * Köhnə live-LDAP fetchGroupMembersTree-nin yerini tutur.
- */
 async function fetchGroupMembersTree(group, _visited, _depth, _maxDepth) {
-  /* group obyekti və ya dn/id-dən istifadə oluna bilər */
+
   const key = String(group?.dn || group?.id || '').trim();
   if (!key) return [];
   if (nestedGroupMembersCache.has(key)) return nestedGroupMembersCache.get(key) || [];
@@ -398,7 +347,7 @@ async function ensureGroupMembersLoaded(group) {
     group.member_count        = (group.members || []).length;
     group.member_users_count  = group.member_users.length;
     group.is_empty            = group.member_count === 0;
-    // is_privileged-i qoru — üzvlər yüklənəndə dəyişməməlidir
+
     group.is_privileged       = isPrivilegedGroup(group.group_sid || group.sid || '', group.group_name || group.name || '');
     group._membersLoaded      = true;
   } finally {
@@ -406,9 +355,7 @@ async function ensureGroupMembersLoaded(group) {
   }
 }
 
-/* ────────────────────────────────────────────────────
-   FILTER / SEARCH
-   ──────────────────────────────────────────────────── */
+
 function setGroupFilter(filter, btn) {
   groupsFilter = filter;
   document.querySelectorAll('#groups-filter-chips .chip').forEach(c => c.classList.remove('active'));
@@ -423,9 +370,7 @@ function filterGroups() {
   renderGroups();
 }
 
-/* ────────────────────────────────────────────────────
-   RENDER
-   ──────────────────────────────────────────────────── */
+
 function renderMemberItems(members, depth = 0) {
   return (Array.isArray(members) ? members : []).map(m => {
     const name    = escapeHtml(m?.name || m?.dn || '—');
@@ -458,7 +403,7 @@ async function toggleGroupMembers(btn, membersRowId) {
   btn.classList.toggle('open', !isOpen);
 
   if (!isOpen) {
-    /* group-u dn və ya id ilə tap */
+
     const dn = row.dataset.groupDn || '';
     const group = groupsData.find(g => (g.dn || g.group_dn || '') === dn)
                || groupsData.find(g => String(g.id) === row.dataset.groupId);
@@ -466,12 +411,12 @@ async function toggleGroupMembers(btn, membersRowId) {
     if (!group) return;
 
     if (group._membersLoaded) {
-      /* Artıq yüklənib — sadəcə yenidən render et */
+
       renderGroupMembersRow(row, group.members || []);
       return;
     }
 
-    /* Hələ yüklənməyib — DB-dən gətir */
+
     row.innerHTML = '<div class="gr-members-empty">Loading members...</div>';
     try {
       await ensureGroupMembersLoaded(group);
@@ -521,17 +466,17 @@ function renderGroups() {
     const membersCount = Number.isFinite(group.member_count) ? group.member_count : '—';
     const membersRowId = `gr-members-${Math.random().toString(36).slice(2)}`;
 
-    // gr-cell-name
+
     const cellName = document.createElement('div');
     cellName.className = 'gr-cell gr-cell-name';
     cellName.textContent = group.name || group.group_name || '—';
 
-    // gr-cell-sid
+
     const cellSid = document.createElement('div');
     cellSid.className = 'gr-cell gr-cell-sid';
     cellSid.textContent = group.sid || group.group_sid || '—';
 
-    // gr-cell-members — button DOM ilə qur (innerHTML onclick yox)
+
     const cellMembers = document.createElement('div');
     cellMembers.className = 'gr-cell gr-cell-members';
 
@@ -555,7 +500,7 @@ function renderGroups() {
     });
     cellMembers.appendChild(toggleBtn);
 
-    // gr-cell-privileged
+
     const cellEmpty = document.createElement('div');
     cellEmpty.className = 'gr-cell gr-cell-empty';
     const flagSpan = document.createElement('span');
@@ -568,7 +513,7 @@ function renderGroups() {
     row.appendChild(cellMembers);
     row.appendChild(cellEmpty);
 
-    // row click — yalnız özü üçün (button stopPropagation edir)
+
     row.addEventListener('click', () => showGroupDetail(group, row));
 
     body.appendChild(row);
@@ -587,9 +532,7 @@ function renderGroups() {
   });
 }
 
-/* ────────────────────────────────────────────────────
-   DETAIL PANEL
-   ──────────────────────────────────────────────────── */
+
 function showGroupDetail(group, row) {
   document.querySelectorAll('.gr-row').forEach(r => r.classList.remove('selected'));
   row.classList.add('selected');
@@ -620,9 +563,7 @@ function closeGroupDetail() {
   document.querySelectorAll('.gr-row').forEach(r => r.classList.remove('selected'));
 }
 
-/* ────────────────────────────────────────────────────
-   LOADING INDICATOR
-   ──────────────────────────────────────────────────── */
+
 function setGroupsLoading(visible, text = 'Loading groups...') {
   const wrap = document.getElementById('groups-loading');
   if (!wrap) return;

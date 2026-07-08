@@ -1,4 +1,4 @@
-import ipaddress
+
 import os
 import re
 import ctypes
@@ -7,9 +7,9 @@ from datetime import datetime, timezone, timedelta
 from ldap3 import Server, Connection, ALL, SUBTREE, Attribute
 from ldap3.core.exceptions import LDAPInvalidCredentialsResult, LDAPSocketOpenError
 try:
-    pass  # computers_network functions disabled for future use
+    pass  
 except ImportError:
-    pass  # computers_network functions disabled for future use
+    pass  
 try:
     from impacket.ldap import ldaptypes as _ldaptypes
     _IMPACKET_OK = True
@@ -229,12 +229,7 @@ def _normalize_laps_values(attr_name: str, raw_value) -> list[str]:
 
 
 def _parse_isaclprotected(sd_raw: bytes) -> bool:
-    """
-    nTSecurityDescriptor-dan SE_DACL_PROTECTED flag-ını yoxlayır.
-    Security Descriptor Control word-ün 0x1000 biti set-dirsə ACL
-    inheritance bloklanıb (BloodHound-un 'isaclprotected' field-i).
-    Minimum tələb: 4 bayt (Revision + Sbz1 + Control[2]).
-    """
+
     if not sd_raw or len(sd_raw) < 4:
         return False
     try:
@@ -247,10 +242,7 @@ def _parse_isaclprotected(sd_raw: bytes) -> bool:
 
 
 def _parse_sid_history(raw_values) -> list[str]:
-    """
-    sIDHistory atributundan SID siyahısını çıxarır.
-    Hər element bytes formatında gəlir — formatCanonical ilə stringify edilir.
-    """
+
     if not raw_values:
         return []
     if not isinstance(raw_values, list):
@@ -276,14 +268,10 @@ def _parse_sid_history(raw_values) -> list[str]:
 
 
 def _extract_domainsid_from_sid(sid_str: str) -> str:
-    """
-    Kompüterin öz SID-indən domain SID-ini çıxarır.
-    Məs: S-1-5-21-111-222-333-1234  →  S-1-5-21-111-222-333
-    """
+
     if not sid_str:
         return ""
     parts = sid_str.split("-")
-    # S-1-5-21-X-X-X-RID formatı — son element RID-dir
     if len(parts) >= 8 and parts[2] == "5" and parts[3] == "21":
         return "-".join(parts[:-1])
     return ""
@@ -329,8 +317,8 @@ def get_domain_computers(ip, domain, username, password, config):
             "pwdLastSet", "whenCreated", "whenChanged",
             "lastLogonTimestamp", "location", "physicalLocationObject",
             "msDS-AllowedToDelegateTo", "msDS-AllowedToActOnBehalfOfOtherIdentity", "primaryGroupID",
-            "nTSecurityDescriptor",  # isaclprotected üçün
-            "sIDHistory",            # SID History privilege escalation üçün
+            "nTSecurityDescriptor", 
+            "sIDHistory",         
             *laps_attr_names,
         ]
 
@@ -376,7 +364,6 @@ def get_domain_computers(ip, domain, username, password, config):
             uac_raw = entry.userAccountControl.value if entry.userAccountControl else 0
             user_account_control = parse_user_account_control(uac_raw)
             
-            # Atributlar thlksiz kild oxumaq n kmki
             def get_attr(attr_name, is_list=False):
                 attr = getattr(entry, attr_name, None)
                 if not attr: return [] if is_list else None
@@ -395,24 +382,15 @@ def get_domain_computers(ip, domain, username, password, config):
             rbcd_sddl = _security_descriptor_to_sddl(rbcd_raw) if rbcd_enabled else ""
             rbcd_principals = _extract_rbcd_sids(rbcd_raw, rbcd_sddl) if rbcd_enabled else []
 
-            # ── isaclprotected ───────────────────────────────────────────────
-            # nTSecurityDescriptor Control word-ünün SE_DACL_PROTECTED biti
-            # set-dirsə ACL inheritance bloklanıb
             ntsd_raw = _normalize_sd_raw(get_attr("nTSecurityDescriptor"))
             isaclprotected = _parse_isaclprotected(ntsd_raw)
 
-            # ── sid_history ──────────────────────────────────────────────────
-            # Keçmiş SID-lər — migration zamanı qalır, privilege escalation üçün istifadə edilə bilər
             sid_history_raw = get_attr("sIDHistory", is_list=True) or []
             sid_history = _parse_sid_history(sid_history_raw)
 
-            # ── domainsid ────────────────────────────────────────────────────
-            # Kompüterin öz SID-indən domain SID-i çıxarılır
             own_sid = str(get_attr("objectSid") or "")
             domainsid = _extract_domainsid_from_sid(own_sid)
 
-            # ── haslaps (BloodHound canonical field adı) ─────────────────────
-            # has_laps ilə eyni dəyər, BloodHound inteqrasiyası üçün əlavə edilir
 
             laps_attributes = {
                 attr_name: _normalize_laps_values(attr_name, get_attr(attr_name, is_list=True))
@@ -420,7 +398,6 @@ def get_domain_computers(ip, domain, username, password, config):
             }
             has_laps = any(laps_attributes[attr_name] for attr_name in laps_attr_names)
 
-            # Check for Kerberoasting vulnerability (computer has SPNs)
             has_spn = len(spn_list) > 0
 
             pwd_last_set = ldap_timestamp_to_iso(get_attr("pwdLastSet"))
@@ -465,17 +442,11 @@ def get_domain_computers(ip, domain, username, password, config):
             if isaclprotected:
                 risk_controls.append("ACL Protected")
 
-
-            # ── smb fields ───────────────────────────────────────────────────
-            # Reserved for future use — SMB probe and IP resolution
             smb_signing_required = None
             smb_version = None
 
-            # ── os_service_pack ──────────────────────────────────────────────
             os_service_pack = str(get_attr("operatingSystemServicePack") or "")
 
-            # ── is_ip_only, ipv4_addresses, ipv6_addresses ───────────────────
-            # Reserved for future use — IP resolution functions deactivated
             is_ip_only = None
             ipv4_addresses_reserved = []
             ipv6_addresses_reserved = []
@@ -534,39 +505,10 @@ def get_domain_computers(ip, domain, username, password, config):
 
         conn.unbind()
 
-        # ── Network enrichment ───────────────────────────────────────────────
-        # Yalnız Domain Controller-lər üçün SMB probe aparılır.
-        # Digər kompüterlər eyni şəbəkədə olmaya bilər — probe mənasızdır.
-        # DC-nin IP-si artıq bizdə var (LDAP bağlantısının `ip` parametri),
-        # buna görə DNS resolve-a da ehtiyac yoxdur.
-        network_timeout = getattr(config, "NETWORK_TIMEOUT", 3.0)
-
-        # Reserved for future use — computers_network.py functions disabled
         smb_info = {"smb_port_open": False, "smb_signing_required": None, "smb_version": None}
-
-        # Qoşulduğumuz maşına uyğun kompüter girişini tap və yalnız onu yenilə.
-        # Strategy (disabled — reserved for future use):
-        #   1) Reverse DNS lookup — DISABLED
-        #   2) Forward DNS resolution — DISABLED  
-        #   3) Fallback to is_domain_controller=True
 
         matched_comp = None
 
-        # 1) Reverse DNS — DISABLED (reserved for future use)
-        # reversed_hostname = _reverse_lookup(ip, timeout=network_timeout)
-
-        # 2) Forward resolve — DISABLED (reserved for future use)
-        # if matched_comp is None:
-        #     for comp in computers:
-        #         dns = str(comp.get("dns_name") or "").strip()
-        #         if not dns:
-        #             continue
-        #         resolved = _resolve_ip_addresses(dns, timeout=network_timeout)
-        #         if ip in resolved["ipv4"]:
-        #             matched_comp = comp
-        #             break
-
-        # 3) Fallback — is_domain_controller=True olan ilk kompüter
         if matched_comp is None:
             for comp in computers:
                 if comp.get("is_domain_controller"):

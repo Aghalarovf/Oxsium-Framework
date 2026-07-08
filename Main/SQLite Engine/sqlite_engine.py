@@ -12,52 +12,29 @@ from typing import Any, Callable, Iterable, Iterator
 
 logger = logging.getLogger("jsonl_to_sqlite")
 
-
-# --------------------------------------------------------------------------- #
-# Helper types
-# --------------------------------------------------------------------------- #
-
 @dataclass
 class ChildTableSpec:
-    """Definition for extracting a list field from a parent record into a separate table."""
-
-    # Key in the parent object (e.g. "spn", "open_ports", "transitive_member_sids")
     source_key: str
-    # Name of the child table to create (e.g. "computer_spns")
     table_name: str
-    # FK column name pointing back to the parent (e.g. "computer_rowid")
     parent_fk: str
-    # If list elements are dicts: {column_name: dict_key} mapping.
-    # If list elements are plain scalars (str/int) use None — a "value" column is used.
     columns: dict[str, str] | None = None
 
 
 @dataclass
 class TableSpec:
-    """Describes how a domain_*.jsonl file will be converted into tables."""
 
     table_name: str
-    # Explicit column list for simple (scalar) fields. If None, determined
-    # automatically from the first record (generic fallback).
     scalar_columns: list[str] | None = None
-    # Fields to store as JSON TEXT (metadata lists/dicts)
     json_columns: list[str] = field(default_factory=list)
-    # Fields to extract into a separate child table
     child_tables: list[ChildTableSpec] = field(default_factory=list)
-    # Primary/unique search columns (for indexing, optional)
     index_columns: list[str] = field(default_factory=list)
 
-
-# --------------------------------------------------------------------------- #
-# Domain-specific schema definitions
-# --------------------------------------------------------------------------- #
 
 def _build_known_specs() -> dict[str, TableSpec]:
     """Returns a TableSpec dictionary for known domain_*.jsonl files."""
 
     specs: dict[str, TableSpec] = {}
 
-    # ---------------- domain_info.jsonl (single record, domain-level) -------
     specs["domain_info"] = TableSpec(
         table_name="domain_info",
         scalar_columns=[
@@ -68,12 +45,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
             "smb_signing_required", "ntlm_supported", "smart_card_required",
             "machine_account_quota", "risk_score", "highest_severity",
             "success", "count", "error",
-            # ── fsmo / password_policy / kerberos_policy dicts, flattened by
-            #    _flatten_known_dicts() into "<dict>__<subkey>" columns.
-            #    These MUST be listed here explicitly — since scalar_columns
-            #    is not None for this spec, _write_record() only writes keys
-            #    that appear in this list, so omitting them means they're
-            #    silently dropped even though they're computed. ──
             "fsmo__schema_master", "fsmo__naming_master", "fsmo__rid_master",
             "fsmo__pdc_emulator", "fsmo__infrastructure",
             "password_policy__min_length", "password_policy__complexity_enabled",
@@ -116,10 +87,7 @@ def _build_known_specs() -> dict[str, TableSpec]:
             ),
         ],
     )
-    # We add the fsmo / password_policy / kerberos_policy dicts as flat columns
-    # (these are processed at runtime via "_FLATTEN_DICTS", see below)
 
-    # ---------------- domain_users.jsonl -------------------------------------
     specs["domain_users"] = TableSpec(
         table_name="users",
         scalar_columns=[
@@ -141,7 +109,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
             "account_never_expires", "msds_resultant_pso", "pwd_expiry_time",
             "has_key_credential_link", "script_path", "home_directory",
             "home_drive",
-            # ── AD Recycle Bin / tombstone (users_dump.py tərəfindən yazılır) ──
             "deleted", "deleted_dn", "last_known_parent", "when_deleted",
         ],
         json_columns=[
@@ -155,7 +122,7 @@ def _build_known_specs() -> dict[str, TableSpec]:
                 source_key="member_of",
                 table_name="user_member_of",
                 parent_fk="user_rowid",
-                columns=None,  # simple string list -> "value" column
+                columns=None,  
             ),
             ChildTableSpec(
                 source_key="admin_rules",
@@ -170,7 +137,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
         index_columns=["sid", "username", "dn", "deleted"],
     )
 
-    # ---------------- domain_computers.jsonl ----------------------------------
     specs["domain_computers"] = TableSpec(
         table_name="computers",
         scalar_columns=[
@@ -199,12 +165,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
         index_columns=["sid", "computer_name", "dn"],
     )
 
-    # ---------------- domain_groups.jsonl --------------------------------------
-    # Real JSONL strukturu (get_all_group_members çıxışı):
-    #   Scalar: group_name, group_dn, group_sid, member_count,
-    #           member_users_count, is_empty
-    #   Child dict lists: members, member_users
-    #     hər element: {name, sid, dn, is_user, is_group, isaclprotected, domainsid}
     specs["domain_groups"] = TableSpec(
         table_name="groups",
         scalar_columns=[
@@ -220,7 +180,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
                 source_key="members",
                 table_name="group_direct_members",
                 parent_fk="group_rowid",
-                # {name, sid, dn, is_user, is_group, isaclprotected, domainsid}
                 columns={
                     "name":          "member_name",
                     "sid":           "member_sid",
@@ -235,7 +194,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
                 source_key="member_users",
                 table_name="group_member_users",
                 parent_fk="group_rowid",
-                # {name, sid, dn, is_user, is_group, isaclprotected, domainsid}
                 columns={
                     "name":          "member_name",
                     "sid":           "member_sid",
@@ -250,17 +208,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
         index_columns=["group_sid", "group_dn", "group_name"],
     )
 
-    # ---------------- domain_gpos.jsonl -----------------------------------------
-    # NOTE: column names below match the actual fields produced by the
-    # collector for domain_gpos.jsonl (verified against real sample data):
-    #   name, guid, display_name, description, dn, path, domain, domainsid,
-    #   created, modified, version, user_version, computer_version, flags,
-    #   user_settings_disabled, computer_settings_disabled, linked_count,
-    #   enforced, link_disabled, isaclprotected, owner_sid, owner_name,
-    #   highvalue. "managed_by", "risk_score", "high_risk", "orphaned",
-    #   "domain_name" are NOT present in the real data.
-    # list/dict fields not previously captured: all_cpasswords (cleartext
-    # GPP credentials — important!), ldap_dacl_aces, ou_inheritance, sysvol.
     specs["domain_gpos"] = TableSpec(
         table_name="gpos",
         scalar_columns=[
@@ -279,18 +226,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
         index_columns=["guid", "dn"],
     )
 
-    # ---------------- domain_ous.jsonl ------------------------------------------
-    # NOTE: column names below match the actual fields produced by the
-    # collector for domain_ous.jsonl (verified against real sample data):
-    #   objectguid/objectid (not object_guid/object_id), childous (not
-    #   child_ous, and it's a scalar JSON list, not a child table),
-    #   is_protected, type. "managed_by_name", "gp_options", "gpo_count",
-    #   "inherited_gpo_count", "high_risk", "risk_score", "domain_name" are
-    #   NOT present in the real data.
-    # Child list shapes also differ from the old spec:
-    #   linked_gpos / inherited_gpos -> {gpo_dn, gpo_guid, order, enforced}
-    #   privileged_users -> {sam_name, dn, sid} (no "cn")
-    #   privileged_computers -> {cn, dn, sid} (no "dns_name")
     specs["domain_ous"] = TableSpec(
         table_name="ous",
         scalar_columns=[
@@ -352,16 +287,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
         index_columns=["objectguid", "dn"],
     )
 
-    # ---------------- domain_trusts.jsonl ---------------------------------------
-    # NOTE: column names below match the actual fields produced by the
-    # collector for domain_trusts.jsonl (verified against real sample data):
-    #   partner (not trust_partner), flat_name, sid (not partner_sid),
-    #   trust_type/trust_type_raw, direction/direction_raw, inbound/outbound
-    #   (booleans, not is_inbound/is_outbound), attributes_raw, transitive,
-    #   forest, treat_as_external, sid_filtering_enabled, selective_auth,
-    #   forest_wide_auth, dangerous, when_created, when_changed. There is no
-    #   risk_score/highest_severity/risk_findings in the real data — instead
-    #   there's a "security_posture" list of {level, text} dicts.
     specs["domain_trusts"] = TableSpec(
         table_name="trusts",
         scalar_columns=[
@@ -390,7 +315,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
         index_columns=["partner", "sid", "flat_name"],
     )
 
-    # ---------------- domain_network.jsonl --------------------------------------
     specs["domain_network"] = TableSpec(
         table_name="network_hosts",
         scalar_columns=[
@@ -419,9 +343,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
         index_columns=["ipv4", "hostname", "ad_sid"],
     )
 
-    # Shared scalar/json columns for all ACE-type files.
-    # domain_aces / domain_dangerous_ace / domain_extended_rights all use
-    # the same schema as of the current data format.
     _ace_scalars = [
         "target_name", "target_dn", "target_sid", "target_type",
         "principal", "principal_sid", "principal_scope", "principal_is_disabled",
@@ -432,15 +353,12 @@ def _build_known_specs() -> dict[str, TableSpec]:
     _ace_json = ["rights", "edge_rights"]
     _ace_index = ["target_sid", "principal_sid", "is_edge"]
 
-    # ---------------- domain_aces.jsonl -----------------------------------------
     specs["domain_aces"] = TableSpec(
         table_name="aces",
         scalar_columns=_ace_scalars,
         json_columns=_ace_json,
         index_columns=_ace_index,
     )
-
-    # ---------------- domain_dangerous_ace.jsonl --------------------------------
     specs["domain_dangerous_ace"] = TableSpec(
         table_name="dangerous_ace",
         scalar_columns=_ace_scalars,
@@ -448,7 +366,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
         index_columns=_ace_index,
     )
 
-    # ---------------- domain_extended_rights.jsonl ------------------------------
     specs["domain_extended_rights"] = TableSpec(
         table_name="extended_rights",
         scalar_columns=_ace_scalars,
@@ -461,10 +378,6 @@ def _build_known_specs() -> dict[str, TableSpec]:
 
 KNOWN_SPECS = _build_known_specs()
 
-# --------------------------------------------------------------------------- #
-# Whitelisted files – ONLY these are ever written to the database.
-# Any other domain_*.jsonl files present in the directory are silently ignored.
-# --------------------------------------------------------------------------- #
 
 WHITELISTED_FILES: tuple[str, ...] = (
     "domain_info.jsonl",
@@ -479,7 +392,6 @@ WHITELISTED_FILES: tuple[str, ...] = (
     "domain_extended_rights.jsonl",
 )
 
-# Dict (struct) fields in domain_info.jsonl - expanded into flat columns
 _DOMAIN_INFO_FLATTEN_DICTS = {
     "fsmo": ["schema_master", "naming_master", "rid_master", "pdc_emulator",
              "infrastructure"],
@@ -491,26 +403,10 @@ _DOMAIN_INFO_FLATTEN_DICTS = {
                          "max_service_age_mins", "max_clock_skew_mins"],
 }
 
-
-
-# Fields that identify an envelope/metadata record (first line of each file).
-# These records contain run-time stats, not domain objects, and must be skipped.
 _ENVELOPE_KEYS = frozenset({"generated_at", "source", "success", "count", "error", "meta"})
 
 
 def _is_envelope(obj: dict, file_stem: str | None = None) -> bool:
-    """Returns True if the record looks like a file-level metadata envelope.
-
-    An envelope has at least 2 of the known envelope keys and none of the
-    typical domain-object keys (like 'dn', 'sid', 'username', etc.).
-
-    NOTE: domain_info.jsonl's real (non-envelope) record legitimately
-    carries success/count/error/meta/generated_at alongside the actual
-    domain payload (fqdn, netbios_name, domain_controllers, ...), so the
-    generic domain-field check above would misclassify it as an envelope
-    and drop it. For this file we additionally recognize domain_info-only
-    markers as proof of a real record.
-    """
     envelope_hits = sum(1 for k in obj if k in _ENVELOPE_KEYS)
     has_domain_fields = any(k in obj for k in ("dn", "sid", "username", "sam_account_name",
                                                 "computer_name", "object_sid", "trust_partner",
@@ -523,17 +419,6 @@ def _is_envelope(obj: dict, file_stem: str | None = None) -> bool:
 
 
 def iter_jsonl(path: Path, file_stem: str | None = None) -> Iterator[dict[str, Any]]:
-    """Reads a .jsonl file line by line and returns it as a dict generator.
-
-    Skips:
-    - Empty lines
-    - Unparseable lines (with a warning)
-    - Envelope/metadata records (the first-line summary that each file starts with)
-
-    file_stem (e.g. "domain_info") is passed to _is_envelope() so it can
-    apply file-specific rules for telling a real record apart from a pure
-    metadata envelope. Defaults to path.stem when not given.
-    """
     stem = file_stem if file_stem is not None else path.stem
     with path.open("r", encoding="utf-8") as fh:
         for line_no, raw_line in enumerate(fh, start=1):
@@ -556,17 +441,7 @@ def iter_jsonl(path: Path, file_stem: str | None = None) -> Iterator[dict[str, A
             yield obj
 
 
-# --------------------------------------------------------------------------- #
-# Value normalization (converting to a SQLite-writable form)
-# --------------------------------------------------------------------------- #
-
 def _to_sqlite_value(value: Any) -> Any:
-    """Converts a Python value into a type supported by SQLite.
-
-    bool  -> 0/1 (int)
-    list/dict -> JSON string
-    str/int/float/None -> unchanged
-    """
     if isinstance(value, bool):
         return int(value)
     if isinstance(value, (list, dict)):
@@ -575,7 +450,6 @@ def _to_sqlite_value(value: Any) -> Any:
 
 
 def _sqlite_column_type(value: Any) -> str:
-    """Infers the appropriate SQLite column type from a Python value, for automatic schema."""
     if isinstance(value, bool):
         return "INTEGER"
     if isinstance(value, int):
@@ -586,34 +460,17 @@ def _sqlite_column_type(value: Any) -> str:
 
 
 def _quote_ident(name: str) -> str:
-    """Safely quotes a SQLite identifier (table/column name)."""
     return '"' + name.replace('"', '""') + '"'
 
 
-# --------------------------------------------------------------------------- #
-# DB schema creation and writing
-# --------------------------------------------------------------------------- #
-
 class SqliteWriter:
-    """Manages table creation/insert operations over a SQLite connection."""
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
         self._created_tables: set[str] = set()
-        # Tracks known columns per table in memory (set for O(1) lookup).
-        # After the first CREATE/PRAGMA, only ALTER TABLE is issued for truly
-        # new columns — no repeated PRAGMA calls on every row.
         self._table_columns: dict[str, set[str]] = {}
 
     def ensure_table(self, table_name: str, column_types: dict[str, str]) -> None:
-        """Creates the table if it doesn't exist; adds any missing columns.
-
-        On the first call for a given table the full schema is resolved (either
-        CREATE TABLE or a PRAGMA introspection for pre-existing tables).
-        On every subsequent call only columns absent from the in-memory set are
-        added via ALTER TABLE — this handles generic/unknown files where
-        different rows may introduce new fields.
-        """
         cur = self.conn.cursor()
         if table_name not in self._created_tables:
             cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -642,7 +499,6 @@ class SqliteWriter:
                 self._table_columns[table_name] = existing_cols | set(column_types.keys())
             self._created_tables.add(table_name)
         else:
-            # Fast path: compare against in-memory column set, ALTER only if needed.
             known = self._table_columns[table_name]
             for col, ctype in column_types.items():
                 if col not in known:
@@ -653,7 +509,6 @@ class SqliteWriter:
                     known.add(col)
 
     def insert(self, table_name: str, row: dict[str, Any]) -> int:
-        """Inserts a row into a table, returns the new rowid (id)."""
         cols = list(row.keys())
         placeholders = ", ".join("?" for _ in cols)
         col_sql = ", ".join(_quote_ident(c) for c in cols)
@@ -674,14 +529,7 @@ class SqliteWriter:
             logger.warning("Could not create index (%s.%s): %s", table_name, column, exc)
 
 
-# --------------------------------------------------------------------------- #
-# Core logic for writing a record (parent + child tables)
-# --------------------------------------------------------------------------- #
-
 def _flatten_known_dicts(record: dict[str, Any], file_stem: str) -> dict[str, Any]:
-    """Converts nested dicts (fsmo, password_policy, kerberos_policy) in files
-    like domain_info into prefixed flat columns. For other files the record
-    is returned unchanged."""
     if file_stem != "domain_info":
         return record
     flat = dict(record)
@@ -702,12 +550,10 @@ def _write_child_rows(
         return
     for item in items:
         if spec.columns is None:
-            # simple scalar list -> a single "value" column
             row = {"value": _to_sqlite_value(item), spec.parent_fk: parent_rowid}
             col_types = {"value": _sqlite_column_type(item), spec.parent_fk: "INTEGER"}
         else:
             if not isinstance(item, dict):
-                # unexpected shape - store as a JSON string
                 row = {"raw": _to_sqlite_value(item), spec.parent_fk: parent_rowid}
                 col_types = {"raw": "TEXT", spec.parent_fk: "INTEGER"}
             else:
@@ -732,7 +578,6 @@ def _write_record(
     child_keys = {ct.source_key for ct in spec.child_tables}
     json_keys = set(spec.json_columns)
 
-    # Column list: use the explicit one if given, otherwise use all scalar fields
     if spec.scalar_columns is not None:
         scalar_keys = spec.scalar_columns
     else:
@@ -755,8 +600,6 @@ def _write_record(
         row[key] = _to_sqlite_value(val) if val is not None else None
         col_types[key] = "TEXT"
 
-    # In the generic fallback case, when there are no scalar_columns, also add
-    # the prefixed columns produced by the domain_info flattening
     if spec.scalar_columns is None:
         for key, val in record.items():
             if key in row or key in child_keys or key in json_keys:
@@ -774,13 +617,6 @@ def _write_record(
 
 
 def _read_domain_fqdn(input_dir: Path, pattern: str) -> str:
-    """Reads the domain FQDN from domain_info.jsonl in input_dir.
-
-    Raises FileNotFoundError if domain_info.jsonl is missing, and ValueError
-    if it exists but contains no usable 'fqdn' field. The `pattern` is used
-    only to decide whether a domain_info file is expected to participate in
-    this run at all (kept for symmetry with the rest of the pipeline).
-    """
     info_path = input_dir / "domain_info.jsonl"
     if not info_path.exists():
         raise FileNotFoundError(
@@ -803,28 +639,16 @@ def _read_domain_fqdn(input_dir: Path, pattern: str) -> str:
 
     return fqdn
 
-
 def _sanitize_fqdn_for_filename(fqdn: str) -> str:
-    """Turns 'warzone.oxsium.local' into 'warzone_oxsium_local'.
-
-    Any character that isn't alphanumeric, '_' or '-' is replaced with '_'
-    so the result is always a safe filename component.
-    """
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", fqdn.strip().lower())
     safe = re.sub(r"_+", "_", safe).strip("_")
     return safe or "unknown_domain"
 
 
 def _generic_spec_for_unknown_file(file_stem: str) -> TableSpec:
-    """Creates a generic TableSpec (everything as either scalar or JSON TEXT
-    columns) for a domain_*.jsonl file with an unknown schema."""
     table_name = file_stem.replace("domain_", "", 1) or file_stem
     return TableSpec(table_name=table_name, scalar_columns=None, json_columns=[])
 
-
-# --------------------------------------------------------------------------- #
-# Public API
-# --------------------------------------------------------------------------- #
 
 def convert_file(
     jsonl_path: str | Path,
@@ -832,21 +656,8 @@ def convert_file(
     spec: TableSpec | None = None,
     progress_cb: Callable[[int], None] | None = None,
 ) -> int:
-    """Writes a single domain_*.jsonl file to the given open SQLite connection.
-
-    Parameters
-    ----------
-    jsonl_path : path to the .jsonl file
-    conn       : open sqlite3.Connection (caller is responsible for commit)
-    spec       : TableSpec to use. If None, looked up by file name in
-                 KNOWN_SPECS; if not found, a generic spec is built.
-    progress_cb: optional callback invoked every N lines, receiving the
-                 number of lines read so far (for CLI progress display)
-
-    Returns: number of rows written
-    """
     jsonl_path = Path(jsonl_path)
-    file_stem = jsonl_path.stem  # "domain_users", etc.
+    file_stem = jsonl_path.stem 
 
     if spec is None:
         spec = KNOWN_SPECS.get(file_stem) or _generic_spec_for_unknown_file(file_stem)
@@ -869,21 +680,8 @@ def convert_file(
     return count
 
 
-
-
 def _inject_primary_group_members_sqlite(conn: sqlite3.Connection) -> int:
-    """
-    users.primary_group_sid əsasında group_direct_members və
-    group_member_users cədvəllərinə primary group üzvlərini əlavə edir.
-
-    LDAP 'member' atributu primary group üzvlərini qaytarmır —
-    buna görə JSONL-da bu üzvlər olmur. Bu funksiya SQLite-da
-    users → groups cross-reference edərək çatışan üzvləri doldurur.
-
-    Yalnız artıq mövcud olmayan (member_sid-ə görə) üzvlər əlavə edilir.
-    """
     try:
-        # users və groups cədvəlləri mövcuddurmu?
         tables = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()}
@@ -891,23 +689,19 @@ def _inject_primary_group_members_sqlite(conn: sqlite3.Connection) -> int:
                 'group_direct_members' in tables):
             return 0
 
-        # users cədvəlinin sütunlarını yoxla
         user_cols = {r[1] for r in conn.execute('PRAGMA table_info(users)').fetchall()}
         if 'primary_group_sid' not in user_cols:
             return 0
 
-        # qrupların rowid → group_sid xəritəsi
         group_map = {
-            row[1]: row[0]  # group_sid → rowid
+            row[1]: row[0] 
             for row in conn.execute('SELECT rowid, group_sid FROM groups WHERE group_sid IS NOT NULL').fetchall()
         }
 
-        # mövcud group_direct_members-dəki (group_rowid, member_sid) cütlüklər
         existing = set(conn.execute(
             'SELECT group_rowid, member_sid FROM group_direct_members WHERE member_sid IS NOT NULL'
         ).fetchall())
 
-        # users-dən primary group üzvlərini çək
         user_rows = conn.execute(
             'SELECT username, sid, dn, primary_group_sid FROM users '
             'WHERE primary_group_sid IS NOT NULL AND primary_group_sid != ""'
@@ -919,9 +713,9 @@ def _inject_primary_group_members_sqlite(conn: sqlite3.Connection) -> int:
         for username, sid, dn, pg_sid in user_rows:
             group_rowid = group_map.get(pg_sid)
             if group_rowid is None:
-                continue  # bu SID-ə uyğun qrup yoxdur
+                continue  
             if (group_rowid, sid) in existing:
-                continue  # artıq var
+                continue  
 
             dm_rows.append((group_rowid, username, sid, dn, 1, 0, 0, ''))
             mu_rows.append((group_rowid, username, sid, dn, 1, 0, 0, ''))
@@ -943,7 +737,6 @@ def _inject_primary_group_members_sqlite(conn: sqlite3.Connection) -> int:
             mu_rows,
         )
 
-        # member_count-u yenilə
         conn.execute("""
             UPDATE groups SET member_count = (
                 SELECT COUNT(*) FROM group_direct_members
@@ -976,42 +769,12 @@ def convert_directory(
     progress: bool = True,
     delete_source: bool = False,
 ) -> dict[str, int]:
-    """Converts all domain_*.jsonl files in a directory into a single SQLite
-    .db file.
-
-    Parameters
-    ----------
-    input_dir  : directory containing the domain_*.jsonl files
-    output_db  : path to the .db file to be created/written. If this file
-                 already exists, it is always deleted and recreated from
-                 scratch (this matters most when output_db was derived from
-                 the domain name: writing a second time for the same domain
-                 replaces the old .db rather than appending to it).
-    pattern    : glob pattern (default "domain_*.jsonl")
-    overwrite  : kept for backwards compatibility; no longer required for
-                 deletion to happen (output_db is now always replaced if it
-                 exists), but still accepted as a no-op flag.
-    progress   : if True, writes brief progress output to stderr for each file
-    delete_source : if True, every source .jsonl file that was written to
-                 the database successfully is deleted once its own commit
-                 has gone through. Each file is processed and committed in
-                 isolation: if one file fails, files already committed
-                 before it are still deleted, and the failing file (along
-                 with any files after it, since they are processed in
-                 order) is left in place. A summary of failures is logged
-                 either way and does not stop the rest of the files from
-                 being processed.
-
-    Returns: a dict of {table_name_or_filename: rows_written}
-    """
     input_dir = Path(input_dir)
     output_db = Path(output_db)
 
     if not input_dir.is_dir():
         raise FileNotFoundError(f"Directory not found: {input_dir}")
 
-    # Only process the explicitly whitelisted files; all other domain_*.jsonl
-    # files in the directory are intentionally ignored.
     files = [input_dir / name for name in WHITELISTED_FILES
              if (input_dir / name).exists()]
     if not files:
@@ -1043,14 +806,14 @@ def convert_directory(
             try:
                 count = convert_file(f, conn, spec=spec, progress_cb=_cb if progress else None)
                 if progress:
-                    print(file=sys.stderr)  # close the line
-                conn.commit()  # isolate this file's writes from the next file's
+                    print(file=sys.stderr) 
+                conn.commit() 
                 results[spec.table_name] = count
                 succeeded_files.append(f)
-            except Exception as exc:  # noqa: BLE001 - we want to isolate any failure
+            except Exception as exc:  
                 conn.rollback()
                 if progress:
-                    print(file=sys.stderr)  # close the partial progress line
+                    print(file=sys.stderr) 
                 logger.error("Failed to process %s: %s", f.name, exc)
                 failed.append((f, exc))
     finally:
@@ -1070,8 +833,6 @@ def convert_directory(
             ", ".join(f.name for f, _ in failed),
         )
 
-    # MƏRHƏLƏ 1: primary group üzvlərini users.primary_group_sid-dən inject et
-    # (domain_users.jsonl-dan oxunur, ayrıca LDAP sorğusu yoxdur)
     try:
         conn2 = sqlite3.connect(str(output_db))
         added = _inject_primary_group_members_sqlite(conn2)
@@ -1083,11 +844,6 @@ def convert_directory(
         logger.warning("Primary group injection skipped: %s", _pg_exc)
 
     return results
-
-
-# --------------------------------------------------------------------------- #
-# CLI
-# --------------------------------------------------------------------------- #
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -1152,7 +908,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.quiet:
-        log_level = logging.CRITICAL + 1  # effectively disables all logging
+        log_level = logging.CRITICAL + 1  
     elif args.verbose:
         log_level = logging.DEBUG
     else:

@@ -1,15 +1,3 @@
-/* ═══════════════════════════════════════════════════
-   14-zip-import.js
-   ZIP Import: server-side only.
-   Brauzerdə HEÇ bir parse/render edilmir (Client Side Render YOXDUR).
-   ZIP faylı birbaşa serverə yüklənir (POST /api/upload-zip), backend
-   onu Domain Object qovluğuna açır, sonra sqlite_engine.py ilə
-   domain_data.db faylına çevirir (POST /api/build-sqlite-db).
-   Cədvəllər/UI bu fayl tərəfindən doldurulmur — yalnız status
-   mesajları (log + toast) göstərilir.
-   ═══════════════════════════════════════════════════ */
-
-/* ── Dropzone helpers ── */
 function handleZipDrop(e) {
   const f = e.dataTransfer.files[0];
   if (f && f.name.endsWith('.zip')) setZipFile(f);
@@ -47,16 +35,11 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('srv-zip-import-btn').style.opacity = '0.45';
 });
 
-/* ── ZIP import state ── */
 const ZIP_IMPORT = {
   active: false,
   files:  [],
 };
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   Upload ZIP to server → backend Domain Object qovluğuna açır
-   (connection.py: POST /api/upload-zip)
-   ═══════════════════════════════════════════════════════════════════════════ */
 async function _uploadZipToServer(file, logLine) {
   const fd = new FormData();
   fd.append('file', file, file.name);
@@ -79,11 +62,6 @@ async function _uploadZipToServer(file, logLine) {
   return data;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   SQLite DB Build Trigger
-   ZIP servere yazıldıqdan sonra /api/build-sqlite-db endpoint-ini çağırır
-   ki, backend domain_data.db-ni qursun/yeniləsin.
-   ═══════════════════════════════════════════════════════════════════════════ */
 async function _triggerSqliteDbBuild(logLine) {
   logLine('[*] SQLite DB build triggered...', 'info');
   const resp = await fetch(`${API_BASE}/api/build-sqlite-db`, { method: 'POST' });
@@ -99,12 +77,6 @@ async function _triggerSqliteDbBuild(logLine) {
   return data;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   importZip() — server-side ZIP import.
-   Client-side parse/render YOXDUR. Yalnız:
-     1) ZIP-i serverə yükləyir → backend Domain Object qovluğuna açır
-     2) sqlite_engine.py-ı tetikləyir → domain_data.db qurulur
-   ═══════════════════════════════════════════════════════════════════════════ */
 async function importZip() {
   const fileInput = document.getElementById('srv-zip-file');
   const file      = fileInput && fileInput.files[0];
@@ -121,7 +93,6 @@ async function importZip() {
     log.scrollTop  = log.scrollHeight;
   };
 
-  /* ── Button → loading state ── */
   btn.disabled      = true;
   btn.style.opacity = '0.6';
   const origHTML    = btn.innerHTML;
@@ -142,28 +113,22 @@ async function importZip() {
   try {
     logLine(`[*] ${file.name} (${(file.size / 1024).toFixed(1)} KB) sending to server...`, 'info');
 
-    /* 1. ZIP-i serverə yüklə → backend Domain Object qovluğuna açır */
     const uploadResult = await _uploadZipToServer(file, logLine);
 
-    /* 2. sqlite_engine.py-ı tetiklə → domain_data.db qurulsun */
     await _triggerSqliteDbBuild(logLine);
 
     ZIP_IMPORT.active = true;
     ZIP_IMPORT.files  = uploadResult.extracted || [];
 
-    /* 3. sqlite_reader.py (port 8800) hazır olana qədər gözlə */
     logLine('[*] Waiting for sqlite_reader (port 8800)...', 'info');
     const dbReady = await _waitForDbReaderReady(90000, 1500);
 
     if (dbReady) {
-      /* 4. Offline rejimə keç — Connection state-i toxunulmaz qalır */
       state._zipOffline    = true;
       state.sessionStart   = state.sessionStart || Date.now();
 
-      /* Topbar-da "OFFLINE (ZIP)" badge-i göstər */
       if (typeof setConnState === 'function') setConnState('offline-zip');
 
-      /* 5. Bütün tab cache-lərini sıfırla və DB-dən yenidən yüklə */
       if (typeof refreshAllSectionsAfterConnect === 'function') {
         refreshAllSectionsAfterConnect();
       }
@@ -175,7 +140,6 @@ async function importZip() {
       addLog('ZIP import: DB reader timeout — manual tab refresh may be needed', 'warn');
     }
 
-    /* 6. Dropzone-u təmizlə */
     clearZip();
 
     logLine(`[+] ZIP import complete — ${uploadResult.count} files extracted`, 'ok');
@@ -196,9 +160,6 @@ async function importZip() {
   }
 }
 
-/* ═══════════════════════════════════════════════════
-   Reset ZIP import state when domain connects
-   ═══════════════════════════════════════════════════ */
 function zipOnDomainConnected() {
   ZIP_IMPORT.active    = false;
   ZIP_IMPORT.files     = [];

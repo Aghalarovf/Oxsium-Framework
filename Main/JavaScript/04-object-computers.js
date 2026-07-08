@@ -1,21 +1,9 @@
-/* ═══════════════════════════════════════════════════
-   04-computers.js
-   Computers tab: load, render, filter, detail panel.
-   Depends on: 00-globals.js, 01-core.js
-   ═══════════════════════════════════════════════════ */
-
 let computersFilter = 'all';
 let computersSearch = '';
 
-/* ── Select Domains (Computers tab) ──
-   Users tabındakı eyni konsepsiya: domain_data.db-dəki "trusts" cədvəlinin
-   "name" sahəsini + cari domenin adını göstərir və seçilmiş domenlərin
-   SID-inə (computers.domainsid) görə cədvəli filtrləyir.
-   SID decode helper-ləri (parsePythonBytesLiteralToArray, sidBytesToString,
-   normalizeTrustSid, domainNameToDcSuffix) 03-objects-users.js-də təyin
-   olunub və bu fayldan əvvəl yüklənir — burada təkrar yazılmır. */
-let computersDomainsListCache    = null;   // [{ name, isCurrent, sid }]
-let computersDomainsSelected     = null;   // Set<string> (lowercased domain names)
+
+let computersDomainsListCache    = null;
+let computersDomainsSelected     = null;
 let computersDomainsDropdownOpen = false;
 
 function guessCurrentDomainSidFromComputers() {
@@ -180,8 +168,7 @@ async function loadComputers() {
   document.getElementById('c-table-body').innerHTML = '';
   closeComputerDetail();
 
-  // Domen siyahısı (cari domen + trusts) yenidən yüklənsin — reconnect
-  // zamanı state.domain və ya connected domenin SID-i dəyişmiş ola bilər.
+
   computersDomainsListCache = null;
   computersDomainsSelected  = null;
 
@@ -194,7 +181,7 @@ async function loadComputers() {
     const resp = await fetch(url, { method: 'GET' });
     const data = await resp.json().catch(() => null);
     if (!resp.ok || !data) {
-      throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine xətası (HTTP ${resp.status})`);
+      throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine error (HTTP ${resp.status})`);
     }
 
     computersData = Array.isArray(data.records) ? data.records : (Array.isArray(data.rows) ? data.rows : []);
@@ -204,7 +191,7 @@ async function loadComputers() {
     setObjectCountStat('cnt-comp', total);
     document.getElementById('nav-computers-count').textContent = total;
     document.getElementById('computers-meta').textContent =
-      `${total} computers · mənbə: Oxsium SQLite Engine (.db)`;
+      `${total} computers · source: Oxsium SQLite Engine (.db)`;
 
     const dcComputer = computersData.find(c => c.is_domain_controller);
     const dcDns = dcComputer?.dns_name || dcComputer?.computer_name || '';
@@ -213,7 +200,7 @@ async function loadComputers() {
     }
 
     renderComputers();
-    addLog(`Computers sqlite_reader.py-dən yükləndi: ${total} sistem (Oxsium SQLite Engine)`, 'ok');
+    addLog(`Computers loaded from sqlite_reader.py: ${total} systems (Oxsium SQLite Engine)`, 'ok');
   } catch (err) {
     addLog(`Computers: ${err.message}`, 'err');
     document.getElementById('c-table-body').innerHTML = `<div class="c-empty"><p>${escapeHtml(err.message)}</p></div>`;

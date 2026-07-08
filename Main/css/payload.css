@@ -1,8 +1,3 @@
-/* ============================================================
-   payload.css — Gold Edition
-   ============================================================ */
-
-/* ── Payload Tab Bar ── */
 .payload-tab-bar {
   display: flex;
   gap: 4px;
@@ -45,7 +40,6 @@
   background: rgba(255,255,255,0.03);
 }
 
-/* Agent — altın yaşıl → açıq qızıl */
 .payload-tab-btn.active.agent {
   background: rgba(240,192,48,0.10);
   border-color: rgba(240,192,48,0.40);
@@ -57,7 +51,6 @@
   box-shadow: 0 0 6px rgba(240,192,48,0.80);
 }
 
-/* Beacon — bənövşəyi → altın-boz */
 .payload-tab-btn.active.beacon {
   background: rgba(168,140,80,0.10);
   border-color: rgba(168,140,80,0.40);
@@ -86,7 +79,6 @@
 .card-accent-bar.beacon { background: #f0b838; box-shadow: 0 0 5px rgba(240,190,60,0.6); }
 .card-accent-bar.cyan   { background: var(--accent); }
 
-/* ── Format Grid ── */
 .fmt-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -122,7 +114,6 @@
   color: #f0b838;
 }
 
-/* ── Transport Grid ── */
 .transport-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -153,7 +144,6 @@
   color: var(--accent);
 }
 
-/* ── Beacon Type Grid ── */
 .beacon-type-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -187,7 +177,6 @@
 .beacon-type-btn.selected .btype-name { color: #f0b838; }
 .beacon-type-btn.selected .btype-port { color: rgba(240,190,60,0.60); }
 
-/* ── SMB Section ── */
 .smb-section {
   background: rgba(240,190,60,0.05);
   border: 1px solid rgba(240,190,60,0.20);
@@ -200,7 +189,6 @@
 
 .smb-label { font-family: var(--head); font-size: 10px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: rgba(240,190,60,0.70); margin-bottom: 10px; }
 
-/* ── Toggle Switches ── */
 .toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 .toggle-item {
@@ -241,17 +229,14 @@
   transition: all 0.2s;
 }
 
-/* Agent (altın) */
 input:checked + .agent-track { border-color: rgba(240,192,48,0.55); background: rgba(240,192,48,0.12); }
 input:checked + .agent-track::after { background: var(--accent); left: 15px; box-shadow: 0 0 5px rgba(240,192,48,0.65); }
 
-/* Beacon (altın-boz) */
 input:checked + .beacon-track { border-color: rgba(240,190,60,0.50); background: rgba(240,190,60,0.12); }
 input:checked + .beacon-track::after { background: #f0b838; left: 15px; box-shadow: 0 0 5px rgba(240,190,60,0.65); }
 
 .toggle-label { font-size: 11px; color: var(--text-sec); font-family: var(--head); font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; }
 
-/* ── Range Slider ── */
 .range-wrap { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 
 .range-wrap input[type=range] {
@@ -270,7 +255,6 @@ input:checked + .beacon-track::after { background: #f0b838; left: 15px; box-shad
 
 .range-val { font-family: var(--mono); font-size: 11px; color: var(--text-hi); min-width: 38px; text-align: right; }
 
-/* ── Key Generator ── */
 .key-wrap { display: flex; gap: 6px; align-items: center; }
 .key-wrap .form-input { flex: 1; }
 
@@ -290,7 +274,6 @@ input:checked + .beacon-track::after { background: #f0b838; left: 15px; box-shad
 
 .key-gen-btn:hover { border-color: var(--accent-dim); color: var(--accent); transform: rotate(60deg); }
 
-/* ── Output Path ── */
 .output-path-wrap { display: flex; gap: 6px; align-items: center; }
 .output-path-wrap .form-input { flex: 1; }
 
@@ -312,7 +295,6 @@ input:checked + .beacon-track::after { background: #f0b838; left: 15px; box-shad
 
 .browse-btn:hover { border-color: rgba(240,192,48,0.30); color: var(--text-pri); }
 
-/* ── Generate Buttons ── */
 .btn-generate {
   height: 42px; flex: 1;
   border: none;

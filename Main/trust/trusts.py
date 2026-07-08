@@ -88,37 +88,12 @@ def decode_trust_type(value: int) -> str:
 
 
 def decode_trust_attributes(attr_val: int) -> dict:
-    """
-    trustAttributes bitfield-ini tam decode edir.
-
-    Bit dəyərləri MS-ADTS 2.2.16 (TRUST_ATTRIBUTE_* konstantları) əsasındadır;
-    bunlar Microsoft-un rəsmi spesifikasiyasıdır və koddakı kimi qalmalıdır:
-
-        0x00000001  TRUST_ATTRIBUTE_NON_TRANSITIVE
-        0x00000002  TRUST_ATTRIBUTE_UPLEVEL_ONLY
-        0x00000004  TRUST_ATTRIBUTE_QUARANTINED_DOMAIN          (SID Filtering)
-        0x00000008  TRUST_ATTRIBUTE_FOREST_TRANSITIVE
-        0x00000010  TRUST_ATTRIBUTE_CROSS_ORGANIZATION          (Selective Auth)
-        0x00000020  TRUST_ATTRIBUTE_WITHIN_FOREST
-        0x00000040  TRUST_ATTRIBUTE_TREAT_AS_EXTERNAL
-        0x00000080  TRUST_ATTRIBUTE_USES_RC4_ENCRYPTION
-        0x00000200  TRUST_ATTRIBUTE_CROSS_ORGANIZATION_NO_TGT_DELEGATION
-        0x00000400  TRUST_ATTRIBUTE_PIM_TRUST
-        0x00000800  TRUST_ATTRIBUTE_CROSS_ORGANIZATION_ENABLE_TGT_DELEGATION
-
-    Qeyd: 0x00000100 spesifikasiyada təyin olunmayıb (reserved), ona görə
-    burada yoxdur. Əgər başqa mənbədə fərqli bit dəyərləri görsəniz
-    (məs. NON_TRANSITIVE=0x4, FILTER_SIDS=0x40, TREAT_AS_EXTERNAL=0x400),
-    onlar səhvdir — yuxarıdakı dəyərlər rəsmi MS-ADTS sənədinə uyğundur və
-    real domain controller-lərdən gələn trustAttributes dəyərləri ilə
-    yalnız bu uyğunlaşma düzgün decode olunur.
-    """
     return {
         "NON_TRANSITIVE":                          bool(attr_val & 0x00000001),
         "UPLEVEL_ONLY":                             bool(attr_val & 0x00000002),
-        "QUARANTINED_DOMAIN":                       bool(attr_val & 0x00000004),  # SID Filtering
-        "FOREST_TRANSITIVE":                        bool(attr_val & 0x00000008),  # Forest trust
-        "CROSS_ORGANIZATION":                       bool(attr_val & 0x00000010),  # Selective Auth
+        "QUARANTINED_DOMAIN":                       bool(attr_val & 0x00000004), 
+        "FOREST_TRANSITIVE":                        bool(attr_val & 0x00000008), 
+        "CROSS_ORGANIZATION":                       bool(attr_val & 0x00000010), 
         "WITHIN_FOREST":                            bool(attr_val & 0x00000020),
         "TREAT_AS_EXTERNAL":                        bool(attr_val & 0x00000040),
         "USES_RC4_ENCRYPTION":                      bool(attr_val & 0x00000080),
@@ -129,21 +104,6 @@ def decode_trust_attributes(attr_val: int) -> dict:
 
 
 def decode_supported_encryption_types(value) -> dict:
-    """
-    msDS-SupportedEncryptionTypes bitmask-ini decode edir.
-
-    [MS-KILE] 2.2.7 əsasında Kerberos encryption type bit-ləri:
-        0x00000001  DES-CBC-CRC
-        0x00000002  DES-CBC-MD5
-        0x00000004  RC4-HMAC
-        0x00000008  AES128-CTS-HMAC-SHA1-96
-        0x00000010  AES256-CTS-HMAC-SHA1-96
-
-    Atribut təyin olunmayıbsa (None), trust üçün açıq şəkildə konfiqurasiya
-    edilməyib deməkdir — DC defolt olaraq RC4+AES-ə icazə verə bilər, amma
-    bunu bilmək üçün ayrıca yoxlama lazımdır, ona görə supported_raw=None
-    və flags boş qaytarılır, "unset" "heç biri aktiv deyil"dən fərqləndirilir.
-    """
     raw = safe_int(value, None) if value is not None else None
     if normalize_value(value) is None:
         return {
@@ -185,23 +145,8 @@ def assess_security_posture(
     selective_auth: bool,
     is_forest: bool,
 ) -> dict:
-    """
-    Ports the risk assessment logic from the PS1 script into Python.
-
-    Attack vectors evaluated:
-      1. ExtraSids / SID-History Golden Ticket forgery  →  SID Filtering disabled
-      2. Coercion (PrinterBug/PetitPotam) + Unconstrained Delegation TGT capture
-           a) Parent-Child trust (WITHIN_FOREST)        →  always at risk by design
-           b) Forest/External trust + TGT Delegation    →  depends on delegation flag
-      3. Selective Authentication disabled              →  overly broad auth surface
-
-    Returns:
-        risks      — list of {level, text} dicts for each finding
-        dangerous  — True if at least one HIGH-level risk is present
-    """
     risks: list[dict] = []
 
-    # ── 1. SID History / ExtraSids / Golden Ticket ───────────────────────────
     if not sid_filtering_enabled:
         risks.append({
             "level": "HIGH",
@@ -212,7 +157,6 @@ def assess_security_posture(
             ),
         })
 
-    # ── 2a. Parent-Child (WITHIN_FOREST) — Coercion + Unconstrained Delegation ─
     if within_forest:
         risks.append({
             "level": "HIGH",
@@ -222,7 +166,7 @@ def assess_security_posture(
                 "with Unconstrained Delegation TGT capture"
             ),
         })
-    # ── 2b. Forest/External trust — TGT Delegation flag is set ────────────────
+
     elif tgt_delegation_enabled:
         risks.append({
             "level": "HIGH",
@@ -241,7 +185,6 @@ def assess_security_posture(
             ),
         })
 
-    # ── 3. Selective Authentication ───────────────────────────────────────────
     if not selective_auth and not within_forest:
         risks.append({
             "level": "MEDIUM",
@@ -263,11 +206,6 @@ def assess_security_posture(
 
 
 def format_object_guid(value) -> str:
-    """
-    objectGUID-i standart GUID string formatına çevirir (8-4-4-4-12 hex).
-    ldap3 adətən bunu artıq formatlanmış string kimi qaytarır, amma raw
-    bytes gəlsə (16 bayt, little-endian first three fields) düzgün decode edir.
-    """
     normalized = normalize_value(value)
     if normalized is None:
         return ""
@@ -282,17 +220,11 @@ def format_object_guid(value) -> str:
 
 
 def _parse_forest_trust_info(raw) -> list:
-    """
-    msDS-TrustForestTrustInfo atributunu oxuyur.
-    Binary blob-dur; parse edilə bilmirsə raw hex string kimi saxlanılır.
-    Forest trust-larda trusted namespace/SID məlumatlarını ehtiva edir.
-    """
     if raw is None:
         return []
     if isinstance(raw, (bytearray, memoryview)):
         raw = bytes(raw)
     if isinstance(raw, bytes) and raw:
-        # Binary blob — hex string kimi saxla (tam parser ayrıca modul tələb edir)
         return [raw.hex()]
     if isinstance(raw, list):
         return [str(v) for v in raw if v]
@@ -325,11 +257,11 @@ def get_domain_trusts(ip, domain, username, password, config):
             "cn", "distinguishedName", "flatName", "trustPartner",
             "trustDirection", "trustType", "trustAttributes",
             "securityIdentifier", "whenCreated", "whenChanged",
-            "description",                  # Trust açıqlaması
-            "msDS-TrustForestTrustInfo",    # Forest trust namespace/SID məlumatları
-            "msDS-SupportedEncryptionTypes",  # Trust üzrə icazəli Kerberos enc. tipləri
-            "objectGUID",                    # Sabit unikal identifikator
-            "uSNCreated", "uSNChanged",      # Replikasiya sıra nömrələri (dəyişiklik izi)
+            "description",                 
+            "msDS-TrustForestTrustInfo",  
+            "msDS-SupportedEncryptionTypes", 
+            "objectGUID",                 
+            "uSNCreated", "uSNChanged",   
         ]
 
         conn.search(
@@ -352,56 +284,28 @@ def get_domain_trusts(ip, domain, username, password, config):
             type_val      = safe_int(get_attr("trustType"), 0)
             attr_val      = safe_int(get_attr("trustAttributes"), 0)
 
-            # ── Decoded flags ────────────────────────────────────────────────
             flags = decode_trust_attributes(attr_val)
 
             is_inbound    = direction_val in (1, 3)
             is_outbound   = direction_val in (2, 3)
             is_forest     = flags["FOREST_TRANSITIVE"] or type_val == 2
             is_transitive = not flags["NON_TRANSITIVE"] or is_forest
-
-            # ── SID Filtering (Quarantine) ───────────────────────────────────
-            # QUARANTINED_DOMAIN flag-i set-dirsə SID filtering aktiv deməkdir;
-            # bu zaman cross-domain SID-lər trust üzərindən keçə bilməz
             sid_filtering_enabled = flags["QUARANTINED_DOMAIN"]
-
-            # ── TREAT_AS_EXTERNAL ────────────────────────────────────────────
-            # Forest trust olsa belə external trust kimi davranılır;
-            # SID filtering daha sərt tətbiq edilir
             treat_as_external = flags["TREAT_AS_EXTERNAL"]
-
-            # ── Selective Authentication ─────────────────────────────────────
-            # CROSS_ORGANIZATION flag-i set-dirsə yalnız icazə verilmiş
-            # hesablar authenticate ola bilər (forest-wide deyil)
             selective_auth = flags["CROSS_ORGANIZATION"]
-
-            # ── Forest-wide Authentication ───────────────────────────────────
-            # Selective auth yoxdursa və forest trust-dursa bütün hesablar
-            # authenticate ola bilər
             forest_wide_auth = is_forest and not selective_auth
-
-            # ── msDS-TrustForestTrustInfo ────────────────────────────────────
             fti_raw = get_attr("msDS-TrustForestTrustInfo")
             forest_trust_info = _parse_forest_trust_info(fti_raw)
-
-            # ── msDS-SupportedEncryptionTypes ────────────────────────────────
             enc_types = decode_supported_encryption_types(get_attr("msDS-SupportedEncryptionTypes"))
-
-            # ── objectGUID / USN ──────────────────────────────────────────────
             object_guid = format_object_guid(get_attr("objectGUID"))
             usn_created = safe_int(get_attr("uSNCreated"), None)
             usn_changed = safe_int(get_attr("uSNChanged"), None)
 
-            # ── TGT Delegation ───────────────────────────────────────────────
-            # 0x800 (CROSS_ORGANIZATION_ENABLE_TGT_DELEGATION) açıqdırsa
-            # və ya 0x200 (CROSS_ORG_NO_TGT_DELEGATION) yoxdursa TGT
-            # delegation aktiv sayılır (within-forest üçün həmişə True).
             tgt_delegation_enabled = (
                 flags["CROSS_ORGANIZATION_ENABLE_TGT_DELEGATION"]
                 or not flags["CROSS_ORG_NO_TGT_DELEGATION"]
             )
 
-            # ── Security Posture Qiymətləndirməsi (PS1 məntiqindən) ──────────
             posture = assess_security_posture(
                 sid_filtering_enabled=sid_filtering_enabled,
                 within_forest=flags["WITHIN_FOREST"],
@@ -410,7 +314,6 @@ def get_domain_trusts(ip, domain, username, password, config):
                 is_forest=is_forest,
             )
 
-            # ── risk_controls ────────────────────────────────────────────────
             risk_controls = []
             if is_inbound:
                 risk_controls.append("Inbound Trust")
@@ -450,7 +353,7 @@ def get_domain_trusts(ip, domain, username, password, config):
                 "trust_type":           decode_trust_type(type_val),
                 "trust_type_raw":       type_val,
                 "attributes_raw":       attr_val,
-                "attributes_decoded":   flags,              # Bütün flag-lər açıq şəkildə
+                "attributes_decoded":   flags,              
                 "inbound":              is_inbound,
                 "outbound":             is_outbound,
                 "transitive":           is_transitive,
@@ -468,7 +371,6 @@ def get_domain_trusts(ip, domain, username, password, config):
                 "when_created":         ldap_timestamp_to_iso(get_attr("whenCreated")),
                 "when_changed":         ldap_timestamp_to_iso(get_attr("whenChanged")),
                 "risk_controls":        risk_controls,
-                # ── PS1 inteqrasiyası: security posture + dangerous ──────
                 "security_posture":     posture["risks"],
                 "dangerous":            posture["dangerous"],
             })
@@ -477,13 +379,11 @@ def get_domain_trusts(ip, domain, username, password, config):
 
         result = {"success": True, "trusts": trusts, "count": len(trusts)}
 
-        # ── domain_trusts.jsonl-a yaz ────────────────────────────────────────
         output_path = os.path.join(
             str(config.DOMAIN_OBJECT_DIR), "domain_trusts.jsonl"
         )
         try:
             with open(output_path, "w", encoding="utf-8") as f:
-                # Meta sətir: success + count + dangerous_count
                 dangerous_count = sum(1 for t in result["trusts"] if t.get("dangerous"))
                 meta = {
                     "success":         result["success"],
@@ -491,7 +391,6 @@ def get_domain_trusts(ip, domain, username, password, config):
                     "dangerous_count": dangerous_count,
                 }
                 f.write(json.dumps(meta, ensure_ascii=False, default=str) + "\n")
-                # Hər trust ayrı sətirdə
                 for trust in result["trusts"]:
                     f.write(json.dumps(trust, ensure_ascii=False, default=str) + "\n")
         except Exception as write_exc:

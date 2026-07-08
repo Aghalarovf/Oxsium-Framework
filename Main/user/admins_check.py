@@ -44,54 +44,47 @@ _GUID_DS_REPLICATION_GET_CHANGES_IN_FILTERED_SET   = "89e95b76-444d-4c62-991a-0f
 
 _RIGHT_ADS_RIGHT_DS_WRITE_PROP = 0x20
 
-# Rule 1 — Confirmed high-privilege domain groups.
-# Membership here = definitive admin.  Used by _rule_01_domain_admins.
+
 _RULE1_RIDS = frozenset({
-    _RID_DOMAIN_ADMINS,       # 512 — full domain control
-    _RID_ENTERPRISE_ADMINS,   # 519 — forest-wide control
-    _RID_SCHEMA_ADMINS,       # 518 — schema modification rights
-    _RID_BUILTIN_ADMINS,      # 544 — local admin on every DC
-    _RID_DOMAIN_CONTROLLERS,  # 516 — full control over DC computer objects, plus local admin on DCs
-    _RID_ENTERPRISE_READONLY_CONTROLLERS, # 498 — read-only access to DC computer objects, plus local admin on DCs 
-    _RID_ONLY_DOMAIN_CONTROLLERS, # 521 — same as Domain Controllers but without the local admin rights on DCs (exists in some Windows versions)
+    _RID_DOMAIN_ADMINS,
+    _RID_ENTERPRISE_ADMINS,
+    _RID_SCHEMA_ADMINS,
+    _RID_BUILTIN_ADMINS,
+    _RID_DOMAIN_CONTROLLERS,
+    _RID_ENTERPRISE_READONLY_CONTROLLERS,
+    _RID_ONLY_DOMAIN_CONTROLLERS,
 })
 
-# Rule 2 — Operator groups that carry significant privilege but are not
-# full domain admins.  Used by _rule_02_operator_groups.
+
 _RULE2_RIDS = frozenset({
-    _RID_ACCOUNT_OPERATORS,      # 548 — manage user/group accounts
-    _RID_SERVER_OPERATORS,       # 549 — manage DC services & shares
-    _RID_BACKUP_OPERATORS,       # 551 — bypass NTFS ACLs for backup
-    _RID_GROUP_POLICY_CREATORS,  # 520 — create & edit GPOs
-    _RID_PRINT_OPERATORS,        # 550 — load drivers on DCs
-    _RID_HYPERV_ADMINISTRATORS,  # 578 — Hyper-V Administrators (real risk only if a DC is virtualized on a Hyper-V host managed by this group)
-    _RID_KEY_ADMINS, #526 - Key Admins - manage BitLocker keys and other KMS-related functions
-    _RID_ENTERPRISE_KEY_ADMINS, #527 - Enterprise Key Admins - manage BitLocker keys and other KMS-related functions at the enterprise level
-    _RID_INCOMING_FOREST_TRUST_BUILDERS, # 557 - Incoming Forest Trust Builders - can create incoming one-way forest trusts (trust-abuse vector)
+    _RID_ACCOUNT_OPERATORS,
+    _RID_SERVER_OPERATORS,
+    _RID_BACKUP_OPERATORS,
+    _RID_GROUP_POLICY_CREATORS,
+    _RID_PRINT_OPERATORS,
+    _RID_HYPERV_ADMINISTRATORS,
+    _RID_KEY_ADMINS,
+    _RID_ENTERPRISE_KEY_ADMINS,
+    _RID_INCOMING_FOREST_TRUST_BUILDERS,
 })
 
-# Combined set kept for helpers that need to check either category.
+
 _PRIVILEGED_RIDS = _RULE1_RIDS | _RULE2_RIDS
 
-# ---------------------------------------------------------------------------
-# Rule 14 — Privileged Primary Group RIDs
-# ---------------------------------------------------------------------------
-# Bir istifadəçinin primaryGroupID atributu bu RID-lərdən birinə bərabər
-# olarsa, o, memberOf siyahısında görünmədən imtiyazlı qrupa mənsub sayılır.
-# Bu, gizli admin membership-in ən çox istifadə olunan üsullarından biridir.
+
 PRIVILEGED_PRIMARY_GROUP_RIDS: dict[int, str] = {
-    512: "Domain Admins — Ən kritik. Domain üzərində tam nəzarət; memberOf-da görünməyə bilər.",
-    519: "Enterprise Admins — Forest (meşə) səviyyəsində tam idarəetmə.",
-    520: "Schema Admins — AD strukturunu (schema) dəyişmək hüququ.",
-    517: "Cert Publishers — AD CS ilə bağlı hücumlar üçün kritik (sertifikat buraxmaq hüququ).",
-    544: "Administrators (Built-in) — Lokal admin + domain səviyyəli idarəetmə.",
-    548: "Account Operators — Digər istifadəçilərin parollarını dəyişmə və hesab idarəetmə.",
-    549: "Server Operators — DC-lərə daxil olmaq və xidmətləri dayandırmaq hüququ.",
-    551: "Backup Operators — Fayl icazələrindən asılı olmayaraq NTDS.dit oxumaq hüququ.",
-    516: "Domain Controllers — Kompüter deyilsə ciddi konfiqurasiya səhvidir.",
+    512: "Domain Admins — Most critical. Full control over the domain; may not appear in memberOf.",
+    519: "Enterprise Admins — Full forest-level administration.",
+    520: "Schema Admins — Right to modify the AD schema.",
+    517: "Cert Publishers — Critical for AD CS-related attacks (right to issue certificates).",
+    544: "Administrators (Built-in) — Local admin plus domain-level administration.",
+    548: "Account Operators — Can change other users' passwords and manage accounts.",
+    549: "Server Operators — Right to log on to DCs and stop services.",
+    551: "Backup Operators — Right to read NTDS.dit regardless of file permissions.",
+    516: "Domain Controllers — A serious misconfiguration if not a computer object.",
 }
 
-# Human-readable labels for each RID — used in match details.
+
 _RID_LABEL: dict[int, str] = {
     _RID_DOMAIN_ADMINS:         "Domain Admins",
     _RID_ENTERPRISE_ADMINS:     "Enterprise Admins",
@@ -109,7 +102,7 @@ _RID_LABEL: dict[int, str] = {
     _RID_ENTERPRISE_READONLY_CONTROLLERS: "Enterprise Read-Only Domain Controllers",
     _RID_ONLY_DOMAIN_CONTROLLERS: "Only Domain Controllers",
     _RID_INCOMING_FOREST_TRUST_BUILDERS: "Incoming Forest Trust Builders",
-    # Rule 14 — əlavə RID labels
+
     517: "Cert Publishers (primaryGroup)",
     520: "Schema Admins (primaryGroup)",
 }
@@ -202,7 +195,6 @@ def _collect_privileged_group_sids(ctx: dict) -> set[str]:
 
 
 def _collect_rule1_group_sids(ctx: dict) -> set[str]:
-    """Return SIDs of groups whose RID falls in _RULE1_RIDS (Domain/Enterprise/Schema/Builtin Admins)."""
     privileged: set[str] = set()
     for group in ctx.get("groups", []):
         try:
@@ -217,7 +209,6 @@ def _collect_rule1_group_sids(ctx: dict) -> set[str]:
 
 
 def _collect_rule2_group_sids(ctx: dict) -> set[str]:
-    """Return SIDs of groups whose RID falls in _RULE2_RIDS (Operator groups)."""
     privileged: set[str] = set()
     for group in ctx.get("groups", []):
         try:
@@ -251,7 +242,7 @@ def _is_nested_member(
         for member in group_index.get(psid, set()):
             if member in visited:
                 continue
-            if member not in group_index:          # not a group, skip
+            if member not in group_index:
                 continue
             visited.add(member)
             if _is_nested_member(target, {member}, group_index, visited):
@@ -266,13 +257,13 @@ def _rule_01_domain_admins(ctx: dict) -> bool:
         matched_groups: list[str] = []
         match_sources:  list[str] = []
 
-        # ── 1. Primary group ─────────────────────────────────────────────────
+
         primary_rid = _safe_int(ctx.get("primary_group_id"))
         if primary_rid and primary_rid in _RULE1_RIDS:
             matched_rids.append(primary_rid)
             matched_groups.append(_RID_LABEL.get(primary_rid, str(primary_rid)))
             match_sources.append("primary_group")
-            # primary group has no separate SID in ctx, mark as synthesised
+
             user_sid = _safe_str(ctx.get("user_sid"))
             if user_sid and "-" in user_sid:
                 domain_sid = user_sid.rsplit("-", 1)[0]
@@ -280,19 +271,19 @@ def _rule_01_domain_admins(ctx: dict) -> bool:
             else:
                 matched_sids.append(f"<domain>-{primary_rid}")
 
-        # ── 2. Token / transitive group SIDs ─────────────────────────────────
+
         group_sids = set(ctx.get("all_group_sids") or set())
         for sid in group_sids:
             r = _rid(sid)
             if r is not None and r in _RULE1_RIDS:
                 sid_upper = _safe_str(sid).upper()
-                if sid_upper not in matched_sids:          # deduplicate
+                if sid_upper not in matched_sids:
                     matched_rids.append(r)
                     matched_sids.append(sid_upper)
                     matched_groups.append(_RID_LABEL.get(r, str(r)))
                     match_sources.append("token_group")
 
-        # ── 3. User's own SID (rare but valid) ───────────────────────────────
+
         user_sid = _safe_str(ctx.get("user_sid")).upper()
         if user_sid:
             r = _rid(user_sid)
@@ -324,7 +315,7 @@ def _rule_02_operator_groups(ctx: dict) -> bool:
         matched_groups: list[str] = []
         match_sources:  list[str] = []
 
-        # ── 1. Primary group ─────────────────────────────────────────────────
+
         primary_rid = _safe_int(ctx.get("primary_group_id"))
         if primary_rid and primary_rid in _RULE2_RIDS:
             matched_rids.append(primary_rid)
@@ -337,7 +328,7 @@ def _rule_02_operator_groups(ctx: dict) -> bool:
             else:
                 matched_sids.append(f"<domain>-{primary_rid}")
 
-        # ── 2. Token / transitive group SIDs ─────────────────────────────────
+
         group_sids = set(ctx.get("all_group_sids") or set())
         for sid in group_sids:
             r = _rid(sid)
@@ -349,7 +340,7 @@ def _rule_02_operator_groups(ctx: dict) -> bool:
                     matched_groups.append(_RID_LABEL.get(r, str(r)))
                     match_sources.append("token_group")
 
-        # ── 3. User's own SID ────────────────────────────────────────────────
+
         user_sid = _safe_str(ctx.get("user_sid")).upper()
         if user_sid:
             r = _rid(user_sid)
@@ -383,7 +374,7 @@ def _rule_03_generic_all_domain_root(ctx):
             ("GenericAll",    _GENERIC_ALL_MASK),
             ("WriteDACL",     _RIGHT_WRITE_DACL),
             ("WriteOwner",    _RIGHT_WRITE_OWNER),
-            ("GenericWrite",  0x40000000),                  # ActiveDirectoryRights.GenericWrite
+            ("GenericWrite",  0x40000000),
             ("WriteProperty", _RIGHT_ADS_RIGHT_DS_WRITE_PROP),
         )
 
@@ -415,37 +406,14 @@ def _rule_03_generic_all_domain_root(ctx):
 
 
 def _rule_04_dcsync_get_changes_all(ctx):
-    """DCSync yoxlaması — domain root VƏ Configuration NC üzərindən.
 
-    DÜZƏLİŞ 1 (AND məntiqi): Əsl DCSync hücumu eyni identity-yə HƏM
-    DS-Replication-Get-Changes (1131f6aa), HƏM DƏ DS-Replication-Get-
-    Changes-All (1131f6ad) hüquqlarının birgə verilməsini tələb edir.
-    Tək biri (məsələn yalnız Get-Changes) sirr çıxarmaq üçün kifayət
-    deyil. Əvvəlki versiya OR məntiqi ilə false positive verirdi.
-
-    DÜZƏLİŞ 2 (Configuration NC kor nöqtəsi): Replication hüquqları
-    domain root-da deyil, Configuration NC kökündə (CN=Configuration,
-    <forest-root-dn>) verilə bilər. Bu, real, lakin az rast gəlinən
-    bir kor nöqtə idi — yalnız domain_root_aces yoxlananda buradan
-    keçən imtiyazlar görünmürdü. İndi hər iki NC ACL siyahısı yoxlanır.
-
-    DS-Replication-Get-Changes-In-Filtered-Set (89e95b76) tək başına
-    kifayət deyil (yalnız RODC filtered-attribute replikasiyası);
-    AND şərtinə daxil edilmir.
-
-    Üç yolla aşkarlanır (hər iki NC üzərindən):
-      1. GenericAll (0x000F01FF) — implicit olaraq hər iki hüququ əhatə edir
-      2. AllExtendedRights (0x100) + boş GUID — blanket, implicit hər ikisi
-      3. Eyni identity üçün HƏM Get-Changes, HƏM Get-Changes-All GUID-ləri
-    """
-    # ── Precomputed flag (online enumeration tərəfindən doldurulur) ───────────
     try:
         if bool(ctx.get("has_dcsync_right")):
             return True
     except Exception:
         pass
 
-    # ── Identities: user SID + bütün transitiv qrup SID-ləri ─────────────────
+
     try:
         identities = {_safe_str(i).upper() for i in _get_identities(ctx) if i}
     except Exception:
@@ -461,7 +429,6 @@ def _rule_04_dcsync_get_changes_all(ctx):
     })
 
     def _check_aces_for_dcsync(aces) -> bool:
-        """Verilmiş ACE siyahısında bu identity üçün DCSync aşkarlayır."""
         matched_guids: set[str] = set()
         for ace in aces:
             try:
@@ -480,19 +447,19 @@ def _rule_04_dcsync_get_changes_all(ctx):
                     ace.get("object_type") or ace.get("object_guid") or ""
                 ).lower().strip()
 
-                # Yoxlama 1: GenericAll tam mask
+
                 if (mask & _GENERIC_ALL_MASK) == _GENERIC_ALL_MASK:
                     return True
 
-                # Yoxlama 2 + 3: AllExtendedRights biti lazımdır
+
                 if not (mask & _RIGHT_ALL_EXTENDED):
                     continue
 
-                # Yoxlama 2: Blanket AllExtendedRights (GUID yoxdur)
+
                 if not obj_type:
                     return True
 
-                # Yoxlama 3: GUID-i yığ — hər ikisi lazımdır
+
                 if obj_type in _DCSYNC_GUIDS:
                     matched_guids.add(obj_type)
 
@@ -505,11 +472,11 @@ def _rule_04_dcsync_get_changes_all(ctx):
         )
 
     try:
-        # ── Domain root NC ────────────────────────────────────────────────────
+
         if _check_aces_for_dcsync(_get_aces(ctx, "domain_root_aces")):
             return True
 
-        # ── Configuration NC root — əvvəllər yoxlanmayan kor nöqtə ──────────
+
         if _check_aces_for_dcsync(_get_aces(ctx, "configuration_root_aces")):
             return True
 
@@ -523,7 +490,7 @@ def _rule_06_adminsdholder_generic_all(ctx):
         aces       = _get_aces(ctx, "adminsdholder_aces")
         identities = _get_identities(ctx)
 
-        # Rights masks to check: (name, mask)
+
         _DANGEROUS_RIGHTS = (
             ("GenericAll",    _GENERIC_ALL_MASK),
             ("WriteOwner",    _RIGHT_WRITE_OWNER),
@@ -542,11 +509,11 @@ def _rule_06_adminsdholder_generic_all(ctx):
 
                 mask = _safe_int(ace.get("mask") or ace.get("access_mask"))
 
-                # GenericAll — full mask match + 0x10000000 (GA bit)
+
                 if (mask & _GENERIC_ALL_MASK) == _GENERIC_ALL_MASK or (mask & 0x10000000):
                     return True
 
-                # Other dangerous rights
+
                 for _right_name, right_mask in _DANGEROUS_RIGHTS[1:]:
                     if mask & right_mask:
                         return True
@@ -559,20 +526,13 @@ def _rule_06_adminsdholder_generic_all(ctx):
         return False
 
 def _rule_07_all_extended_rights_domain(ctx):
-    """AllExtendedRights yoxlaması — domain root VƏ Configuration NC üzərindən.
-
-    Replication extended rights domain root-da deyil, Configuration NC-nin
-    kökündə (CN=Configuration,...) verilə bilər. Əvvəlki versiya yalnız
-    domain_root_aces-i yoxlayırdı; bu, real bir kor nöqtə idi. İndi
-    configuration_root_aces də eyni məntiqlə yoxlanır.
-    """
     try:
         if bool(ctx.get("has_all_extended_rights_on_domain")):
             return True
     except Exception:
         pass
 
-    # GUIDs that are dangerous as a scoped AllExtendedRights on the domain root
+
     _DR_EXTENDED_GUIDS = frozenset({
         _GUID_DS_REPLICATION_GET_CHANGES,
         _GUID_DS_REPLICATION_GET_CHANGES_ALL,
@@ -616,11 +576,11 @@ def _rule_07_all_extended_rights_domain(ctx):
         identities = _get_identities(ctx)
         identities_upper = {_safe_str(i).upper() for i in identities}
 
-        # ── Domain root NC ────────────────────────────────────────────────────
+
         if _check_extended_rights_aces(_get_aces(ctx, "domain_root_aces"), identities_upper):
             return True
 
-        # ── Configuration NC root — əvvəllər yoxlanmayan kor nöqtə ──────────
+
         if _check_extended_rights_aces(_get_aces(ctx, "configuration_root_aces"), identities_upper):
             return True
 
@@ -630,7 +590,7 @@ def _rule_07_all_extended_rights_domain(ctx):
 
 def _rule_08_nested_to_domain_admins(ctx):
     try:
-        # Fast-path yalnız Rule 1 SID-lərinə real uyğunluq varsa keçərlidir.
+
         if ctx.get("is_nested_admin"):
             identities = _get_identities(ctx)
             group_index = _build_group_sid_index(ctx)
@@ -674,7 +634,7 @@ def _rule_10_dns_admins(ctx):
         names = [_safe_str(g).lower() for g in (ctx.get("member_of_names") or [])]
         if _group_names_contain(names, "dnsadmins"):
             return True
-        
+
         dns_admins_sids: set[str] = set()
         for group in ctx.get("groups", []):
             try:
@@ -694,7 +654,7 @@ def _rule_10_dns_admins(ctx):
         return False
     except Exception:
         return False
-    
+
 def _rule_12_nested_to_operator_groups(ctx):
     try:
         if ctx.get("is_nested_operator_admin"):
@@ -759,8 +719,8 @@ def _rule_14_privileged_primary_group(ctx: dict) -> bool:
             "primary_group_label": _RID_LABEL.get(primary_rid, str(primary_rid)),
             "description": PRIVILEGED_PRIMARY_GROUP_RIDS[primary_rid],
             "note": (
-                "Bu üzv memberOf atributunda görünmür — "
-                "standart qrup üzvlüyü yoxlamalarından gizli qala bilər."
+                "This membership does not appear in the memberOf attribute — "
+                "it can remain hidden from standard group-membership checks."
             ),
         }
         return True
@@ -781,7 +741,7 @@ _RULES = [
     (10, "tier1",    "DnsAdmins member — DLL injection on DC",                             _rule_10_dns_admins),
     (12, "tier1",    "Nested group -> Operator Groups (Rule 2 groups)",                    _rule_12_nested_to_operator_groups),
     (13, "absolute", "krbtgt account (RID 502) — always absolute admin",                    _rule_13_krbtgt_rid_502),
-    (14, "absolute",   "Privileged primaryGroupID — gizli qrup üzvlüyü (memberOf-da görünmür)", _rule_14_privileged_primary_group),
+    (14, "absolute",   "Privileged primaryGroupID — hidden group membership (not shown in memberOf)", _rule_14_privileged_primary_group),
 ]
 
 potential_admin_lvl1: list[int] = [
@@ -838,7 +798,7 @@ def check_admin(ctx: dict) -> dict:
 
     matched: list[dict] = []
 
-    # Detail keys written into ctx by rules after a successful match.
+
     _DETAIL_KEYS: dict[int, str] = {
         1:  "rule1_detail",
         2:  "rule2_detail",
@@ -866,8 +826,7 @@ def check_admin(ctx: dict) -> dict:
         if sev in by_severity:
             by_severity[sev].append(rule)
 
-    # is_direct_admin → ən azı bir "absolute" qayda match etdikdə True
-    # potential_admin  → "absolute" yoxdur, amma ən azı bir tier1/2/3 varsa "PAD"
+
     has_absolute = bool(by_severity["absolute"])
     has_tier     = bool(by_severity["tier1"] or by_severity["tier2"] or by_severity["tier3"])
 
@@ -878,10 +837,6 @@ def check_admin(ctx: dict) -> dict:
         "by_severity":     by_severity,
     }
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Protobuf Integration
-# ─────────────────────────────────────────────────────────────────────────────
 
 def check_admin_from_proto(admin_ctx_proto) -> dict:
 

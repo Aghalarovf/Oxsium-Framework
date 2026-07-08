@@ -27,9 +27,6 @@ def _tcp_probe(ip: str, port: int, timeout: float) -> str:
 
 
 def host_up(ip: str, extra_ports: list = None, timeout: float = 3) -> tuple[bool, int]:
-    """Pure TCP multi-port host probe (no ICMP/ping).
-    Returns (is_up, detected_via_port).
-    'open' or 'closed/RST' both confirm the host is alive."""
     probe_order = list(extra_ports or []) + _HOST_PROBE_PORTS
     seen: set = set()
     for port in probe_order:

@@ -126,24 +126,7 @@ def _connect(ip: str, domain: str, username: str, password: str, config) -> Conn
 
 
 def _check_ntlm_supported(ip: str, domain: str, username: str, password: str, config, diagnostics: list[str] | None = None) -> bool | None:
-	"""Domenin NTLM autentifikasiyasına icazə verib-vermədiyini yoxlayır.
 
-	Əsas bind (get_domain_info-da _connect ilə) artıq uğurla keçdiyi üçün
-	istifadə olunan kredensialların düzgün olduğu məlumdur. Burada EYNİ
-	kredensiallarla, amma məcburi NTLM auth növü ilə ayrıca, yüngül bir
-	LDAP bind sınanır:
-	  - Uğurlu olarsa → DC NTLM-i qəbul edir (True).
-	  - LDAPInvalidCredentialsResult ilə uğursuz olarsa → kredensiallar
-	    artıq doğrulandığı üçün bu, "yanlış parol" demək DEYİL, DC-nin
-	    NTLM mexanizmini spesifik olaraq rədd etməsi deməkdir (məs.
-	    "Network security: Restrict NTLM" GPO ilə bloklanıb) → False.
-	  - Şəbəkə/protokol səviyyəsində başqa xəta baş verərsə → None
-	    (nəticə qeyri-müəyyəndir, diaqnostikaya yazılır).
-
-	Qeyd: bu, LDAP bind cavabına əsaslanan dolayı göstəricidir; SMB
-	səviyyəsində "STATUS_NTLM_BLOCKED" kimi 100% dəqiq bir siqnal deyil,
-	amma yalnız LDAP mövcud olan mühitdə ən etibarlı əlçatan üsuldur.
-	"""
 	bind_password = password
 	if is_ntlm_hash(password):
 		bind_password = f"00000000000000000000000000000000:{password}"
@@ -176,32 +159,11 @@ def _check_ntlm_supported(ip: str, domain: str, username: str, password: str, co
 			except Exception:
 				pass
 
-
-# QEYD: 0x0311 (SMB 3.1.1) bilərəkdən BURAYA daxil edilmir. Səbəb: client
-# NEGOTIATE sorğusunda 3.1.1 təklif edildikdə, MS-SMB2 3.2.4.2.2.2-yə əsasən
-# sorğuya mütləq bir Negotiate Context List (ən azı
-# SMB2_PREAUTH_INTEGRITY_CAPABILITIES) əlavə olunmalıdır. Bu modul sadə,
-# konteksti olmayan sabit bir paket göndərdiyi üçün, əgər 0x0311 siyahıya
-# əlavə edilsəydi, sərt tətbiq olunan DC-lər (məs. Windows Server 2019+)
-# bunu qanunsuz/natamam sorğu sayıb STATUS_INVALID_PARAMETER ilə SMB2 ERROR
-# cavabı (StructureSize=9) qaytarır. Həmin error cavabında offset [66:68]
-# artıq SecurityMode deyil, sadəcə sıfırlanmış/əlaqəsiz baytlardır — nəticədə
-# signing həqiqətən aktiv/tələb olunsa belə enabled=False, required=False
-# kimi YANLIŞ nəticə alınırdı (nxc kimi alətlər isə düzgün "True" göstərirdi).
-# 0x0302-yə qədər olan dialektlər kontekst tələb etmir və SecurityMode
-# cavabdakı eyni sabit offset-də (body+2) olduğu üçün yoxlama məqsədi üçün
-# tam kifayətdir.
 _SMB2_CLIENT_DIALECTS = (0x0202, 0x0210, 0x0300, 0x0302)
 
 
 def _build_smb2_negotiate_request() -> bytes:
-	"""Xam SMB2 NEGOTIATE_PROTOCOL_REQUEST paketi qurur (MS-SMB2 2.2.3).
-	Müasir (2012+) domen kontrollerləri qoşulduqda ilk paket kimi bilavasitə
-	SMB2 negotiate-i qəbul edir, ona görə köhnə SMB1 "multi-protocol"
-	sarğısına ehtiyac yoxdur. Bu, hər SMB müştərisinin qoşulanda etdiyi
-	passiv protokol danışığıdır — heç bir autentifikasiya tələb olunmur və
-	heç bir hücum/istismar əməliyyatı yoxdur, sadəcə serverin elan etdiyi
-	SecurityMode sahəsini oxumaq üçündür."""
+
 	protocol_id = b"\xfeSMB"
 	structure_size = struct.pack("<H", 64)
 	credit_charge = struct.pack("<H", 0)
@@ -225,7 +187,7 @@ def _build_smb2_negotiate_request() -> bytes:
 	dialects = _SMB2_CLIENT_DIALECTS
 	body_structure_size = struct.pack("<H", 36)
 	dialect_count = struct.pack("<H", len(dialects))
-	client_security_mode = struct.pack("<H", 1)  # SMB2_NEGOTIATE_SIGNING_ENABLED (what we offer, irrelevant to the check)
+	client_security_mode = struct.pack("<H", 1)  
 	body_reserved = struct.pack("<H", 0)
 	capabilities = struct.pack("<I", 0)
 	client_guid = os.urandom(16)
@@ -238,7 +200,7 @@ def _build_smb2_negotiate_request() -> bytes:
 	)
 
 	packet = header + body
-	netbios_session_header = struct.pack(">I", len(packet))  # 1 byte type (0x00) + 3 byte big-endian length
+	netbios_session_header = struct.pack(">I", len(packet))  
 	return netbios_session_header + packet
 
 
@@ -253,10 +215,7 @@ def _recv_exact(sock: socket.socket, size: int) -> bytes:
 
 
 def _check_smb_signing(ip: str, timeout: float = 5.0, diagnostics: list[str] | None = None) -> dict:
-	"""DC-nin 445 portuna SMB2 NEGOTIATE göndərib cavabdakı SecurityMode
-	sahəsini oxuyur (bit 0x0001 = signing enabled, bit 0x0002 = signing
-	required). Bu, GPO faylını oxumaq əvəzinə faktiki tətbiq olunan
-	nəticəni birbaşa serverdən öyrənir."""
+
 	outcome = {"enabled": None, "required": None}
 	try:
 		with socket.create_connection((ip, 445), timeout=timeout) as sock:
@@ -269,12 +228,6 @@ def _check_smb_signing(ip: str, timeout: float = 5.0, diagnostics: list[str] | N
 				if diagnostics is not None:
 					diagnostics.append("smb_signing_check: unexpected SMB2 negotiate response")
 				return outcome
-			# SMB2 header = 64 bytes, then NEGOTIATE response body:
-			#   [64:66] StructureSize (NEGOTIATE cavabında 65 olmalıdır;
-			#           SMB2 ERROR cavabında isə 9 olur — bu halda [66:68]
-			#           artıq SecurityMode deyil, error body-nin başqa bir
-			#           sahəsidir və bit kimi oxunması yanlış nəticə verər)
-			#   [66:68] SecurityMode  (bit 0x0001=enabled, bit 0x0002=required)
 			structure_size = struct.unpack("<H", response[64:66])[0]
 			if structure_size != 65:
 				if diagnostics is not None:
@@ -300,10 +253,6 @@ def _search_first_entry(conn: Connection, base_dn: str, ldap_filter: str, attrib
 		search_scope=search_scope,
 		attributes=attributes,
 	)
-	# Paged results control BASE scope ilə uyuşmur — bəzi AD DC-lər bunu
-	# "unwilling to perform" ilə rədd edir və axtarış sükutla (üst səviyyədə
-	# tutulan exception vasitəsilə) None qaytarırdı. Yalnız SUBTREE/LEVEL
-	# axtarışlarında paging tətbiq olunur.
 	if search_scope != BASE:
 		search_kwargs["paged_size"] = getattr(Config, "LDAP_PAGE_SIZE", 200)
 	conn.search(**search_kwargs)
@@ -311,28 +260,6 @@ def _search_first_entry(conn: Connection, base_dn: str, ldap_filter: str, attrib
 
 
 def _search_base_entry(conn: Connection, base_dn: str, attributes: list[str], debug_label: str = "", diagnostics: list[str] | None = None):
-	# ƏVVƏLKİ YANLIŞ HƏLL: bu funksiya conn.check_names-i müvəqqəti False
-	# edirdi ki, naməlum/RootDSE-yə xas atribut adı (məs. supportedCapabilities,
-	# ldapServiceName) LDAPAttributeError atmasın. Bunun ciddi yan effekti var:
-	# ldap3-də check_names=False olduqda server CAVABINDAKI BÜTÜN dəyərlər
-	# sxemaya görə formatlaşdırılmır (bax: ldap3/operation/search.py,
-	# search_result_entry_response_to_dict -> check_names=False olduqda
-	# checked_attributes_to_dict() əvəzinə sadə attributes_to_dict() işlədilir,
-	# yəni format_attribute_values HEÇ ÇAĞIRILMIR). Nəticədə:
-	#   - objectSid binar formada qalır və "S-1-5-21-..." şəklinə çevrilmir
-	#     -> domain_sid yanlış/oxunmaz çıxırdı,
-	#   - msDS-Behavior-Version / domainFunctionality kimi int-syntax
-	#     atributlar da tam etibarlı çevrilmirdi.
-	# Bu, yalnız SUBTREE axtarışlarında (DC/CA siyahısı) check_names=True
-	# qaldığı üçün gizli qalırdı, amma məhz domain_sid və functional_level
-	# BASE-scope oxumalardan (RootDSE, domen kökü) gəldiyi üçün korlanırdı.
-	#
-	# DOĞRU HƏLL: check_names-i heç vaxt söndürmürük. Əvəzində normal
-	# (check_names=True) sorğu göndəririk; yalnız LDAPAttributeError
-	# baş verərsə, server sxemasında olmayan atribut adlarını siyahıdan
-	# çıxarıb sorğunu YENƏ check_names=True ilə təkrarlayırıq. Beləliklə
-	# tanınan atributlar (objectSid, msDS-Behavior-Version və s.) üçün
-	# düzgün formatlaşdırma qorunur, naməlum adlar isə sorğunu batırmır.
 	try:
 		return _search_first_entry(conn, base_dn, "(objectClass=*)", attributes, search_scope=BASE)
 	except LDAPAttributeError as exc:
@@ -355,9 +282,6 @@ def _search_base_entry(conn: Connection, base_dn: str, attributes: list[str], de
 
 
 def _extract_server_cn_from_ntds_dn(dn: str) -> str:
-	"""fSMORoleOwner dəyəri NTDS Settings obyektinin DN-idir, məs:
-	'CN=NTDS Settings,CN=WIN-DC01,CN=Servers,CN=Default-First-Site-Name,...'
-	Buradan sahibi DC-nin cn-i (ikinci RDN komponenti) çıxarılır."""
 	if not dn:
 		return ""
 	parts = [p.strip() for p in dn.split(",")]
@@ -377,14 +301,7 @@ def _get_fsmo_role_owner_cn(conn: Connection, container_dn: str, role_name: str 
 
 
 def _collect_fsmo_roles(conn: Connection, base_dn: str, config_dn: str, schema_dn: str, diagnostics: list[str] | None = None) -> dict:
-	"""5 FSMO rolunun sahibini (owning DC-nin cn-i) müəyyən edir.
-	Hər rol AD-də fərqli konteynerin fSMORoleOwner atributunda saxlanılır:
-	  - Schema Master        → schema NC-nin özü
-	  - Domain Naming Master → CN=Partitions,<config NC>
-	  - RID Master           → CN=RID Manager$,CN=System,<domain NC>
-	  - PDC Emulator         → domen NC-nin özü (domain root object)
-	  - Infrastructure Master→ CN=Infrastructure,<domain NC>
-	"""
+
 	locations = {
 		"schema_master":   schema_dn,
 		"naming_master":   f"CN=Partitions,{config_dn}" if config_dn else "",
@@ -423,8 +340,6 @@ def _collect_domain_controllers(conn: Connection, base_dn: str, domain: str, fsm
 		cn = str(normalize_value(getattr(entry, "cn", None)) or "")
 		dns_name = str(normalize_value(getattr(entry, "dNSHostName", None)) or "")
 		cn_upper = cn.upper()
-		# DC-nin tam adı (FQDN) — dNSHostName mövcuddursa ondan, olmasa
-		# cn + domen adından qurulur ki, sahə həmişə doldurulmuş olsun.
 		fqdn = dns_name or (f"{cn}.{domain}" if cn and domain else cn)
 		controllers.append(
 			{
@@ -447,10 +362,6 @@ def _collect_domain_controllers(conn: Connection, base_dn: str, domain: str, fsm
 
 
 def _collect_certificate_services(conn: Connection, config_dn: str) -> list[dict]:
-	"""Enterprise CA-ların təməl məlumatı — RootDSE-dən gələn
-	configurationNamingContext əsasında Public Key Services konteynerindən
-	yalnız əsas atributlar (cn, dns_name, dn) çəkilir; certificateTemplates
-	kimi ağır siyahılar oxunmur."""
 	if not config_dn:
 		return []
 	enrollment_services_dn = f"CN=Enrollment Services,CN=Public Key Services,CN=Services,{config_dn}"
@@ -655,23 +566,11 @@ def get_domain_info(ip: str, domain: str, username: str, password: str, config) 
 		result["fine_grained_policies"] = []
 		result["smart_card_required"] = False
 
-		# NTLM autentifikasiyasının icazə verilib-verilmədiyi (LDAP bind
-		# ilə dolayı yoxlama) və SMB signing-in server tərəfindən elan
-		# olunan real vəziyyəti (SMB2 NEGOTIATE probu ilə, port 445).
-		# Hər ikisi əlavə, qısa müddətli əməliyyatlardır və əsas nəticəni
-		# pozmasın deyə öz xətalarını yalnız diagnostics-ə yazır.
 		result["ntlm_supported"] = _check_ntlm_supported(ip, domain, username, password, config, diagnostics=diagnostics)
 
 		smb_signing = _check_smb_signing(ip, timeout=getattr(config, "SMB_PROBE_TIMEOUT", 5), diagnostics=diagnostics)
 		result["smb_signing_enabled"] = smb_signing.get("enabled")
 		result["smb_signing_required"] = smb_signing.get("required")
-		# "policy_present" DC-dən SMB2 NEGOTIATE cavabının uğurla alınıb-
-		# alınmadığını göstərməlidir (yəni SecurityMode oxuna bilib-bilmədiyi),
-		# YOX "signing tələb olunurmu" sualının özünü. Əvvəlki kod bu iki
-		# fərqli anlayışı eyniləşdirirdi: `required=False` (siyasət var, sadəcə
-		# tələb olunmur) hallarında `policy_present` də False olurdu, sanki
-		# heç bir məlumat alınmayıb. İndi yalnız prob nəticəsi None (şəbəkə/
-		# protokol xətası, "inconclusive") olduqda policy_present False olur.
 		result["smb_signing_policy_present"] = smb_signing.get("required") is not None
 
 		findings = _build_risk_findings(

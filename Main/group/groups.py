@@ -9,10 +9,6 @@ from ldap3.core.exceptions import LDAPInvalidCredentialsResult, LDAPSocketOpenEr
 from ldap3.utils.conv import escape_filter_chars
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# SHARED HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def is_ntlm_hash(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Fa-f0-9]{32}", value or ""))
 
@@ -91,10 +87,6 @@ def decode_group_type(value: int) -> str:
 
 
 def _parse_isaclprotected(sd_raw) -> bool:
-    """
-    nTSecurityDescriptor Control word-ünün SE_DACL_PROTECTED (0x1000) bitini yoxlayır.
-    Set-dirsə ACL inheritance bloklanıb — BloodHound 'isaclprotected' field-i.
-    """
     if isinstance(sd_raw, (bytearray, memoryview)):
         sd_raw = bytes(sd_raw)
     if not isinstance(sd_raw, bytes) or len(sd_raw) < 4:
@@ -107,10 +99,6 @@ def _parse_isaclprotected(sd_raw) -> bool:
 
 
 def _extract_domainsid_from_sid(sid_str: str) -> str:
-    """
-    Qrupun öz SID-indən domain SID-ini çıxarır.
-    S-1-5-21-X-X-X-RID  →  S-1-5-21-X-X-X
-    """
     if not sid_str:
         return ""
     parts = sid_str.split("-")
@@ -120,10 +108,6 @@ def _extract_domainsid_from_sid(sid_str: str) -> str:
 
 
 def _parse_sid_history(entry) -> list:
-    """
-    sIDHistory atributunu oxuyur — köhnə domainlərdən miras qalan SID-lər.
-    Migration zamanı təhlükəli ola bilər (privilege escalation riski).
-    """
     sid_history_attr = getattr(entry, "sIDHistory", None)
     if not sid_history_attr:
         return []
@@ -132,10 +116,6 @@ def _parse_sid_history(entry) -> list:
 
 
 def _is_protected_users_group(sid: str) -> bool:
-    """
-    Protected Users Group-u yoxlayır.
-    Well-known RID: 525  →  SID S-1-5-21-<domain>-525
-    """
     return sid.endswith("-525")
 
 
@@ -156,10 +136,6 @@ def _is_potential_privileged_by_rid(rid: int | None) -> bool:
     potential_privileged_rids = {548, 549, 551, 520, 550, 569, 578, 582, 526, 527, 553, 557}
     return rid in potential_privileged_rids
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# groups.py — DOMAIN GROUPS
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def get_domain_groups(ip, domain, username, password, config):
     auth_type = "SIMPLE"
@@ -185,10 +161,9 @@ def get_domain_groups(ip, domain, username, password, config):
             "cn", "sAMAccountName", "distinguishedName", "description",
             "objectSid", "groupType", "managedBy",
             "adminCount", "whenCreated", "whenChanged", "memberOf",
-            "nTSecurityDescriptor",  # isaclprotected üçün
-            "primaryGroupToken",     # PrimaryGroupToken — bu qrupu primary group kimi
-                                     # istifadə edən userları tapmaq üçün əsas dəyər
-            "sIDHistory",            # SID History — köhnə domainlərdən miras SID-lər
+            "nTSecurityDescriptor",  
+            "primaryGroupToken",     
+            "sIDHistory",            
         ]
 
         conn.search(
@@ -214,7 +189,6 @@ def get_domain_groups(ip, domain, username, password, config):
             sam_name = str(get_attr("sAMAccountName") or "")
             sid = str(get_attr("objectSid") or "")
 
-            # ── isaclprotected ───────────────────────────────────────────────
             ntsd_raw = get_attr("nTSecurityDescriptor")
             if isinstance(ntsd_raw, (bytearray, memoryview)):
                 ntsd_raw = bytes(ntsd_raw)
@@ -222,21 +196,12 @@ def get_domain_groups(ip, domain, username, password, config):
                 ntsd_raw = b""
             isaclprotected = _parse_isaclprotected(ntsd_raw)
 
-            # ── domainsid ────────────────────────────────────────────────────
             domainsid = _extract_domainsid_from_sid(sid)
 
-            # ── primaryGroupToken ────────────────────────────────────────────
-            # Bu token-i primaryGroupID-i eyni olan userlar bu qrupu
-            # primary group kimi istifadə edir (default: 513 = Domain Users)
             primary_group_token = safe_int(get_attr("primaryGroupToken"), None)
 
-            # ── SID History ──────────────────────────────────────────────────
-            # Köhnə domain SID-lərini saxlayır; migration sonrası silinməyibsə
-            # privilege escalation riski yarada bilər
             sid_history = _parse_sid_history(entry)
 
-            # ── Protected Users Group ────────────────────────────────────────
-            # RID-525 qrupu — NTLM, RC4, unconstrained delegation-u bloklayır
             is_protected_users = _is_protected_users_group(sid)
 
             privileged_names = {
@@ -291,12 +256,12 @@ def get_domain_groups(ip, domain, username, password, config):
                 "is_protected": safe_int(get_attr("adminCount"), 0) == 1,
                 "when_created": ldap_timestamp_to_iso(get_attr("whenCreated")),
                 "when_changed": ldap_timestamp_to_iso(get_attr("whenChanged")),
-                "isaclprotected": isaclprotected,       # ACL inheritance bloklanıb/bloklanmayıb
-                "domainsid": domainsid,                 # Domain SID (cross-domain path üçün)
-                "primary_group_token": primary_group_token,  # primaryGroupToken dəyəri
+                "isaclprotected": isaclprotected,      
+                "domainsid": domainsid,            
+                "primary_group_token": primary_group_token,  
                 "primaryGroupToken": primary_group_token,
-                "sid_history": sid_history,             # Köhnə domain SID-lərinin siyahısı
-                "is_protected_users_group": is_protected_users,  # RID-525 Protected Users
+                "sid_history": sid_history,       
+                "is_protected_users_group": is_protected_users,  
                 "risk_controls": risk_controls,
             })
 
@@ -304,18 +269,12 @@ def get_domain_groups(ip, domain, username, password, config):
 
         result = {"success": True, "groups": groups, "count": len(groups)}
 
-        # ── domain_groups.jsonl-a yaz ────────────────────────────────────────
-        # _jsonl_output_path() eyni prioritet sırasını (DOMAIN_OBJECT_DIR →
-        # OUTPUT_DIR → fallback) tətbiq edir; Mərhələ 2 də eyni funksiyanı
-        # istifadə edir, buna görə hər iki mərhələ eyni fayla yazır/oxuyur.
         output_path = _jsonl_output_path(config)
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             with output_path.open("w", encoding="utf-8") as f:
-                # 1-ci sətir: meta
                 meta = {"success": result["success"], "count": result["count"]}
                 f.write(json.dumps(meta, ensure_ascii=False, default=str) + "\n")
-                # Hər qrup ayrı sətirdə; members bu mərhələdə boş ([]) qalır
                 for group in result["groups"]:
                     f.write(json.dumps(group, ensure_ascii=False, default=str) + "\n")
         except Exception as write_exc:
@@ -330,10 +289,6 @@ def get_domain_groups(ip, domain, username, password, config):
     except Exception as exc:
         return {"success": False, "error": f"Internal server error: {exc}", "code": 500}
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# group_member.py — GROUP MEMBERS
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def _project_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -354,12 +309,6 @@ def _group_snapshot_candidates(config) -> list[Path]:
 
 
 def _load_group_rows(config) -> list[dict]:
-    """
-    domain_groups.jsonl oxuyur.
-    Format:
-      - 1-ci sətir: meta {"success": ..., "count": ...}  — skip edilir
-      - sonrakı hər sətir: bir qrup obyekti
-    """
     seen: set[str] = set()
     for path in _group_snapshot_candidates(config):
         path_key = str(path).lower()
@@ -377,7 +326,6 @@ def _load_group_rows(config) -> list[dict]:
                         continue
                     obj = json.loads(line)
                     if i == 0:
-                        # meta sətir — "success" / "count" saxlayır, qrup deyil
                         continue
                     if isinstance(obj, dict):
                         rows.append(obj)
@@ -403,27 +351,7 @@ def _resolve_group_dns_from_snapshot(config) -> list[dict]:
         })
     return resolved
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# İKİ MƏRHƏLƏLİ ÜZVLÜK İNJECTION
-#
-# MƏRHƏLƏ 1 — primaryGroupID əsasında üzvlük
-#   Hər user üçün ƏVVƏLCƏ primary_group_sid yoxlanılır.
-#   LDAP "member" atributu primary group üzvlərini göstərmir
-#   (Domain Users qrupunda olan istifadəçilər buna misaldır).
-#   Bu mərhələ LDAP batch sorğusundan gəlməmiş userləri
-#   primary_group_sid uyğunlaşdırması ilə qruplara əlavə edir.
-#
-# MƏRHƏLƏ 2 — LDAP memberOf əsasında üzvlük (domain_users.json-dan)
-#   domain_users.json-dakı hər userin "member_of" siyahısına baxılır.
-#   Qrupun adı o siyahıda varsa user həmin qrupa əlavə edilir.
-#   Bu üzvlər LDAP-ın explicit memberOf atributunu əks etdirir.
-#   Yalnız MƏRHƏLƏ 1-dən keçməmiş userlər buraya düşür —
-#   MƏRHƏLƏ 1-dən gələn üzvlərə heç bir müdaxilə olmur.
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _user_snapshot_candidates(config) -> list[Path]:
-    """domain_users.json faylı üçün axtarış sırası."""
     candidates: list[Path] = []
     output_dir = getattr(config, "OUTPUT_DIR", "")
     if output_dir:
@@ -435,7 +363,6 @@ def _user_snapshot_candidates(config) -> list[Path]:
 
 
 def _load_user_rows(config) -> list[dict]:
-    """domain_users.json-u oxuyub user siyahısını qaytarır."""
     seen: set[str] = set()
     for path in _user_snapshot_candidates(config):
         path_key = str(path).lower()
@@ -457,7 +384,6 @@ def _load_user_rows(config) -> list[dict]:
 
 
 def _computer_snapshot_candidates(config) -> list[Path]:
-    """domain_computers.jsonl faylı üçün axtarış sırası (domain_groups.jsonl ilə eyni prinsip)."""
     candidates: list[Path] = []
     domain_object_dir = getattr(config, "DOMAIN_OBJECT_DIR", "")
     if domain_object_dir:
@@ -472,12 +398,6 @@ def _computer_snapshot_candidates(config) -> list[Path]:
 
 
 def _load_computer_rows(config) -> list[dict]:
-    """
-    domain_computers.jsonl oxuyub computer siyahısını qaytarır.
-    Format:
-      - 1-ci sətir: meta {"generated_at": ..., "success": ..., "count": ...} — skip edilir
-      - sonrakı hər sətir: bir computer obyekti
-    """
     seen: set[str] = set()
     for path in _computer_snapshot_candidates(config):
         path_key = str(path).lower()
@@ -495,7 +415,7 @@ def _load_computer_rows(config) -> list[dict]:
                         continue
                     obj = json.loads(line)
                     if i == 0:
-                        continue  # meta sətir — computer deyil
+                        continue  
                     if isinstance(obj, dict):
                         rows.append(obj)
             if rows:
@@ -527,10 +447,6 @@ def _build_member_entry(user: dict) -> dict:
 
 
 def _build_computer_member_entry(computer: dict) -> dict:
-    """
-    domain_computers.jsonl-dəki bir computer sətirindən members/member_computers
-    strukturuna uyğun üzv obyekti qurur.
-    """
     sid = str(computer.get("sid") or "")
     return {
         "name": str(computer.get("computer_name") or ""),
@@ -547,15 +463,6 @@ def _build_computer_member_entry(computer: dict) -> dict:
 def _build_primary_group_map(
     users: list[dict],
 ) -> dict[str, list[dict]]:
-    """
-    MƏRHƏLƏ 1 üçün primary_group_sid → [member_entry, ...] xəritəsi.
-
-    domain_users.jsonl-dakı hər userin primary_group_sid sahəsi birbaşa
-    istifadə olunur. Sahə boşdursa domain_sid + primary_group_id
-    birləşməsindən SID qurulur.
-
-    Ayrıca LDAP sorğusu atılmır — bütün məlumat domain_users.jsonl-dan oxunur.
-    """
     pg_map: dict[str, list[dict]] = {}
 
     for user in users:
@@ -583,15 +490,6 @@ def _build_primary_group_map(
 def _build_primary_group_map_for_computers(
     computers: list[dict],
 ) -> dict[str, list[dict]]:
-    """
-    MƏRHƏLƏ 1 (computer hesabları) üçün primary_group_sid → [member_entry, ...] xəritəsi.
-
-    domain_computers.jsonl-dakı hər computer üçün "domainsid" + "primary_group_id"
-    birləşməsindən SID qurulur (computers.py "primary_group_sid" sahəsini birbaşa
-    hesablamır, ona görə burada birbaşa qurulur).
-
-    Ayrıca LDAP sorğusu atılmır — bütün məlumat domain_computers.jsonl-dan oxunur.
-    """
     pg_map: dict[str, list[dict]] = {}
 
     for computer in computers:
@@ -617,25 +515,6 @@ def _inject_primary_group_members(
     merged_groups: list[dict],
     pg_map: dict[str, list[dict]],
 ) -> None:
-    """
-    MƏRHƏLƏ 1 — primary_group_sid əsasında üzvlük (user və ya computer).
-
-    Bu funksiya həm domain_users.jsonl, həm də domain_computers.jsonl üçün
-    işləyir — hansı pg_map verilibsə (istifadəçi xəritəsi yoxsa computer
-    xəritəsi) onu inject edir. Hər member_entry-dəki "is_computer" bayrağına
-    görə "member_users" yoxsa "member_computers" siyahısına yazılır.
-
-    Hər user/computer üçün ƏVVƏLCƏ primary group yoxlanılır.
-    LDAP "member" atributu primary group üzvlərini qaytarmır —
-    (məsələn Domain Users qrupunun bütün üzvləri).
-    Bu məlumat artıq domain_users.jsonl / domain_computers.jsonl-da
-    mövcuddur; ayrıca LDAP sorğusu lazım deyil.
-
-    Hər qrupun mövcud LDAP üzvləri (batch sorğudan gələnlər) SID-ə görə
-    yoxlanılır — duplikat əlavə edilmir.
-    İşlənmiş SID-lər _existing_sids temp key-inə yazılır ki,
-    sonrakı çağırışlar (digər pg_map və ya MƏRHƏLƏ 2) onları görüb keçsin.
-    """
     for group in merged_groups:
         group_sid = str(group.get("group_sid") or group.get("sid") or "").strip()
         if not group_sid or group_sid not in pg_map:
@@ -643,7 +522,6 @@ def _inject_primary_group_members(
 
         pg_members = pg_map[group_sid]
 
-        # LDAP batch sorğusundan gələn mövcud üzvlərin SID-lərini yığ
         if "_existing_sids" not in group:
             group["_existing_sids"] = {
                 str(m.get("sid") or "")
@@ -673,22 +551,7 @@ def _inject_memberof_members(
     merged_groups: list[dict],
     users: list[dict],
 ) -> None:
-    """
-    MƏRHƏLƏ 2 — domain_users.jsonl-dakı "member_of" atributuna əsasən üzvlük.
-
-    Hər userin "member_of" siyahısındakı qrup adları (case-insensitive)
-    merged_groups-dakı qrupların adları ilə uyğunlaşdırılır.
-    Uyğunluq tapılarsa user həmin qrupun members / member_users siyahısına
-    əlavə edilir.
-
-    MƏRHƏLƏ 1-dən (_inject_primary_group_members) artıq əlavə edilmiş
-    üzvlər _existing_sids temp key-i vasitəsilə tanınır və keçilir.
-    Bu mərhələdən əlavə edilən üzvlər də _existing_sids-ə yazılır ki,
-    sonrakı duplikatlar bloklanılsın.
-    Temp key hər qrup üçün burada da lazy init olunur (MƏRHƏLƏ 1-dən
-    keçməmiş qruplar üçün).
-    """
-    # qrupları ad (kiçik hərf) → group dict xəritəsinə köçür
+    
     groups_by_name: dict[str, dict] = {}
     for group in merged_groups:
         gname = str(group.get("group_name") or "").strip().lower()
@@ -710,9 +573,8 @@ def _inject_memberof_members(
 
             group = groups_by_name.get(mo_name)
             if group is None:
-                continue  # bu adda qrup tapılmadı
+                continue  
 
-            # MƏRHƏLƏ 1-dən qalan _existing_sids-i götür; yoxdursa lazy init et
             if "_existing_sids" not in group:
                 group["_existing_sids"] = {
                     str(m.get("sid") or "")
@@ -722,7 +584,7 @@ def _inject_memberof_members(
 
             existing: set[str] = group["_existing_sids"]
             if user_sid and user_sid in existing:
-                continue  # LDAP-dan və ya MƏRHƏLƏ 1-dən artıq var
+                continue  
 
             group.setdefault("members", []).append(member_entry)
             group.setdefault("member_users", []).append(member_entry)
@@ -735,9 +597,6 @@ def _inject_memberof_members(
     # Bütün temp set-ləri təmizlə
     for group in merged_groups:
         group.pop("_existing_sids", None)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _resolve_group_members_from_connection(conn, group_name: str = "", group_dn: str = "") -> dict:
     group_name = str(group_name or "").strip()
@@ -768,8 +627,6 @@ def _resolve_group_members_from_connection(conn, group_name: str = "", group_dn:
     members_attr = getattr(group_entry, "member", None)
     member_dns = [str(v) for v in (getattr(members_attr, "values", []) or [])]
 
-    # Nested qrupların üzvlərini də əldə etmək üçün
-    # LDAP_MATCHING_RULE_IN_CHAIN ilə ayrıca sorğu at
     nested_dn_set: set[str] = set(dn.lower() for dn in member_dns)
     try:
         chain_filter = f"(memberOf:1.2.840.113556.1.4.1941:={escape_filter_chars(group_dn or group_entry.entry_dn)})"
@@ -785,7 +642,7 @@ def _resolve_group_members_from_connection(conn, group_name: str = "", group_dn:
                 member_dns.append(dn_val)
                 nested_dn_set.add(dn_val.lower())
     except Exception:
-        pass  # fallback: yalnız birbaşa üzvlər istifadə olunur
+        pass  
 
     resolved = []
     for member_dn in member_dns:
@@ -882,17 +739,6 @@ def _merge_batch_results(results: list[dict]) -> dict:
 
 
 def _resolve_group_members_batch(conn, group_rows: list[dict]) -> list[dict]:
-    """
-    Resolve members for multiple groups in a single LDAP query.
-
-    Steps:
-    - Ensure each group has a DN. If some groups only have names, resolve their DN/SID
-      with a single search across the directory.
-    - Query for all objects that have memberOf equal to any of the groups' DNs
-      using a single OR filter.
-    - Build per-group member lists from the results.
-    """
-    # prepare groups map by DN (lowercase) and fallback map for groups lacking DN
     groups_by_dn: dict[str, dict] = {}
     name_only = []
     for g in group_rows:
@@ -913,7 +759,6 @@ def _resolve_group_members_batch(conn, group_rows: list[dict]) -> list[dict]:
         elif name:
             name_only.append(name)
         else:
-            # group without name or dn — include empty placeholder
             groups_by_dn[f"__unknown_{len(groups_by_dn)}"] = {
                 "group_name": name,
                 "group_dn": dn,
@@ -926,7 +771,6 @@ def _resolve_group_members_batch(conn, group_rows: list[dict]) -> list[dict]:
                 "member_computers_count": 0,
             }
 
-    # If we have groups identified only by name, resolve their DN/SID in one query
     if name_only:
         or_parts = []
         for nm in name_only:
@@ -961,21 +805,12 @@ def _resolve_group_members_batch(conn, group_rows: list[dict]) -> list[dict]:
                     "member_computers_count": 0,
                 })
         except Exception:
-            # if resolution fails, proceed with whatever DNs we have
             pass
 
-    # Collect list of DNs to query memberOf for
     dn_list = [v.get("group_dn") for v in groups_by_dn.values() if v.get("group_dn")]
     dn_list = [d for d in dn_list if d]
 
     if dn_list:
-        # LDAP_MATCHING_RULE_IN_CHAIN ilə HƏR QRUP ÜÇÜN AYRICA sorğu atılır.
-        #
-        # NIYƏ böyük OR filter işləmirdi?
-        # OR filter nəticəsindəki entry.memberOf yalnız birbaşa qrupu göstərir.
-        # Nested user-in memberOf-unda GroupA yox, yalnız GroupB var.
-        # Ona görə groups_by_dn-də tapılmır və skip olunurdu.
-        # Ayrıca sorğuda nəticələr artıq birbaşa hədəf qrupa aid olur.
 
         base_dn = ""
         try:
@@ -1049,7 +884,6 @@ def _resolve_group_members_batch(conn, group_rows: list[dict]) -> list[dict]:
             except Exception:
                 pass
 
-    # finalize counts
     results = []
     for grp in groups_by_dn.values():
         grp["member_count"] = len(grp.get("members", []))
@@ -1062,13 +896,6 @@ def _resolve_group_members_batch(conn, group_rows: list[dict]) -> list[dict]:
 
 
 def _jsonl_output_path(config) -> Path:
-    """domain_groups.jsonl üçün çıxış yolu.
-
-    Prioritet:
-      1) config.DOMAIN_OBJECT_DIR (connection.py-də istifadə olunan rəsmi yol)
-      2) config.OUTPUT_DIR
-      3) <project_root>/Domain Object/domain_groups.jsonl (fallback)
-    """
     domain_object_dir = getattr(config, "DOMAIN_OBJECT_DIR", "")
     if domain_object_dir:
         return Path(domain_object_dir) / "domain_groups.jsonl"
@@ -1080,33 +907,10 @@ def _jsonl_output_path(config) -> Path:
 
 def write_group_members_jsonl(config, groups: list[dict], success: bool = True,
                                error: str | None = None) -> dict:
-    """
-    group_member modulunun tapdığı BÜTÜN nəticələri (members/member_users
-    daxil olmaqla, tam doldurulmuş qrup obyektləri) domain_groups.jsonl
-    faylına yazır.
-
-    Format groups.py-dəki domain_groups.jsonl yazılışı ilə eynidir:
-      - 1-ci sətir: meta {"success": ..., "count": ...}
-      - sonrakı hər sətir: bir qrup obyekti (members/member_users daxil)
-
-    Beləliklə sqlite_engine.py (domain_groups spec-i) bu faylı birbaşa,
-    heç bir əlavə çevrilmə olmadan oxuya bilir.
-
-    Returns: {"success": bool, "path": str, "count": int} və ya
-             yazma zamanı xəta olarsa {"success": False, "error": str}.
-    """
-    # ── temp key-ləri və sayları normalize et ───────────────────────────────
     _TEMP_KEYS = {"_existing_sids"}
     _INTERNAL_MEMBER_KEYS = {"primary_group_member"}
 
     def _clean_group(group: dict) -> dict:
-        """
-        Yazılmadan əvvəl:
-          - temp set key-lərini sil (_existing_sids)
-          - member_users / member_computers / members siyahısındakı daxili işarə key-lərini sil
-          - member_count / member_users_count / member_computers_count-u real siyahı uzunluğuna uyğunlaşdır
-          - is_empty flag-ini yenilə
-        """
         cleaned = {k: v for k, v in group.items() if k not in _TEMP_KEYS}
 
         def _strip_internal(lst):
@@ -1154,10 +958,8 @@ def get_all_group_members(ip, domain, username, password, config):
     if not group_rows:
         return {"success": False, "error": "No groups found in domain_groups.jsonl", "code": 404}
 
-    # Hər iki mərhələ üçün user və computer siyahısını bir dəfə yüklə
     users = _load_user_rows(config)
     computers = _load_computer_rows(config)
-    # MƏRHƏLƏ 1 üçün primary group xəritələrini əvvəlcədən qur (user + computer)
     pg_map = _build_primary_group_map(users)
     pg_map_computers = _build_primary_group_map_for_computers(computers)
 
@@ -1172,12 +974,8 @@ def get_all_group_members(ip, domain, username, password, config):
             receive_timeout=config.LDAP_RECEIVE_TIMEOUT,
         )
 
-        # Resolve members for all groups in a single batched LDAP query
         batch_results = _resolve_group_members_batch(conn, group_rows)
-
-        # merge original metadata with resolved members
         merged_groups = []
-        # index batch results by lowercase DN or name when DN missing
         batch_index: dict[str, dict] = {}
         for br in batch_results:
             key = (br.get("group_dn") or br.get("group_name") or "").strip().lower()
@@ -1202,15 +1000,9 @@ def get_all_group_members(ip, domain, username, password, config):
             })
             merged_groups.append(merged_group)
 
-        # MƏRHƏLƏ 1: primaryGroupID üzrə üzvlər (user + computer)
-        # domain_users.jsonl / domain_computers.jsonl-dakı primary_group_id
-        # əsasında — ayrıca LDAP sorğusu yoxdur.
-        # Hər user/computer üçün əvvəlcə primary group yoxlanılır.
         _inject_primary_group_members(merged_groups, pg_map)
         _inject_primary_group_members(merged_groups, pg_map_computers)
 
-        # MƏRHƏLƏ 2: domain_users.jsonl member_of-dan gələn explicit üzvlər
-        # (nə LDAP-dan, nə də MƏRHƏLƏ 1-dən gələnlər buraya düşmür)
         _inject_memberof_members(merged_groups, users)
 
         conn.unbind()
@@ -1248,16 +1040,14 @@ def get_group_members(ip, domain, username, password, group_dn, config):
         )
         result = _resolve_group_members_from_connection(conn, group_dn=group_dn)
 
-        # Tək qrup sorğusunda da iki mərhələli injection tətbiq et
         if result.get("success"):
             users = _load_user_rows(config)
             computers = _load_computer_rows(config)
             pg_map = _build_primary_group_map(users)
             pg_map_computers = _build_primary_group_map_for_computers(computers)
-            # result-i merged_groups formatına uyğunlaşdır
             single_group = {
                 "group_name": result.get("group_name", ""),
-                "group_sid": group_dn,   # SID yoxdursa DN ilə axtarış olunmaz, inject skip edilər
+                "group_sid": group_dn,  
                 "members": result.get("members", []),
                 "member_users": result.get("member_users", []),
                 "member_computers": result.get("member_computers", []),
@@ -1265,12 +1055,8 @@ def get_group_members(ip, domain, username, password, group_dn, config):
                 "member_users_count": result.get("member_users_count", 0),
                 "member_computers_count": result.get("member_computers_count", 0),
             }
-            # MƏRHƏLƏ 1: primary group üzvləri (user + computer)
-            # domain_users.jsonl / domain_computers.jsonl-dakı primary_group_id
-            # əsasında — ayrıca LDAP sorğusu yoxdur
             _inject_primary_group_members([single_group], pg_map)
             _inject_primary_group_members([single_group], pg_map_computers)
-            # MƏRHƏLƏ 2: member_of-dan gələn explicit üzvlər (MƏRHƏLƏ 1-dən keçməyənlər)
             _inject_memberof_members([single_group], users)
             result["members"] = single_group["members"]
             result["member_users"] = single_group["member_users"]
@@ -1290,40 +1076,7 @@ def get_group_members(ip, domain, username, password, group_dn, config):
         return {"success": False, "error": f"Internal server error: {exc}", "code": 500}
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PIPELINE — GROUPS + MEMBERS (İKİ MƏRHƏLƏ)
-# ═══════════════════════════════════════════════════════════════════════════════
-
 def run_domain_groups_pipeline(ip, domain, username, password, config) -> dict:
-    """
-    İki mərhələli pipeline:
-
-    MƏRHƏLƏ 1 — get_domain_groups()
-        LDAP-dan bütün qrupları çəkir və domain_groups.jsonl faylını yaradır.
-        Bu mərhələdə hər qrupun "members" massivi boş ([]) qalır.
-
-    MƏRHƏLƏ 2 — get_all_group_members()
-        domain_groups.jsonl-dən qrup adlarını/DN-lərini oxuyur,
-        LDAP-dan hər qrupun üzvlərini çəkir (nested daxil).
-        Əlavə olaraq domain_users.jsonl-dan:
-          1) primary_group_sid əsasında primary group üzvlərini inject edir,
-          2) member_of əsasında explicit üzvləri inject edir.
-        Nəticəni eyni domain_groups.jsonl faylına "members" massivi
-        içinə yazır (faylı tamamilə yenidən yazır).
-
-    Qaytarılan dəyər:
-        {
-            "success": bool,
-            "stage1": <get_domain_groups nəticəsi>,
-            "stage2": <get_all_group_members nəticəsi>,   # yalnız uğurlu olarsa
-            "jsonl_path": str,
-            "group_count": int,
-            "member_count": int,
-            "member_users_count": int,
-            "member_computers_count": int,
-        }
-    """
-    # ── MƏRHƏLƏ 1: qrupları çək, JSONL yarat ────────────────────────────────
     stage1 = get_domain_groups(ip, domain, username, password, config)
 
     if not stage1.get("success"):
@@ -1337,7 +1090,6 @@ def run_domain_groups_pipeline(ip, domain, username, password, config) -> dict:
 
     jsonl_path = str(_jsonl_output_path(config))
 
-    # ── MƏRHƏLƏ 2: JSONL-dən oxu, members doldur, geri yaz ──────────────────
     stage2 = get_all_group_members(ip, domain, username, password, config)
 
     if not stage2.get("success"):

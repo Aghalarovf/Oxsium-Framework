@@ -193,13 +193,6 @@ def api_health():
 
 @app.route("/api/domain-info")
 def api_domain_info():
-    """Serves the latest domain_info.jsonl record (converted to SQLite by
-    sqlite_engine.py), together with its domain_controllers and
-    risk_findings child rows.
-
-    This backs the right-hand "Environment Status" panel in the UI
-    (see 01-core.js -> loadDomainInfoFromDb / applyDomainInfoStats).
-    """
     conn = get_db()
     if "domain_info" not in list_tables(conn):
         return jsonify({"success": False, "error": "domain_info table not found"}), 404
@@ -263,9 +256,6 @@ def api_tables():
 
 
 def _child_field_name(child_table: str, fk_col: str) -> str:
-    """Derives the JSON field name for a child table (e.g. 'user_admin_rules'
-    + 'user_rowid' -> 'admin_rules'), matching the convention used by
-    _export_parent_records."""
     prefix = fk_col[:-len("_rowid")] if fk_col.endswith("_rowid") else fk_col
     return (
         child_table[len(prefix) + 1:]
@@ -275,14 +265,6 @@ def _child_field_name(child_table: str, fk_col: str) -> str:
 
 
 def _attach_child_data(conn: sqlite3.Connection, table: str, rows: list[dict]) -> None:
-    """Mutates `rows` (parent records) in place, adding one key per child
-    table registered for `table` in CHILD_TABLES (e.g. 'admin_rules',
-    'member_of'), populated only for the given page of parent ids.
-
-    This mirrors what _export_parent_records does for the full table, but is
-    scoped to just the ids present in `rows` so it stays cheap for paginated
-    /api/list calls.
-    """
     child_specs = CHILD_TABLES.get(table, [])
     if not child_specs or not rows:
         return
@@ -295,7 +277,6 @@ def _attach_child_data(conn: sqlite3.Connection, table: str, rows: list[dict]) -
 
     for child_table, fk_col, _label in child_specs:
         field_name = _child_field_name(child_table, fk_col)
-        # Default every row to an empty list so the frontend always sees the key.
         for rec in rows:
             rec.setdefault(field_name, [])
 
@@ -324,6 +305,76 @@ def _attach_child_data(conn: sqlite3.Connection, table: str, rows: list[dict]) -
             parent[field_name].append(item)
 
 
+def _build_identity_lookup(conn: sqlite3.Connection) -> dict[str, str]:
+    """
+    Map SID -> canonical display name across users/computers/groups.
+    Users/computers prefer display_name, falling back to
+    username/computer_name when display_name is empty (e.g. built-in
+    accounts like Administrator/Guest/krbtgt).
+    """
+    lookup: dict[str, str] = {}
+    tables = list_tables(conn)
+
+    if "users" in tables:
+        for r in conn.execute('SELECT sid, username, display_name FROM "users"'):
+            sid = (r["sid"] or "").strip()
+            if not sid:
+                continue
+            name = (r["display_name"] or "").strip() or (r["username"] or "").strip()
+            if name:
+                lookup[sid.upper()] = name
+
+    if "computers" in tables:
+        for r in conn.execute('SELECT sid, computer_name, display_name FROM "computers"'):
+            sid = (r["sid"] or "").strip()
+            if not sid:
+                continue
+            name = (r["display_name"] or "").strip() or (r["computer_name"] or "").strip()
+            if name:
+                lookup[sid.upper()] = name
+
+    if "groups" in tables:
+        for r in conn.execute('SELECT group_sid, group_name FROM "groups"'):
+            sid = (r["group_sid"] or "").strip()
+            if not sid:
+                continue
+            name = (r["group_name"] or "").strip()
+            if name:
+                lookup[sid.upper()] = name
+
+    return lookup
+
+
+def _normalize_ace_names(conn: sqlite3.Connection, table: str, records: list[dict]) -> None:
+    """
+    aces/dangerous_ace/extended_rights sometimes store an inconsistent
+    display string for the *principal* side (e.g. sAMAccountName
+    'olivia' instead of 'Olivia Johnson', which the *target* side
+    correctly uses). Re-resolve both target_name and principal against
+    users/computers/groups by SID so the same object always shows the
+    same name on both sides. Well-known/built-in SIDs (Everyone,
+    Authenticated Users, NT AUTHORITY\\SYSTEM, etc.) have no row in
+    those tables, so they fall through untouched.
+    """
+    if table not in ("aces", "dangerous_ace", "extended_rights") or not records:
+        return
+
+    lookup = _build_identity_lookup(conn)
+    if not lookup:
+        return
+
+    for rec in records:
+        p_sid = (rec.get("principal_sid") or "").strip().upper()
+        resolved_p = lookup.get(p_sid)
+        if resolved_p:
+            rec["principal"] = resolved_p
+
+        t_sid = (rec.get("target_sid") or "").strip().upper()
+        resolved_t = lookup.get(t_sid)
+        if resolved_t:
+            rec["target_name"] = resolved_t
+
+
 @app.route("/api/list/<table>")
 def api_list(table: str):
     conn = get_db()
@@ -350,8 +401,6 @@ def api_list(table: str):
         )
         params.extend([f"%{q}%"] * len(cols))
 
-    # Filter Target — matches target_name / target_dn when present on the table
-    # (aces, dangerous_ace, extended_rights all carry these columns).
     target_cols = [c for c in ("target_name", "target_dn") if c in cols]
     if target_q and target_cols:
         where_clauses.append(
@@ -359,7 +408,6 @@ def api_list(table: str):
         )
         params.extend([f"%{target_q}%"] * len(target_cols))
 
-    # Filter Principal — matches principal / principal_sid when present.
     principal_cols = [c for c in ("principal", "principal_sid") if c in cols]
     if principal_q and principal_cols:
         where_clauses.append(
@@ -380,9 +428,8 @@ def api_list(table: str):
     ).fetchall()
 
     records = [row_to_dict(r) for r in rows]
-    # Enrich each row with its child-table data (e.g. users -> admin_rules,
-    # member_of) so paginated list views show the same data as /api/users.
     _attach_child_data(conn, table, records)
+    _normalize_ace_names(conn, table, records)
 
     return jsonify({
         "table": table,

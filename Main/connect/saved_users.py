@@ -1,7 +1,6 @@
 import json
 import os
 
-# Stored alongside the project root (one level above this package)
 _PROJECT_ROOT  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OLD_USERS_FILE = os.path.join(_PROJECT_ROOT, "old_users.json")
 

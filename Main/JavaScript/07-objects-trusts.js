@@ -1,9 +1,3 @@
-/* ═══════════════════════════════════════════════════
-   07-objects-trusts.js
-   Trusts tab: load, render, filter, detail panel.
-   Depends on: 00-globals.js, 01-core.js
-   ═══════════════════════════════════════════════════ */
-
 let trustsFilter = 'all';
 let trustsSearch = '';
 
@@ -21,14 +15,14 @@ async function loadTrusts() {
     const resp = await fetch(url, { method: 'GET' });
     const data = await resp.json().catch(() => null);
     if (!resp.ok || !data) {
-      throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine xətası (HTTP ${resp.status})`);
+      throw new Error((data && (data.error || data.detail)) || `Oxsium SQLite Engine error (HTTP ${resp.status})`);
     }
 
-    /* DB sütun adlarını JS-in gözlədiyi sahələrə çevir */
+
     const raw = Array.isArray(data.records) ? data.records : (Array.isArray(data.rows) ? data.rows : []);
     trustsData = raw.map(t => ({
       ...t,
-      /* DB sütunları artıq düzgün adlardadır — birbaşa istifadə et */
+
       inbound:    Boolean(t.inbound),
       outbound:   Boolean(t.outbound),
       transitive: Boolean(t.transitive),
@@ -45,10 +39,10 @@ async function loadTrusts() {
     setObjectCountStat('cnt-trusts', total);
     document.getElementById('nav-trusts-count').textContent = total;
     document.getElementById('trusts-meta').textContent =
-      `${total} trusts · mənbə: Oxsium SQLite Engine (.db)`;
+      `${total} trusts · source: Oxsium SQLite Engine (.db)`;
 
     renderTrusts();
-    addLog(`Trusts sqlite_reader.py-dən yükləndi: ${total} trust (Oxsium SQLite Engine)`, 'ok');
+    addLog(`Trusts loaded from sqlite_reader.py: ${total} trust (Oxsium SQLite Engine)`, 'ok');
   } catch (err) {
     addLog(`Trusts: ${err.message}`, 'err');
     document.getElementById('tr-table-body').innerHTML = `<div class="tr-empty"><p>${escapeHtml(err.message)}</p></div>`;
