@@ -6,7 +6,7 @@ from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
 
 from connect.config import Config
 from connect.utils import (
-    domain_to_dn, get_netbios_bind_user, is_ntlm_hash,
+    domain_to_dn, get_upn_bind_user, is_ntlm_hash,
     build_ldap_bind_users,
     ldap_escape_filter, _is_ipv4_text, _pick_dc_fqdn_from_entries,
 )
@@ -201,7 +201,7 @@ def _collect_ldap_environment(
     bind_user: str | None = None,
 ) -> dict:
     base_dn   = domain_to_dn(domain)
-    bind_user = bind_user or get_netbios_bind_user(username, domain)
+    bind_user = bind_user or get_upn_bind_user(username, domain)
 
     auth_type    = "SIMPLE"
     bind_secret  = password

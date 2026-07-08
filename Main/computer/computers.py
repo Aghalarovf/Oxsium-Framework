@@ -1,4 +1,3 @@
-
 import os
 import re
 import ctypes
@@ -28,8 +27,7 @@ def domain_to_dn(domain: str) -> str:
 def get_bind_user(username: str, domain: str) -> str:
     if "@" in username or "\\" in username:
         return username
-    netbios = domain.split(".")[0].upper()
-    return f"{netbios}\\{username}"
+    return f"{username}@{domain}"
 
 
 def normalize_value(value):

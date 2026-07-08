@@ -19,7 +19,7 @@ def domain_to_dn(domain: str) -> str:
 def get_bind_user(username: str, domain: str) -> str:
     if "@" in username or "\\" in username:
         return username
-    return f"{domain.split('.')[0].upper()}\\{username}"
+    return f"{username}@{domain}"
 
 
 def normalize_value(value):

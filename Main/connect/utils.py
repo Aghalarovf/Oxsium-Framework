@@ -6,6 +6,27 @@ def is_ntlm_hash(password: str) -> bool:
     return bool(re.match(r"^[a-fA-F0-9]{32}$", password))
 
 
+def get_upn_bind_user(username: str, domain: str) -> str:
+    """Build a UPN-style bind user (user@domain.local); no NETBIOS\\user needed."""
+    raw_user = str(username or "").strip()
+    domain = str(domain or "").strip()
+
+    if "@" in raw_user:
+        return raw_user
+
+    if "\\" in raw_user:
+        local_user = raw_user.split("\\", 1)[-1].strip()
+    else:
+        local_user = raw_user
+
+    if domain:
+        return f"{local_user}@{domain}"
+
+    return local_user
+
+
+# Kept for backwards compatibility with any external callers; no longer used
+# internally for bind-user construction (UPN is used instead).
 def get_netbios_bind_user(username: str, domain: str) -> str:
     if "\\" in username or "@" in username:
         return username
@@ -14,6 +35,11 @@ def get_netbios_bind_user(username: str, domain: str) -> str:
 
 
 def build_ldap_bind_users(username: str, domain: str) -> list[str]:
+    """Return bind-user candidates, UPN-first (user@domain.local).
+
+    NETBIOS\\user is no longer generated - only UPN and, as a last-resort
+    fallback, the raw/local username are tried.
+    """
     raw_user = str(username or "").strip()
     domain = str(domain or "").strip()
     candidates: list[str] = []
@@ -26,8 +52,6 @@ def build_ldap_bind_users(username: str, domain: str) -> list[str]:
     if not raw_user:
         return candidates
 
-    add(raw_user)
-
     if "@" in raw_user:
         local_user = raw_user.split("@", 1)[0].strip()
     elif "\\" in raw_user:
@@ -35,14 +59,13 @@ def build_ldap_bind_users(username: str, domain: str) -> list[str]:
     else:
         local_user = raw_user
 
-    if domain and "@" not in raw_user:
-        add(f"{local_user}@{domain}")
+    # UPN format first: user@domain.local
+    add(get_upn_bind_user(raw_user, domain))
 
-    if domain:
-        netbios = domain.split('.')[0].upper()
-        add(f"{netbios}\\{local_user}")
-
+    # Fallbacks, in case UPN bind is rejected for some reason
+    add(raw_user)
     add(local_user)
+
     return candidates
 
 
