@@ -114,6 +114,8 @@ def get_domain_acls(
     sequential: bool = False,
     deep_scan_minimal: bool = False,
     io_workers: Optional[int] = None,
+    conn=None,
+    base_dn: str | None = None,
 ) -> dict:
 
     flt      = acl_filter or AclFilterConfig()
@@ -130,21 +132,26 @@ def get_domain_acls(
     if auth_type == "NTLM":
         password = f"00000000000000000000000000000000:{password}"
 
+    owns_connection = conn is None
+
     try:
-        base_dn   = domain_to_dn(domain)
+        base_dn   = base_dn or domain_to_dn(domain)
         bind_user = get_bind_user(username, domain)
     except ValueError as e:
         err = _capture_error("parse_domain", domain, e)
         return {"success": False, "error": str(e), "code": 400,
                 "meta": {"error_count": 1, "errors": [err]}}
 
-    conn = None
+    backend = None
     try:
         from ldap3.core.exceptions import (
             LDAPInvalidCredentialsResult,
             LDAPSocketOpenError,
         )
-        conn = Ldap3Backend(ip, bind_user, password, auth_type, ldap_cfg)
+        if owns_connection:
+            backend = Ldap3Backend(ip, bind_user, password, auth_type, ldap_cfg)
+        else:
+            backend = Ldap3Backend.from_connection(conn)
     except LDAPInvalidCredentialsResult as e:
         err = _capture_error("ldap_bind", f"{ip} user={bind_user}", e)
         return {"success": False, "error": "Authentication failed", "code": 401,
@@ -163,7 +170,7 @@ def get_domain_acls(
         _guid_map = None
         if resolve_guids:
             try:
-                _guid_map = _build_guid_map(conn, base_dn, page_size=ldap_cfg.page_size)
+                _guid_map = _build_guid_map(backend, base_dn, page_size=ldap_cfg.page_size)
             except Exception as e:
                 _guid_map = None
                 pre_errors.append(_capture_error("build_guid_map", base_dn, e))
@@ -173,7 +180,7 @@ def get_domain_acls(
         )
 
         collector = AclCollector(
-            conn, base_dn, parser,
+            backend, base_dn, parser,
             page_size=ldap_cfg.page_size,
             guid_map=_guid_map,
             conn_factory=conn_factory,
@@ -190,9 +197,9 @@ def get_domain_acls(
         return {"success": False, "error": f"Internal error: {e}", "code": 500,
                 "meta": {"error_count": len(errors), "errors": errors}}
     finally:
-        if conn is not None:
+        if owns_connection and backend is not None:
             try:
-                conn.unbind()
+                backend.unbind()
             except Exception:
                 pass
 
@@ -330,6 +337,8 @@ def check_sensitive_template_acls(
     output_dir: Optional[str] = None,
     filename: Optional[str] = None,
     resolve_guids: bool = False,
+    conn=None,
+    base_dn: str | None = None,
 ) -> dict:
     if output_dir is None:
         output_dir = str(Config.DOMAIN_OBJECT_DIR)
@@ -346,20 +355,25 @@ def check_sensitive_template_acls(
     if auth_type == "NTLM":
         password = f"00000000000000000000000000000000:{password}"
 
+    owns_connection = conn is None
+
     try:
-        base_dn   = domain_to_dn(domain)
+        base_dn   = base_dn or domain_to_dn(domain)
         bind_user = get_bind_user(username, domain)
     except ValueError as e:
         return {"success": False, "error": str(e), "code": 400}
 
     ldap_cfg = LdapConfig.from_app_config(config)
-    conn = None
+    backend = None
     try:
         from ldap3.core.exceptions import (
             LDAPInvalidCredentialsResult,
             LDAPSocketOpenError,
         )
-        conn = Ldap3Backend(ip, bind_user, password, auth_type, ldap_cfg)
+        if owns_connection:
+            backend = Ldap3Backend(ip, bind_user, password, auth_type, ldap_cfg)
+        else:
+            backend = Ldap3Backend.from_connection(conn)
     except LDAPInvalidCredentialsResult:
         return {"success": False, "error": "Authentication failed", "code": 401}
     except LDAPSocketOpenError:
@@ -368,12 +382,12 @@ def check_sensitive_template_acls(
         return {"success": False, "error": str(e), "code": 500}
 
     try:
-        sid_map, disabled_sids = _build_sid_map(conn, base_dn,
+        sid_map, disabled_sids = _build_sid_map(backend, base_dn,
                                                 page_size=ldap_cfg.page_size)
         _guid_map = None
         if resolve_guids:
             try:
-                _guid_map = _build_guid_map(conn, base_dn, page_size=ldap_cfg.page_size)
+                _guid_map = _build_guid_map(backend, base_dn, page_size=ldap_cfg.page_size)
             except Exception:
                 _guid_map = None
 
@@ -392,7 +406,7 @@ def check_sensitive_template_acls(
         for template_key, (dn_template, description) in selected.items():
             dn = dn_template.format(base_dn=base_dn)
 
-            raw_sd, entry = _fetch_object_sd(conn, dn, sdflags=_SD_FLAGS_FULL)
+            raw_sd, entry = _fetch_object_sd(backend, dn, sdflags=_SD_FLAGS_FULL)
 
             if raw_sd is None:
                 results.append({
@@ -471,9 +485,9 @@ def check_sensitive_template_acls(
     except Exception as e:
         return {"success": False, "error": f"Internal error: {e}", "code": 500}
     finally:
-        if conn is not None:
+        if owns_connection and backend is not None:
             try:
-                conn.unbind()
+                backend.unbind()
             except Exception:
                 pass
 
@@ -487,6 +501,8 @@ def deep_scan_domain_acls(
     acl_filter: Optional[AclFilterConfig] = None,
     output_dir: Optional[str] = None,
     filename: Optional[str] = None,
+    conn=None,
+    base_dn: str | None = None,
 ) -> dict:
     if output_dir is None:
         output_dir = str(Config.DOMAIN_OBJECT_DIR)
@@ -514,6 +530,8 @@ def deep_scan_domain_acls(
         config=config,
         acl_filter=_no_filter,
         scope=ObjectScope.DEEP_SCAN,
+        conn=conn,
+        base_dn=base_dn,
     )
 
     if not result.get("success"):

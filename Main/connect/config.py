@@ -56,9 +56,25 @@ class Config:
     RATE_LIMIT_DCSYNC:  str = os.getenv("RATE_LIMIT_DCSYNC",  "60 per minute")
 
 
+_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+_LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
+_LOG_FILE_PATH = Path(os.getenv("CONNECTION_LOG_PATH", str(Config.PROJECT_ROOT / "connection.log")))
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    format=_LOG_FORMAT,
+    datefmt=_LOG_DATEFMT,
 )
+
 logger = logging.getLogger("ad_api")
+
+try:
+    _file_handler = logging.FileHandler(_LOG_FILE_PATH, encoding="utf-8")
+    _file_handler.setLevel(logging.DEBUG)
+    _file_handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
+    logger.addHandler(_file_handler)
+    logger.setLevel(logging.DEBUG)
+    logger.info("File logging enabled -> %s", _LOG_FILE_PATH)
+except Exception as _log_exc:
+    logger.warning("Could not attach file handler for connection.log: %s", _log_exc)

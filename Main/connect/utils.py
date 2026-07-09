@@ -2,6 +2,37 @@ import re
 import ipaddress
 
 
+# Common Active Directory sub-error codes embedded in LDAP bind error messages
+# (e.g. "80090308: LdapErr: ... data 775, v4563"). These explain the *real*
+# reason a bind was rejected, which is often not a credential/format issue.
+_AD_BIND_SUBCODES: dict[str, str] = {
+    "525": "İstifadəçi adı tapılmadı (user not found)",
+    "52e": "Şifrə/istifadəçi adı yanlışdır (invalid credentials)",
+    "530": "Bu hesab hazırkı saatlarda giriş etməyə icazəli deyil (logon hours restriction)",
+    "531": "Bu hesab bu iş stansiyasından giriş etməyə icazəli deyil (workstation restriction)",
+    "532": "Hesabın şifrəsinin vaxtı bitib (password expired)",
+    "533": "Hesab deaktiv edilib (account disabled)",
+    "701": "Hesabın vaxtı bitib (account expired)",
+    "773": "İstifadəçi ilk növbədə şifrəni dəyişməlidir (must reset password)",
+    "775": "Hesab kilidlənib (account locked out)",
+}
+
+
+def extract_ad_bind_subcode(message: str) -> tuple[str, str] | None:
+    """Extract the AD sub-error code (e.g. '775') from an LDAP bind error
+    message and return (code, human_readable_reason), or None if not found."""
+    if not message:
+        return None
+    match = re.search(r"data\s+([0-9a-fA-F]{2,4})\b", message)
+    if not match:
+        return None
+    code = match.group(1).lower()
+    reason = _AD_BIND_SUBCODES.get(code)
+    if reason:
+        return code, reason
+    return code, "Naməlum AD alt-xəta kodu"
+
+
 def is_ntlm_hash(password: str) -> bool:
     return bool(re.match(r"^[a-fA-F0-9]{32}$", password))
 
@@ -37,8 +68,11 @@ def get_netbios_bind_user(username: str, domain: str) -> str:
 def build_ldap_bind_users(username: str, domain: str) -> list[str]:
     """Return bind-user candidates, UPN-first (user@domain.local).
 
-    NETBIOS\\user is no longer generated - only UPN and, as a last-resort
-    fallback, the raw/local username are tried.
+    Order tried:
+      1. UPN format: user@domain.local
+      2. Raw username, as passed in by the caller
+      3. Local username (no domain/netbios prefix)
+      4. NETBIOS format: DOMAIN\\user (last-resort fallback)
     """
     raw_user = str(username or "").strip()
     domain = str(domain or "").strip()
@@ -65,6 +99,10 @@ def build_ldap_bind_users(username: str, domain: str) -> list[str]:
     # Fallbacks, in case UPN bind is rejected for some reason
     add(raw_user)
     add(local_user)
+
+    # Last resort: NETBIOS\user format
+    if domain:
+        add(get_netbios_bind_user(local_user, domain))
 
     return candidates
 

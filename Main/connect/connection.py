@@ -120,6 +120,7 @@ from connect.ldap_core     import (
     _collect_ldap_environment_with_fallback,
     _collect_counts_via_enumeration_fallback,
     _run_enumeration_with_target_fallback,
+    _build_ldap_targets,
 )
 from connect.protocols     import connect_ldap_fast, connect_local, PROTOCOL_HANDLERS
 from connect.shell         import (
@@ -132,6 +133,8 @@ from connect.flask_helpers import (
 )
 from connect.connection_fast import run_connect_strategy
 from connect.connection_deep import apply_deep_defaults, enrich_with_env_probe
+from connect.ldap_session import LdapSession, LdapSessionError
+from connect import session_manager
 
 
 
@@ -883,7 +886,7 @@ def test_connection():
     if proto not in Config.PROTO_PORTS:
         return jsonify({"error": f"Unknown protocol: {proto}"}), 400
 
-    if proto == "ldap":
+    if proto in ("ldap", "ldaps"):
         ports = _probe_ldap_ports(ip)
         port_open = any(port_info["port_open"] for port_info in ports)
         detected_via = next((port_info["port"] for port_info in ports if port_info["port_open"]), ports[0]["port"] if ports else 0)
@@ -893,7 +896,7 @@ def test_connection():
                 "host_up": True,
                 "detected_via": detected_via,
                 "port_open": True,
-                "port": 389,
+                "port": 636 if proto == "ldaps" else 389,
                 "protocol": proto,
                 "reachable": True,
                 "retries": 1,
@@ -905,7 +908,7 @@ def test_connection():
             "host_up": any(port_info["result"] == "closed" for port_info in ports),
             "detected_via": detected_via,
             "port_open": False,
-            "port": 389,
+            "port": 636 if proto == "ldaps" else 389,
             "protocol": proto,
             "reachable": False,
             "attempts": 1,
@@ -967,113 +970,156 @@ def _clear_domain_object_dir() -> None:
     )
 
 
-def _run_full_collector_pipeline(enum_req: dict) -> None:
+def _run_full_collector_pipeline(enum_req: dict, shared_session: "LdapSession | None" = None) -> None:
 
-    ip = enum_req.get("ip") or enum_req.get("dc") or enum_req.get("domain")
-    domain = enum_req.get("domain")
+    ip       = enum_req.get("ip") or enum_req.get("dc") or enum_req.get("domain")
+    domain   = enum_req.get("domain")
+    username = enum_req.get("username")
+    password = enum_req.get("password") or enum_req.get("hash")
+    use_ssl  = str(enum_req.get("protocol", "")).strip().lower() == "ldaps"
     logger.info("collector pipeline started: ip=%s domain=%s", ip, domain)
 
     _clear_domain_object_dir()
-    try:
-        domain_info_result = _run_enumeration_with_target_fallback(enum_req, get_domain_info)
-        _write_domain_info_jsonl_snapshot(domain_info_result, is_local=False)
-    except Exception as exc:
-        logger.warning("collector pipeline: dominfo collector failed: %s", exc)
+
+    session = shared_session
+
+    if session is not None:
+        logger.info("collector pipeline: reusing shared LDAP session (ip=%s)", ip)
+    else:
+        targets = _build_ldap_targets(enum_req)
+        last_error = None
+        for target in targets:
+            try:
+                session = LdapSession(target, domain, username, password, Config, use_ssl=use_ssl).open()
+                logger.info("collector pipeline: LDAP session established on %s", target)
+                break
+            except LdapSessionError as exc:
+                last_error = exc
+                logger.warning("collector pipeline: bind failed on %s: %s", target, exc)
+                continue
+
+        if session is None:
+            logger.error("collector pipeline: could not establish LDAP session (%s)", last_error)
+            return
+
+    conn    = session.conn
+    base_dn = session.base_dn
 
     try:
-        acl_stream_lock = threading.Lock()
-        acl_streamed: list[dict] = []
+        try:
+            domain_info_result = get_domain_info(
+                ip, domain, username, password, Config, conn=conn, base_dn=base_dn
+            )
+            _write_domain_info_jsonl_snapshot(domain_info_result, is_local=False)
+        except Exception as exc:
+            logger.warning("collector pipeline: dominfo collector failed: %s", exc)
 
-        def _acl_stream_write(records: list[dict]) -> None:
-            with acl_stream_lock:
-                acl_streamed.extend(records)
-                try:
-                    out_path = _jsonl_snapshot_path(DOMAIN_ACES_JSON)
-                    DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
-                    partial_meta = {
-                        "generated_at": datetime.utcnow().isoformat() + "Z",
-                        "source": "domain",
-                        "success": False,
-                        "count": len(acl_streamed),
-                        "error": None,
-                        "meta": {"partial": True, "note": "ACL scan davam edir"},
-                    }
-                    _write_acl_jsonl_snapshot(out_path, partial_meta, acl_streamed)
-                except Exception as stream_exc:
-                    logger.warning("acl pipeline stream write failed: %s", stream_exc)
+        try:
+            acl_stream_lock = threading.Lock()
+            acl_streamed: list[dict] = []
 
-        def _acl_collector(ip_, domain_, username_, password_, config_):
-            return get_domain_acls(
-                ip_, domain_, username_, password_, config_,
+            def _acl_stream_write(records: list[dict]) -> None:
+                with acl_stream_lock:
+                    acl_streamed.extend(records)
+                    try:
+                        out_path = _jsonl_snapshot_path(DOMAIN_ACES_JSON)
+                        DOMAIN_OBJECT_DIR.mkdir(parents=True, exist_ok=True)
+                        partial_meta = {
+                            "generated_at": datetime.utcnow().isoformat() + "Z",
+                            "source": "domain",
+                            "success": False,
+                            "count": len(acl_streamed),
+                            "error": None,
+                            "meta": {"partial": True, "note": "ACL scan davam edir"},
+                        }
+                        _write_acl_jsonl_snapshot(out_path, partial_meta, acl_streamed)
+                    except Exception as stream_exc:
+                        logger.warning("acl pipeline stream write failed: %s", stream_exc)
+
+            acl_result = get_domain_acls(
+                ip, domain, username, password, Config,
                 acl_filter=AclFilterConfig(),
                 on_records=_acl_stream_write,
+                conn=conn, base_dn=base_dn,
             )
 
-        acl_result = _run_enumeration_with_target_fallback(enum_req, _acl_collector)
-  
-        if acl_result.get("success") or acl_streamed:
-            final_result = acl_result if acl_result.get("success") else {
-                **acl_result,
-                "acls": acl_streamed,
-                "count": len(acl_streamed),
-            }
-            _write_domain_aces_snapshot(final_result, is_local=False)
-            _write_domain_extended_rights_snapshot(final_result, is_local=False)
-            _write_domain_dangerous_ace_snapshot(final_result, is_local=False)
-    except Exception as exc:
-        logger.warning("collector pipeline: acl collector failed: %s", exc)
+            if acl_result.get("success") or acl_streamed:
+                final_result = acl_result if acl_result.get("success") else {
+                    **acl_result,
+                    "acls": acl_streamed,
+                    "count": len(acl_streamed),
+                }
+                _write_domain_aces_snapshot(final_result, is_local=False)
+                _write_domain_extended_rights_snapshot(final_result, is_local=False)
+                _write_domain_dangerous_ace_snapshot(final_result, is_local=False)
+        except Exception as exc:
+            logger.warning("collector pipeline: acl collector failed: %s", exc)
 
-    try:
-        _run_enumeration_with_target_fallback(enum_req, groups.get_domain_groups)
-    except Exception as exc:
-        logger.warning("collector pipeline: groups collector failed: %s", exc)
+        try:
+            groups.get_domain_groups(ip, domain, username, password, Config,
+                                      conn=conn, base_dn=base_dn)
+        except Exception as exc:
+            logger.warning("collector pipeline: groups collector failed: %s", exc)
 
-    try:
-        _run_enumeration_with_target_fallback(enum_req, groups.get_all_group_members)
-    except Exception as exc:
-        logger.warning("collector pipeline: group_member collector failed: %s", exc)
+        try:
+            groups.get_all_group_members(ip, domain, username, password, Config,
+                                          conn=conn, base_dn=base_dn)
+        except Exception as exc:
+            logger.warning("collector pipeline: group_member collector failed: %s", exc)
 
-    try:
-        gpos_result = _run_enumeration_with_target_fallback(enum_req, gpos.get_domain_gpos)
-        _write_domain_gpos_snapshot(gpos_result)
-    except Exception as exc:
-        logger.warning("collector pipeline: gpos collector failed: %s", exc)
+        try:
+            gpos_result = gpos.get_domain_gpos(ip, domain, username, password, Config,
+                                                conn=conn, base_dn=base_dn)
+            _write_domain_gpos_snapshot(gpos_result)
+        except Exception as exc:
+            logger.warning("collector pipeline: gpos collector failed: %s", exc)
 
-    try:
-        ous_result = _run_enumeration_with_target_fallback(enum_req, ous.get_domain_ous)
-        _write_domain_object_snapshot(
-            filename="domain_ous.json",
-            result=ous_result,
-            is_local=False,
-            data_key="ous",
-            legacy_path=LEGACY_DOMAIN_OUS_JSON,
-        )
-    except Exception as exc:
-        logger.warning("collector pipeline: ous collector failed: %s", exc)
+        try:
+            ous_result = ous.get_domain_ous(ip, domain, username, password, Config,
+                                             conn=conn, base_dn=base_dn)
+            _write_domain_object_snapshot(
+                filename="domain_ous.json",
+                result=ous_result,
+                is_local=False,
+                data_key="ous",
+                legacy_path=LEGACY_DOMAIN_OUS_JSON,
+            )
+        except Exception as exc:
+            logger.warning("collector pipeline: ous collector failed: %s", exc)
 
-    try:
-        trusts_result = _run_enumeration_with_target_fallback(enum_req, trusts.get_domain_trusts)
-        _write_domain_object_snapshot(
-            filename="domain_trusts.json",
-            result=trusts_result,
-            is_local=False,
-            data_key="trusts",
-            legacy_path=LEGACY_DOMAIN_TRUSTS_JSON,
-        )
-    except Exception as exc:
-        logger.warning("collector pipeline: trusts collector failed: %s", exc)
+        try:
+            trusts_result = trusts.get_domain_trusts(ip, domain, username, password, Config,
+                                                       conn=conn, base_dn=base_dn)
+            _write_domain_object_snapshot(
+                filename="domain_trusts.json",
+                result=trusts_result,
+                is_local=False,
+                data_key="trusts",
+                legacy_path=LEGACY_DOMAIN_TRUSTS_JSON,
+            )
+        except Exception as exc:
+            logger.warning("collector pipeline: trusts collector failed: %s", exc)
 
-    try:
-        computers_result = _run_enumeration_with_target_fallback(enum_req, computers.get_domain_computers)
-        _write_domain_computers_jsonl_snapshot(result=computers_result, is_local=False)
-    except Exception as exc:
-        logger.warning("collector pipeline: computers collector failed: %s", exc)
+        try:
+            computers_result = computers.get_domain_computers(ip, domain, username, password, Config,
+                                                                conn=conn, base_dn=base_dn)
+            _write_domain_computers_jsonl_snapshot(result=computers_result, is_local=False)
+        except Exception as exc:
+            logger.warning("collector pipeline: computers collector failed: %s", exc)
 
-    try:
-        users_result = _run_enumeration_with_target_fallback(enum_req, users.get_domain_users)
-        _write_domain_users_snapshot(users_result, is_local=False)
-    except Exception as exc:
-        logger.warning("collector pipeline: users collector failed: %s", exc)
+        try:
+            users_result = users.get_domain_users(ip, domain, username, password, Config,
+                                                    conn=conn, base_dn=base_dn)
+            _write_domain_users_snapshot(users_result, is_local=False)
+        except Exception as exc:
+            logger.warning("collector pipeline: users collector failed: %s", exc)
+
+    finally:
+        if shared_session is None:
+            session.close()
+            logger.info("collector pipeline: LDAP session closed")
+        else:
+            logger.info("collector pipeline: leaving shared LDAP session open for reuse")
 
     with _db_build_lock:
         global _db_build_timer
@@ -1127,7 +1173,7 @@ def connect():
     if proto not in PROTOCOL_HANDLERS:
         return jsonify({"error": f"Unsupported protocol: {proto}"}), 400
 
-    if proto == "ldap":
+    if proto in ("ldap", "ldaps"):
         ldap_ports = _probe_ldap_ports(ip, timeout=Config.LDAP_CONNECT_TIMEOUT)
         if _ldap_ports_refused(ldap_ports):
             return jsonify({
@@ -1170,9 +1216,40 @@ def connect():
         enum_req["protocol"] = proto
         enum_req["dc"]       = result.get("dc") or ip
 
+        # Open ONE shared LDAP session here and register it so every
+        # subsequent enumeration endpoint (/api/users, /api/computers,
+        # /api/groups, /api/ous, /api/gpos, /api/trusts, /api/acl) reuses
+        # this same connection instead of each opening its own.
+        shared_session = None
+        try:
+            session_targets = _build_ldap_targets(enum_req)
+            last_session_error = None
+            for target in session_targets:
+                try:
+                    shared_session = LdapSession(
+                        target, domain, username, auth_secret, Config,
+                        use_ssl=(proto == "ldaps"),
+                    ).open()
+                    logger.info("/api/connect: shared LDAP session established on %s", target)
+                    break
+                except LdapSessionError as exc:
+                    last_session_error = exc
+                    logger.warning("/api/connect: shared session bind failed on %s: %s", target, exc)
+                    continue
+            if shared_session is not None:
+                session_manager.set_active_session(shared_session, ip, domain, username)
+            else:
+                logger.warning(
+                    "/api/connect: could not establish a shared LDAP session (%s); "
+                    "enumeration endpoints will fall back to per-request connections",
+                    last_session_error,
+                )
+        except Exception as exc:
+            logger.warning("/api/connect: shared session setup raised an error: %s", exc, exc_info=True)
+
         threading.Thread(
             target=_run_full_collector_pipeline,
-            args=(enum_req,),
+            args=(enum_req, shared_session),
             daemon=True,
         ).start()
 
@@ -1203,7 +1280,7 @@ def list_users():
 
     proto_out_path = Path(PROJECT_ROOT) / "domain_users.pb"
 
-    def _enum_users_with_proto(ip, domain, username, password, config):
+    def _enum_users_with_proto(ip, domain, username, password, config, conn=None, base_dn=None):
         return users.get_domain_users(
             ip,
             domain,
@@ -1211,6 +1288,8 @@ def list_users():
             password,
             config,
             proto_output_path=str(proto_out_path),
+            conn=conn,
+            base_dn=base_dn,
         )
 
     local_mode = is_local_request(req)
@@ -1432,10 +1511,11 @@ def list_acl_entries():
             scope_filter       = list(acl_filter_raw.get("scope_filter",       [])),
         )
 
-        def _get_acls_with_filter(ip, domain, username, password, config):
+        def _get_acls_with_filter(ip, domain, username, password, config, conn=None, base_dn=None):
             return get_domain_acls(
                 ip, domain, username, password, config,
                 acl_filter=acl_filter,
+                conn=conn, base_dn=base_dn,
             )
 
         should_refresh_snapshots = False

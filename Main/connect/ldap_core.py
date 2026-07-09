@@ -1,7 +1,8 @@
+import inspect
 import logging
 import re
 
-from ldap3 import Server, Connection, ALL, BASE, SUBTREE
+from ldap3 import Server, Connection, ALL, BASE, SUBTREE, AUTO_BIND_TLS_BEFORE_BIND, AUTO_BIND_NO_TLS
 from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
 
 from connect.config import Config
@@ -9,10 +10,77 @@ from connect.utils import (
     domain_to_dn, get_upn_bind_user, is_ntlm_hash,
     build_ldap_bind_users,
     ldap_escape_filter, _is_ipv4_text, _pick_dc_fqdn_from_entries,
+    extract_ad_bind_subcode,
 )
 from connect.network import check_port
 
 logger = logging.getLogger("ad_api")
+
+
+def open_standalone_connection(
+    ip: str,
+    username: str,
+    password: str,
+    domain: str,
+    config,
+    use_ssl: bool = False,
+) -> tuple[Connection, str]:
+    """Single source of truth for collector modules that need to open their
+    OWN LDAP connection (i.e. no shared session was available/reused).
+
+    Every collector (users, groups, trusts, ous, gpos, acl ...) used to
+    hand-roll this with a plain `Connection(..., auto_bind=True)` call and a
+    single bind_user format. That skipped the StartTLS-before-bind step, so
+    on any DC that enforces LDAP signing it failed with
+    'automatic bind not successful - strongerAuthRequired' -- even though
+    the exact same credentials worked fine through /api/connect, which DOES
+    go through `_open_ldap_connection` (StartTLS first, LDAPS fallback).
+
+    Collector modules should call this instead of building ldap3.Connection
+    directly, so every code path -- shared session AND standalone fallback
+    -- authenticates the same way.
+
+    Returns (conn, base_dn). Caller is responsible for conn.unbind().
+    """
+    secret = password
+    auth_type = "SIMPLE"
+    if is_ntlm_hash(password):
+        secret = f"00000000000000000000000000000000:{password}"
+        auth_type = "NTLM"
+
+    base_dn = domain_to_dn(domain)
+
+    last_error: Exception | None = None
+    for bind_user in build_ldap_bind_users(username, domain):
+        try:
+            conn = _open_ldap_connection(
+                ldap_target=ip,
+                bind_user=bind_user,
+                bind_secret=secret,
+                auth_type=auth_type,
+                use_ssl=use_ssl,
+            )
+            return conn, base_dn
+        except (LDAPInvalidCredentialsResult, LDAPBindError) as exc:
+            last_error = exc
+            if _is_ldap_bind_failure(str(exc)):
+                continue
+            raise
+    raise last_error or LDAPBindError("LDAP bind failed")
+
+
+def enum_fn_supports_shared_session(enum_fn) -> bool:
+    """Inspect enum_fn's signature to see if it accepts conn/base_dn kwargs,
+    instead of blindly calling it and catching TypeError. Catching TypeError
+    is unreliable: a TypeError raised *inside* the function body (a real
+    bug) would be silently swallowed and misreported as 'unsupported'."""
+    try:
+        params = inspect.signature(enum_fn).parameters
+    except (TypeError, ValueError):
+        return False
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return True
+    return "conn" in params and "base_dn" in params
 
 
 def _normalize_ldap_target(value: str) -> str:
@@ -101,6 +169,10 @@ def _is_ldap_bind_failure(message: str) -> bool:
     ))
 
 
+def _is_ldaps_protocol(protocol: str) -> bool:
+    return str(protocol or "").strip().lower() == "ldaps"
+
+
 def _collect_ldap_environment_for_target(
     ldap_target: str,
     username: str,
@@ -121,24 +193,37 @@ def _collect_ldap_environment_for_target(
             )
             env["ldap_target"] = ldap_target
             env["bind_user"] = bind_user
+            logger.info("LDAP bind SUCCEEDED with bind_user=%s target=%s", bind_user, ldap_target)
             return {"success": True, "data": env}
         except (LDAPInvalidCredentialsResult, LDAPBindError) as exc:
             last_error = exc
+            logger.error(
+                "LDAP bind RAW error | target=%s bind_user=%s exc_type=%s message=%s",
+                ldap_target, bind_user, type(exc).__name__, str(exc),
+                exc_info=True,
+            )
             if _is_ldap_bind_failure(str(exc)):
                 continue
             break
         except Exception as exc:
             last_error = exc
+            logger.error(
+                "LDAP connection RAW error | target=%s bind_user=%s exc_type=%s message=%s",
+                ldap_target, bind_user, type(exc).__name__, str(exc),
+                exc_info=True,
+            )
             if _is_retryable_ldap_error(str(exc)):
                 return {"success": False, "error": str(exc), "code": 503}
             break
 
     if last_error and _is_ldap_bind_failure(str(last_error)):
+        subcode = extract_ad_bind_subcode(str(last_error))
+        detail = f" AD sub-error: {subcode[0]} — {subcode[1]}." if subcode else ""
         return {
             "success": False,
             "error": (
                 f"LDAP bind failed for {username}; tried UPN, NETBIOS, and raw username formats. "
-                f"Verify the AD logon name (for example user@domain or DOMAIN\\user)."
+                f"Verify the AD logon name (for example user@domain or DOMAIN\\user).{detail}"
             ),
             "code": 401,
         }
@@ -147,6 +232,53 @@ def _collect_ldap_environment_for_target(
 
 
 def _run_enumeration_with_target_fallback(req: dict, enum_fn):
+    # Prefer the single shared LDAP connection opened by /api/connect, so
+    # each collector doesn't have to open (and re-authenticate) its own
+    # connection. Falls back to the old per-target connect behaviour if
+    # no matching shared session is currently open.
+    from connect import session_manager
+
+    shared_session = session_manager.get_active_session(
+        req.get("ip"), req.get("domain"), req.get("username"),
+    )
+    if shared_session is not None:
+        if not enum_fn_supports_shared_session(enum_fn):
+            logger.warning(
+                "enum_fn %s does not accept conn/base_dn -- update it to support "
+                "shared-session reuse; falling back to per-target connect",
+                getattr(enum_fn, "__name__", enum_fn),
+            )
+        else:
+            try:
+                # IMPORTANT: use the IP the shared session actually bound with,
+                # not req.get("dc"). Even when conn= is passed and the main
+                # collector doesn't open a new connection, some enum_fn's
+                # (e.g. get_domain_acls) still use this positional "ip" to
+                # open *additional* connections themselves -- e.g. parallel
+                # ACL workers via make_conn_factory(). If we hand them the
+                # DC's self-reported hostname (often unresolvable from the
+                # client, e.g. dc.sequel.htb) instead of the IP the shared
+                # session proved reachable, every one of those extra
+                # connections fails with "invalid server address", even
+                # though the shared session itself is healthy.
+                result = enum_fn(
+                    shared_session.ip or req.get("ip"),
+                    req["domain"], req["username"], req["password"], Config,
+                    conn=shared_session.conn, base_dn=shared_session.base_dn,
+                )
+                if result.get("success"):
+                    result.setdefault("meta", {})
+                    result["meta"]["shared_session"] = True
+                    return result
+                logger.warning(
+                    "Enumeration via shared session failed (%s), falling back to per-target connect",
+                    result.get("error"),
+                )
+            except Exception as exc:
+                # A real bug inside enum_fn now surfaces here instead of being
+                # mistaken for "doesn't support shared sessions".
+                logger.warning("Enumeration via shared session raised %s, falling back to per-target connect", exc, exc_info=True)
+
     last_result = None
     targets = _build_ldap_targets(req)
 
@@ -192,6 +324,87 @@ def _paged_count(conn: Connection, base_dn: str, ldap_filter: str) -> int:
     return count
 
 
+def _open_ldap_connection(
+    *,
+    ldap_target: str,
+    bind_user: str,
+    bind_secret: str,
+    auth_type: str,
+    use_ssl: bool,
+) -> Connection:
+    """Open an LDAP connection, trying plain LDAP first and only falling
+    back to LDAPS if the DC rejects the plain bind for a channel-security
+    reason (e.g. 'strongerAuthRequired' when LDAP signing is enforced).
+
+    If the caller explicitly asked for LDAPS (use_ssl=True), we skip
+    straight to LDAPS and never attempt plain LDAP.
+    """
+    attempts: list[tuple[bool, int, int]] = []
+    if use_ssl:
+        # Caller explicitly wants LDAPS -- go straight there.
+        attempts.append((True, 636, AUTO_BIND_NO_TLS))
+    else:
+        # 1) Plain LDAP, upgraded in-band via StartTLS before the bind.
+        #    This satisfies "LDAP signing required" DCs without needing
+        #    the dedicated LDAPS port.
+        attempts.append((False, 389, AUTO_BIND_TLS_BEFORE_BIND))
+        # 2) Fallback: full LDAPS on 636, only tried if (1) fails.
+        attempts.append((True, 636, AUTO_BIND_NO_TLS))
+
+    last_exc: Exception | None = None
+    for attempt_index, (attempt_ssl, port, bind_mode) in enumerate(attempts):
+        try:
+            server = Server(
+                ldap_target,
+                port=port,
+                use_ssl=attempt_ssl,
+                get_info=ALL,
+                connect_timeout=Config.LDAP_CONNECT_TIMEOUT,
+            )
+            conn = Connection(
+                server,
+                user=bind_user,
+                password=bind_secret,
+                authentication=auth_type,
+                auto_bind=bind_mode,
+                receive_timeout=Config.LDAP_RECEIVE_TIMEOUT,
+            )
+            if attempt_index > 0:
+                logger.info(
+                    "LDAP connection succeeded on fallback attempt (ssl=%s port=%s) for target=%s",
+                    attempt_ssl, port, ldap_target,
+                )
+            return conn
+        except (LDAPInvalidCredentialsResult,) as exc:
+            # Real credential rejection -- no point retrying with a
+            # different transport, propagate immediately.
+            raise
+        except LDAPBindError as exc:
+            last_exc = exc
+            logger.warning(
+                "LDAP bind attempt failed (ssl=%s port=%s) target=%s: %s -- %s",
+                attempt_ssl, port, ldap_target, str(exc),
+                "trying LDAPS fallback" if attempt_index + 1 < len(attempts) else "no more fallbacks",
+            )
+            if attempt_index + 1 < len(attempts):
+                continue
+            raise
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "LDAP connection error (ssl=%s port=%s) target=%s: %s -- %s",
+                attempt_ssl, port, ldap_target, str(exc),
+                "trying LDAPS fallback" if attempt_index + 1 < len(attempts) else "no more fallbacks",
+            )
+            if attempt_index + 1 < len(attempts):
+                continue
+            raise
+
+    if last_exc:
+        raise last_exc
+    raise LDAPBindError("LDAP connection could not be established")
+
+
 def _collect_ldap_environment(
     ldap_target: str,
     username: str,
@@ -209,20 +422,12 @@ def _collect_ldap_environment(
         bind_secret = f"00000000000000000000000000000000:{password}"
         auth_type   = "NTLM"
 
-    server = Server(
-        ldap_target,
-        port=636 if use_ssl else 389,
+    conn = _open_ldap_connection(
+        ldap_target=ldap_target,
+        bind_user=bind_user,
+        bind_secret=bind_secret,
+        auth_type=auth_type,
         use_ssl=use_ssl,
-        get_info=ALL,
-        connect_timeout=Config.LDAP_CONNECT_TIMEOUT,
-    )
-    conn = Connection(
-        server,
-        user=bind_user,
-        password=bind_secret,
-        authentication=auth_type,
-        auto_bind=True,
-        receive_timeout=Config.LDAP_RECEIVE_TIMEOUT,
     )
 
     counts: dict[str, int] = {}
@@ -346,12 +551,14 @@ def _collect_ldap_environment(
 
 def _collect_ldap_environment_with_fallback(req: dict) -> dict:
     last_error = None
+    use_ssl = _is_ldaps_protocol(req.get("protocol"))
     for target in _build_ldap_targets(req):
         result = _collect_ldap_environment_for_target(
             target,
             req["username"],
             req["password"],
             req["domain"],
+            use_ssl=use_ssl,
         )
         if result.get("success"):
             return result

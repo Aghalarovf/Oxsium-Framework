@@ -122,19 +122,30 @@ class ImpacketParser:
 
 
 class Ldap3Backend:
-    def __init__(self, ip: str, bind_user: str, password: str,
-                 auth_type: str, cfg: LdapConfig) -> None:
-        from ldap3 import ALL, Server, Connection
+    def __init__(self, ip: str = None, bind_user: str = None, password: str = None,
+                 auth_type: str = None, cfg: LdapConfig = None, _conn=None) -> None:
+        if _conn is not None:
+            self._conn = _conn
+            return
+
+        # Route through connect.ldap_core._open_ldap_connection instead of a
+        # raw ldap3.Connection(auto_bind=True) call. That raw call skips
+        # StartTLS-before-bind, so on any DC that enforces LDAP signing it
+        # fails with "automatic bind not successful - strongerAuthRequired"
+        # even though the exact same credentials work fine through
+        # /api/connect (which does StartTLS first, LDAPS fallback second).
+        # This keeps every ACL code path (owns_connection here, and each
+        # parallel worker created via make_conn_factory below) on the same
+        # signing-safe bind logic as the rest of the app.
+        from connect.ldap_core import _open_ldap_connection
         from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
 
-        server = Server(ip, get_info=ALL, connect_timeout=cfg.connect_timeout)
-        self._conn = Connection(
-            server,
-            user=bind_user,
-            password=password,
-            authentication=auth_type,
-            auto_bind=True,
-            receive_timeout=cfg.receive_timeout,
+        self._conn = _open_ldap_connection(
+            ldap_target=ip,
+            bind_user=bind_user,
+            bind_secret=password,
+            auth_type=auth_type,
+            use_ssl=False,
         )
         if not self._conn.bound:
             result_code = (self._conn.result or {}).get("result")
@@ -148,6 +159,10 @@ class Ldap3Backend:
                 f"LDAP bind failed (bind_user={bind_user!r}): "
                 f"{self._conn.result}"
             )
+
+    @classmethod
+    def from_connection(cls, conn) -> "Ldap3Backend":
+        return cls(_conn=conn)
 
     def search(self, base: str, ldap_filter: str, **kwargs) -> None:
         self._conn.search(base, ldap_filter, **kwargs)

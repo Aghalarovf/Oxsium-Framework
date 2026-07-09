@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from ldap3 import Server, Connection, ALL, SUBTREE
 from ldap3.core.exceptions import LDAPInvalidCredentialsResult, LDAPSocketOpenError
 
+from connect.ldap_core import open_standalone_connection
+
 
 def is_ntlm_hash(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Fa-f0-9]{32}", value))
@@ -232,25 +234,15 @@ def _parse_forest_trust_info(raw) -> list:
     return []
 
 
-def get_domain_trusts(ip, domain, username, password, config):
-    auth_type = "SIMPLE"
-    if is_ntlm_hash(password):
-        password = f"00000000000000000000000000000000:{password}"
-        auth_type = "NTLM"
+def get_domain_trusts(ip, domain, username, password, config, conn=None, base_dn=None):
+    owns_connection = conn is None
 
-    base_dn = domain_to_dn(domain)
-    bind_user = get_bind_user(username, domain)
+    if not owns_connection:
+        base_dn = base_dn or domain_to_dn(domain)
 
     try:
-        server = Server(ip, get_info=ALL, connect_timeout=config.LDAP_CONNECT_TIMEOUT)
-        conn = Connection(
-            server,
-            user=bind_user,
-            password=password,
-            authentication=auth_type,
-            auto_bind=True,
-            receive_timeout=config.LDAP_RECEIVE_TIMEOUT,
-        )
+        if owns_connection:
+            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
 
         attrs = [
             "cn", "distinguishedName", "flatName", "trustPartner",
@@ -374,7 +366,8 @@ def get_domain_trusts(ip, domain, username, password, config):
                 "dangerous":            posture["dangerous"],
             })
 
-        conn.unbind()
+        if owns_connection:
+            conn.unbind()
 
         result = {"success": True, "trusts": trusts, "count": len(trusts)}
 

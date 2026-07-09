@@ -9,6 +9,8 @@ from pathlib import Path
 from ldap3 import ALL, BASE, SUBTREE, Connection, Server
 from ldap3.core.exceptions import LDAPInvalidCredentialsResult, LDAPSocketOpenError
 
+from connect.ldap_core import open_standalone_connection
+
 try:
     from impacket.ldap import ldaptypes as _ldaptypes
     _IMPACKET_OK = True
@@ -1188,26 +1190,21 @@ def _build_user_admin_ctx(
 
 def get_domain_users(ip: str, domain: str, username: str,
                      password: str, config,
-                     proto_output_path: str | None = None) -> dict:
+                     proto_output_path: str | None = None,
+                     conn=None, base_dn: str | None = None) -> dict:
 
-    auth_type = "SIMPLE"
-    if _is_ntlm_hash(password):
-        password  = f"00000000000000000000000000000000:{password}"
-        auth_type = "NTLM"
+    owns_connection = conn is None
 
-    base_dn   = _domain_to_dn(domain)
-    bind_user = _get_bind_user(username, domain)
+    if not owns_connection:
+        base_dn = base_dn or _domain_to_dn(domain)
+
     page_size = getattr(config, "LDAP_PAGE_SIZE", 500)
 
     admin_group_dns_lower: set[str] = {dn.lower() for dn in ADMIN_GROUP_DNS}
 
-    conn = None
     try:
-        server = Server(ip, get_info=ALL,
-                        connect_timeout=config.LDAP_CONNECT_TIMEOUT)
-        conn   = Connection(server, user=bind_user, password=password,
-                            authentication=auth_type, auto_bind=True,
-                            receive_timeout=config.LDAP_RECEIVE_TIMEOUT)
+        if owns_connection:
+            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
 
 
         admin_group_dns = _resolve_admin_membership(conn, base_dn, page_size)
@@ -1560,7 +1557,7 @@ def get_domain_users(ip: str, domain: str, username: str,
         logger.exception("get_domain_users failed: %s", exc)
         return {"success": False, "error": "Internal server error", "code": 500}
     finally:
-        if conn is not None:
+        if owns_connection and conn is not None:
             try:
                 conn.unbind()
             except Exception:

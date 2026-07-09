@@ -6,9 +6,9 @@ from ldap3 import Server, Connection, ALL
 from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
 
 from connect.config import Config
-from connect.utils import is_ntlm_hash, get_netbios_bind_user, build_ldap_bind_users
+from connect.utils import is_ntlm_hash, get_netbios_bind_user, build_ldap_bind_users, extract_ad_bind_subcode
 from connect.network import check_port, _tcp_probe
-from connect.ldap_core import _collect_ldap_environment_for_target
+from connect.ldap_core import _collect_ldap_environment_for_target, _open_ldap_connection
 
 logger = logging.getLogger("ad_api")
 
@@ -77,20 +77,30 @@ def connect_ldap(ip: str, user: str, password: str, domain: str, use_ssl: bool =
             "counts":           env.get("counts", {}),
             "protocol_used":    tag,
         }
-    except (LDAPInvalidCredentialsResult, LDAPBindError):
+    except (LDAPInvalidCredentialsResult, LDAPBindError) as exc:
+        logger.error(
+            "LDAP bind RAW error | connect_ldap | ip=%s user=%s exc_type=%s message=%s",
+            ip, user, type(exc).__name__, str(exc), exc_info=True,
+        )
+        subcode = extract_ad_bind_subcode(str(exc))
+        detail = f" AD sub-error: {subcode[0]} — {subcode[1]}." if subcode else ""
         return {
             "success": False,
             "error": (
                 f"LDAP bind failed for {user}; tried UPN, NETBIOS, and raw username formats. "
-                f"Verify the AD logon name or try user@domain / DOMAIN\\user."
+                f"Verify the AD logon name or try user@domain / DOMAIN\\user.{detail}"
             ),
             "code": 401,
+            "raw_error": str(exc),
         }
     except Exception as e:
-        logger.exception("LDAP environment probe failed for %s@%s", get_netbios_bind_user(user, domain), ip)
+        logger.error(
+            "LDAP connection RAW error | connect_ldap | ip=%s user=%s exc_type=%s message=%s",
+            ip, user, type(e).__name__, str(e), exc_info=True,
+        )
         if _is_ldap_refused_error(e):
             return _ldap_refused_message(ip, str(e))
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "raw_error": str(e)}
 
 
 def connect_ldap_fast(ip: str, user: str, password: str, domain: str, use_ssl: bool = False) -> dict:
@@ -100,25 +110,16 @@ def connect_ldap_fast(ip: str, user: str, password: str, domain: str, use_ssl: b
         bind_secret = f"00000000000000000000000000000000:{password}"
         auth_type   = "NTLM"
 
-    server = Server(
-        ip,
-        port=636 if use_ssl else 389,
-        use_ssl=use_ssl,
-        get_info=ALL,
-        connect_timeout=Config.LDAP_CONNECT_TIMEOUT,
-    )
-
     last_error = None
     try:
         for bind_user in build_ldap_bind_users(user, domain):
             try:
-                conn = Connection(
-                    server,
-                    user=bind_user,
-                    password=bind_secret,
-                    authentication=auth_type,
-                    auto_bind=True,
-                    receive_timeout=Config.LDAP_RECEIVE_TIMEOUT,
+                conn = _open_ldap_connection(
+                    ldap_target=ip,
+                    bind_user=bind_user,
+                    bind_secret=bind_secret,
+                    auth_type=auth_type,
+                    use_ssl=use_ssl,
                 )
                 conn.unbind()
                 return {
@@ -139,21 +140,31 @@ def connect_ldap_fast(ip: str, user: str, password: str, domain: str, use_ssl: b
                 }
             except (LDAPInvalidCredentialsResult, LDAPBindError) as exc:
                 last_error = exc
+                logger.error(
+                    "LDAP bind RAW error | connect_ldap_fast | ip=%s bind_user=%s exc_type=%s message=%s",
+                    ip, bind_user, type(exc).__name__, str(exc), exc_info=True,
+                )
                 continue
     except Exception as e:
-        logger.exception("LDAP fast connect failed for %s", user)
+        logger.error(
+            "LDAP connection RAW error | connect_ldap_fast | ip=%s user=%s exc_type=%s message=%s",
+            ip, user, type(e).__name__, str(e), exc_info=True,
+        )
         if _is_ldap_refused_error(e):
             return _ldap_refused_message(ip, str(e))
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "raw_error": str(e)}
 
+    subcode = extract_ad_bind_subcode(str(last_error)) if last_error else None
+    detail = f" AD sub-error: {subcode[0]} — {subcode[1]}." if subcode else ""
     return {
         "success": False,
         "error": (
             f"LDAP bind failed for {user}; tried UPN, NETBIOS, and raw username formats. "
-            f"Verify the AD logon name or try user@domain / DOMAIN\\user."
+            f"Verify the AD logon name or try user@domain / DOMAIN\\user.{detail}"
         ),
         "code": 401,
         "last_error": str(last_error) if last_error else None,
+        "raw_error": str(last_error) if last_error else None,
     }
 
 

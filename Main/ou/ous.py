@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from ldap3 import Server, Connection, ALL, SUBTREE, LEVEL
 from ldap3.core.exceptions import LDAPInvalidCredentialsResult, LDAPSocketOpenError
 
+from connect.ldap_core import open_standalone_connection
+
 
 def is_ntlm_hash(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Fa-f0-9]{32}", value or ""))
@@ -241,23 +243,13 @@ def _is_high_value(ou_name: str, ou_path: str) -> bool:
     return any(p in name_lower or p in path_lower for p in _HIGH_VALUE_OU_PATTERNS)
 
 
-def get_domain_ous(ip, domain, username, password, config):
+def get_domain_ous(ip, domain, username, password, config, conn=None, base_dn=None):
+    owns_connection = conn is None
     try:
-        bind_user = get_bind_user(username, domain)
-        auth_type = "SIMPLE"
-        if is_ntlm_hash(password):
-            password = f"00000000000000000000000000000000:{password}"
-            auth_type = "NTLM"
+        if owns_connection:
+            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
 
-        server = Server(ip, get_info=ALL, port=389, use_ssl=False,
-                        connect_timeout=config.LDAP_CONNECT_TIMEOUT)
-        conn = Connection(
-            server, user=bind_user, password=password,
-            authentication=auth_type, auto_bind=True,
-            receive_timeout=getattr(config, "LDAP_RECEIVE_TIMEOUT", 10),
-        )
-
-        domain_dn  = "DC=" + ",DC=".join(domain.split("."))
+        domain_dn  = base_dn or ("DC=" + ",DC=".join(domain.split(".")))
         page_size  = getattr(config, "LDAP_PAGE_SIZE", 500)
         domain_sid = _get_domain_sid(conn, domain_dn)
 
@@ -377,7 +369,8 @@ def get_domain_ous(ip, domain, username, password, config):
                 "risk_controls":       risk_controls,
             })
 
-        conn.unbind()
+        if owns_connection:
+            conn.unbind()
 
         result = {"success": True, "count": len(ous), "ous": ous}
 

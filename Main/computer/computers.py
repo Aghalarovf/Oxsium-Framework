@@ -5,6 +5,8 @@ from ctypes import wintypes
 from datetime import datetime, timezone, timedelta
 from ldap3 import Server, Connection, ALL, SUBTREE, Attribute
 from ldap3.core.exceptions import LDAPInvalidCredentialsResult, LDAPSocketOpenError
+
+from connect.ldap_core import open_standalone_connection
 try:
     pass  
 except ImportError:
@@ -281,25 +283,15 @@ def _is_potential_privileged_by_rid(primary_group_id: int) -> bool:
 
 
 
-def get_domain_computers(ip, domain, username, password, config):
-    auth_type = "SIMPLE"
-    if is_ntlm_hash(password):
-        password = f"00000000000000000000000000000000:{password}"
-        auth_type = "NTLM"
+def get_domain_computers(ip, domain, username, password, config, conn=None, base_dn=None):
+    owns_connection = conn is None
 
-    base_dn = domain_to_dn(domain)
-    bind_user = get_bind_user(username, domain)
+    if not owns_connection:
+        base_dn = base_dn or domain_to_dn(domain)
 
     try:
-        server = Server(ip, get_info=ALL, connect_timeout=config.LDAP_CONNECT_TIMEOUT)
-        conn = Connection(
-            server,
-            user=bind_user,
-            password=password,
-            authentication=auth_type,
-            auto_bind=True,
-            receive_timeout=config.LDAP_RECEIVE_TIMEOUT,
-        )
+        if owns_connection:
+            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
 
         laps_attr_names = [
             "ms-Mcs-AdmPwd", "msLAPS-Password", "msLAPS-PasswordHistory",
@@ -501,7 +493,8 @@ def get_domain_computers(ip, domain, username, password, config):
                 "risk_controls": risk_controls,
             })
 
-        conn.unbind()
+        if owns_connection:
+            conn.unbind()
 
         smb_info = {"smb_port_open": False, "smb_signing_required": None, "smb_version": None}
 

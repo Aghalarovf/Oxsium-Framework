@@ -31,6 +31,11 @@ except Exception:
 		LDAP_PAGE_SIZE = 200
 		SMB_PROBE_TIMEOUT = 5
 
+try:
+	from connect.ldap_core import _open_ldap_connection
+except Exception:
+	_open_ldap_connection = None
+
 
 def is_ntlm_hash(value: str) -> bool:
 	return len(value or "") == 32 and all(ch in "0123456789abcdefABCDEF" for ch in value)
@@ -191,6 +196,20 @@ def _connect(ip: str, domain: str, username: str, password: str, config, netbios
 		auth_type = NTLM
 
 	bind_user = get_bind_user(username, domain, netbios_name)
+
+	# Prefer the StartTLS-before-bind / LDAPS-fallback path used by
+	# /api/connect. A plain Connection(auto_bind=True) here would fail with
+	# "strongerAuthRequired" on any DC that enforces LDAP signing, even
+	# though the same credentials succeed through the signing-safe path.
+	if _open_ldap_connection is not None:
+		return _open_ldap_connection(
+			ldap_target=ip,
+			bind_user=bind_user,
+			bind_secret=password,
+			auth_type=auth_type,
+			use_ssl=False,
+		)
+
 	server = Server(ip, get_info=ALL, connect_timeout=getattr(config, "LDAP_CONNECT_TIMEOUT", 15))
 	return Connection(
 		server,
@@ -987,9 +1006,10 @@ def get_domain_info_unauth(ip: str, domain: str, config) -> dict:
 	return result
 
 
-def get_domain_info(ip: str, domain: str, username: str, password: str, config) -> dict:
+def get_domain_info(ip: str, domain: str, username: str, password: str, config, conn=None, base_dn=None) -> dict:
 	generated_at = datetime.now(timezone.utc).isoformat()
-	base_dn = domain_to_dn(domain)
+	base_dn = base_dn or domain_to_dn(domain)
+	owns_connection = conn is None
 	result = {
 		"success": False,
 		"count": 0,
@@ -1047,7 +1067,8 @@ def get_domain_info(ip: str, domain: str, username: str, password: str, config) 
 			)
 
 	try:
-		conn = _connect(ip, domain, username, password, config, netbios_name=resolved_netbios_name)
+		if owns_connection:
+			conn = _connect(ip, domain, username, password, config, netbios_name=resolved_netbios_name)
 	except (LDAPInvalidCredentialsResult, LDAPSocketOpenError, LDAPException, OSError, ValueError) as exc:
 		result["error"] = str(exc)
 		if diagnostics:
@@ -1165,6 +1186,12 @@ def get_domain_info(ip: str, domain: str, username: str, password: str, config) 
 	except Exception as exc:
 		result["error"] = str(exc)
 		return result
+	finally:
+		if owns_connection and conn is not None:
+			try:
+				conn.unbind()
+			except Exception:
+				pass
 
 
 __all__ = ["get_domain_info", "get_domain_info_unauth"]

@@ -8,6 +8,8 @@ from ldap3 import Server, Connection, ALL, BASE, SUBTREE
 from ldap3.core.exceptions import LDAPInvalidCredentialsResult, LDAPSocketOpenError
 from ldap3.utils.conv import escape_filter_chars
 
+from connect.ldap_core import open_standalone_connection
+
 
 def is_ntlm_hash(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Fa-f0-9]{32}", value or ""))
@@ -136,25 +138,31 @@ def _is_potential_privileged_by_rid(rid: int | None) -> bool:
     return rid in potential_privileged_rids
 
 
-def get_domain_groups(ip, domain, username, password, config):
-    auth_type = "SIMPLE"
-    if is_ntlm_hash(password):
-        password = f"00000000000000000000000000000000:{password}"
-        auth_type = "NTLM"
+def get_domain_groups(ip, domain, username, password, config, conn=None, base_dn=None):
+    owns_connection = conn is None
 
-    base_dn = domain_to_dn(domain)
-    bind_user = get_bind_user(username, domain)
+    if owns_connection:
+        auth_type = "SIMPLE"
+        if is_ntlm_hash(password):
+            password = f"00000000000000000000000000000000:{password}"
+            auth_type = "NTLM"
+
+        base_dn = domain_to_dn(domain)
+        bind_user = get_bind_user(username, domain)
+    else:
+        base_dn = base_dn or domain_to_dn(domain)
 
     try:
-        server = Server(ip, get_info=ALL, connect_timeout=config.LDAP_CONNECT_TIMEOUT)
-        conn = Connection(
-            server,
-            user=bind_user,
-            password=password,
-            authentication=auth_type,
-            auto_bind=True,
-            receive_timeout=config.LDAP_RECEIVE_TIMEOUT,
-        )
+        if owns_connection:
+            server = Server(ip, get_info=ALL, connect_timeout=config.LDAP_CONNECT_TIMEOUT)
+            conn = Connection(
+                server,
+                user=bind_user,
+                password=password,
+                authentication=auth_type,
+                auto_bind=True,
+                receive_timeout=config.LDAP_RECEIVE_TIMEOUT,
+            )
 
         attrs = [
             "cn", "sAMAccountName", "distinguishedName", "description",
@@ -264,7 +272,8 @@ def get_domain_groups(ip, domain, username, password, config):
                 "risk_controls": risk_controls,
             })
 
-        conn.unbind()
+        if owns_connection:
+            conn.unbind()
 
         result = {"success": True, "groups": groups, "count": len(groups)}
 
@@ -946,13 +955,9 @@ def write_group_members_jsonl(config, groups: list[dict], success: bool = True,
         return {"success": False, "error": str(exc)}
 
 
-def get_all_group_members(ip, domain, username, password, config):
-    auth_type = "SIMPLE"
-    if is_ntlm_hash(password):
-        password = f"00000000000000000000000000000000:{password}"
-        auth_type = "NTLM"
+def get_all_group_members(ip, domain, username, password, config, conn=None, base_dn=None):
+    owns_connection = conn is None
 
-    bind_user = get_bind_user(username, domain)
     group_rows = _resolve_group_dns_from_snapshot(config)
     if not group_rows:
         return {"success": False, "error": "No groups found in domain_groups.jsonl", "code": 404}
@@ -963,15 +968,8 @@ def get_all_group_members(ip, domain, username, password, config):
     pg_map_computers = _build_primary_group_map_for_computers(computers)
 
     try:
-        server = Server(ip, get_info=ALL, connect_timeout=config.LDAP_CONNECT_TIMEOUT)
-        conn = Connection(
-            server,
-            user=bind_user,
-            password=password,
-            authentication=auth_type,
-            auto_bind=True,
-            receive_timeout=config.LDAP_RECEIVE_TIMEOUT,
-        )
+        if owns_connection:
+            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
 
         batch_results = _resolve_group_members_batch(conn, group_rows)
         merged_groups = []
@@ -1004,7 +1002,8 @@ def get_all_group_members(ip, domain, username, password, config):
 
         _inject_memberof_members(merged_groups, users)
 
-        conn.unbind()
+        if owns_connection:
+            conn.unbind()
         write_group_members_jsonl(config, merged_groups, success=True)
         return _merge_batch_results(merged_groups)
 
@@ -1016,27 +1015,15 @@ def get_all_group_members(ip, domain, username, password, config):
         return {"success": False, "error": f"Internal server error: {exc}", "code": 500}
 
 
-def get_group_members(ip, domain, username, password, group_dn, config):
-    auth_type = "SIMPLE"
-    if is_ntlm_hash(password):
-        password = f"00000000000000000000000000000000:{password}"
-        auth_type = "NTLM"
-
-    bind_user = get_bind_user(username, domain)
+def get_group_members(ip, domain, username, password, group_dn, config, conn=None, base_dn=None):
+    owns_connection = conn is None
 
     if not str(group_dn or "").strip() or str(group_dn).strip().lower() in {"*", "all", "__all__"}:
-        return get_all_group_members(ip, domain, username, password, config)
+        return get_all_group_members(ip, domain, username, password, config, conn=conn, base_dn=base_dn)
 
     try:
-        server = Server(ip, get_info=ALL, connect_timeout=config.LDAP_CONNECT_TIMEOUT)
-        conn = Connection(
-            server,
-            user=bind_user,
-            password=password,
-            authentication=auth_type,
-            auto_bind=True,
-            receive_timeout=config.LDAP_RECEIVE_TIMEOUT,
-        )
+        if owns_connection:
+            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
         result = _resolve_group_members_from_connection(conn, group_dn=group_dn)
 
         if result.get("success"):
@@ -1064,7 +1051,8 @@ def get_group_members(ip, domain, username, password, group_dn, config):
             result["member_users_count"] = single_group["member_users_count"]
             result["member_computers_count"] = single_group["member_computers_count"]
 
-        conn.unbind()
+        if owns_connection:
+            conn.unbind()
         return result
 
     except LDAPInvalidCredentialsResult:
