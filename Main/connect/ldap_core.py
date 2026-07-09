@@ -2,7 +2,7 @@ import inspect
 import logging
 import re
 
-from ldap3 import Server, Connection, ALL, BASE, SUBTREE, AUTO_BIND_TLS_BEFORE_BIND, AUTO_BIND_NO_TLS
+from ldap3 import Server, Connection, ALL, BASE, SUBTREE, AUTO_BIND_NO_TLS
 from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
 
 from connect.config import Config
@@ -282,8 +282,43 @@ def _run_enumeration_with_target_fallback(req: dict, enum_fn):
     last_result = None
     targets = _build_ldap_targets(req)
 
+    # Derive use_ssl once: honour the explicit boolean first, then fall back
+    # to checking whether the protocol string is "ldaps".
+    req_use_ssl = (
+        bool(req.get("use_ssl"))
+        or str(req.get("protocol", "")).strip().lower() == "ldaps"
+    )
+
     for target in targets:
-        result = enum_fn(target, req["domain"], req["username"], req["password"], Config)
+        if enum_fn_supports_shared_session(enum_fn):
+            # Open a standalone SSL-aware connection for this fallback attempt.
+            try:
+                conn, base_dn = open_standalone_connection(
+                    target,
+                    req["username"],
+                    req["password"],
+                    req["domain"],
+                    Config,
+                    use_ssl=req_use_ssl,
+                )
+                result = enum_fn(
+                    target, req["domain"], req["username"], req["password"], Config,
+                    conn=conn, base_dn=base_dn,
+                )
+                try:
+                    conn.unbind()
+                except Exception:
+                    pass
+            except Exception as exc:
+                last_result = {"success": False, "error": str(exc), "code": 503}
+                logger.warning(
+                    "_run_enumeration_with_target_fallback: standalone open failed on %s: %s",
+                    target, exc,
+                )
+                continue
+        else:
+            result = enum_fn(target, req["domain"], req["username"], req["password"], Config)
+
         if result.get("success"):
             if target != req.get("ip"):
                 result.setdefault("meta", {})
@@ -332,77 +367,50 @@ def _open_ldap_connection(
     auth_type: str,
     use_ssl: bool,
 ) -> Connection:
-    """Open an LDAP connection, trying plain LDAP first and only falling
-    back to LDAPS if the DC rejects the plain bind for a channel-security
-    reason (e.g. 'strongerAuthRequired' when LDAP signing is enforced).
+    """Open an LDAP connection exactly as the caller requested — no automatic
+    fallback between LDAP and LDAPS.
 
-    If the caller explicitly asked for LDAPS (use_ssl=True), we skip
-    straight to LDAPS and never attempt plain LDAP.
+    use_ssl=False  →  plain LDAP:389, no TLS negotiation whatsoever
+    use_ssl=True   →  LDAPS:636, full TLS tunnel from the start
+
+    The GUI lets the user pick the protocol explicitly (SSL toggle), so the
+    code must honour that choice strictly.  Auto-fallback hides real errors
+    and causes WinError 10054 when the DC rejects an unsolicited StartTLS.
     """
-    attempts: list[tuple[bool, int, int]] = []
     if use_ssl:
-        # Caller explicitly wants LDAPS -- go straight there.
-        attempts.append((True, 636, AUTO_BIND_NO_TLS))
+        port      = 636
+        bind_mode = AUTO_BIND_NO_TLS
+        label     = "LDAPS:636"
     else:
-        # 1) Plain LDAP, upgraded in-band via StartTLS before the bind.
-        #    This satisfies "LDAP signing required" DCs without needing
-        #    the dedicated LDAPS port.
-        attempts.append((False, 389, AUTO_BIND_TLS_BEFORE_BIND))
-        # 2) Fallback: full LDAPS on 636, only tried if (1) fails.
-        attempts.append((True, 636, AUTO_BIND_NO_TLS))
+        port      = 389
+        bind_mode = AUTO_BIND_NO_TLS
+        label     = "LDAP:389"
 
-    last_exc: Exception | None = None
-    for attempt_index, (attempt_ssl, port, bind_mode) in enumerate(attempts):
-        try:
-            server = Server(
-                ldap_target,
-                port=port,
-                use_ssl=attempt_ssl,
-                get_info=ALL,
-                connect_timeout=Config.LDAP_CONNECT_TIMEOUT,
-            )
-            conn = Connection(
-                server,
-                user=bind_user,
-                password=bind_secret,
-                authentication=auth_type,
-                auto_bind=bind_mode,
-                receive_timeout=Config.LDAP_RECEIVE_TIMEOUT,
-            )
-            if attempt_index > 0:
-                logger.info(
-                    "LDAP connection succeeded on fallback attempt (ssl=%s port=%s) for target=%s",
-                    attempt_ssl, port, ldap_target,
-                )
-            return conn
-        except (LDAPInvalidCredentialsResult,) as exc:
-            # Real credential rejection -- no point retrying with a
-            # different transport, propagate immediately.
-            raise
-        except LDAPBindError as exc:
-            last_exc = exc
-            logger.warning(
-                "LDAP bind attempt failed (ssl=%s port=%s) target=%s: %s -- %s",
-                attempt_ssl, port, ldap_target, str(exc),
-                "trying LDAPS fallback" if attempt_index + 1 < len(attempts) else "no more fallbacks",
-            )
-            if attempt_index + 1 < len(attempts):
-                continue
-            raise
-        except Exception as exc:
-            last_exc = exc
-            logger.warning(
-                "LDAP connection error (ssl=%s port=%s) target=%s: %s -- %s",
-                attempt_ssl, port, ldap_target, str(exc),
-                "trying LDAPS fallback" if attempt_index + 1 < len(attempts) else "no more fallbacks",
-            )
-            if attempt_index + 1 < len(attempts):
-                continue
-            raise
-
-    if last_exc:
-        raise last_exc
-    raise LDAPBindError("LDAP connection could not be established")
+    try:
+        server = Server(
+            ldap_target,
+            port=port,
+            use_ssl=use_ssl,
+            get_info=ALL,
+            connect_timeout=Config.LDAP_CONNECT_TIMEOUT,
+        )
+        conn = Connection(
+            server,
+            user=bind_user,
+            password=bind_secret,
+            authentication=auth_type,
+            auto_bind=bind_mode,
+            receive_timeout=Config.LDAP_RECEIVE_TIMEOUT,
+        )
+        logger.info("LDAP connection established [%s] target=%s", label, ldap_target)
+        return conn
+    except (LDAPInvalidCredentialsResult, LDAPBindError):
+        raise
+    except Exception as exc:
+        logger.warning(
+            "LDAP connect error [%s] target=%s: %s", label, ldap_target, exc,
+        )
+        raise
 
 
 def _collect_ldap_environment(

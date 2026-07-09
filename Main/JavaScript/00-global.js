@@ -17,6 +17,7 @@ let state = {
   sessionStart: null,
   connectMode: 'fast',
   deepEnumRunning: false,
+  ssl: false,
 };
 
 
@@ -208,9 +209,17 @@ function buildEnumerationPayload() {
   const finalPass = passInput || (!hashInput && !savedHash ? savedPass : savedPass && !hashInput ? savedPass : '');
   const finalHash = hashInput || (!passInput && !savedPass ? savedHash : savedHash && !passInput ? savedHash : '');
 
+  // When SSL is toggled on, ensure the protocol field is "ldaps" so the
+  // backend opens an LDAPS connection on port 636, regardless of which
+  // protocol button (ldap / rpc / ...) was last selected.
+  const effectiveProtocol = state.ssl
+    ? 'ldaps'
+    : state.protocol;
+
   return {
     mode:      'remote',
-    protocol:  state.protocol,
+    protocol:  effectiveProtocol,
+    use_ssl:   !!state.ssl,
     ip:        document.getElementById('f-ip')?.value.trim()     || state.ip || state.dc,
     dc:        ldapTarget,
     ldap_host: ldapTarget,

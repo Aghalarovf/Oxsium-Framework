@@ -16,6 +16,41 @@ function selectProto(p) {
     document.getElementById(`proto-${x}`).className = 'proto-btn' + (x === p ? ' selected' : '');
   });
   document.getElementById('sb-proto').textContent = p.toUpperCase();
+  syncSSLButtonWithProtocol();
+}
+
+
+function syncSSLButtonWithProtocol() {
+  const btn = document.getElementById('btn-ssl-toggle');
+  const txt = document.getElementById('btn-ssl-text');
+  if (!btn || !txt) return;
+  const isSSL = state.protocol === 'ldaps';
+  state.ssl = isSSL;
+  btn.classList.toggle('active', isSSL);
+  txt.textContent = isSSL ? 'SSL: ON' : 'SSL: OFF';
+}
+
+
+function toggleSSL(event) {
+  if (event?.preventDefault) event.preventDefault();
+  if (event?.stopPropagation) event.stopPropagation();
+
+  const btn = document.getElementById('btn-ssl-toggle');
+  const txt = document.getElementById('btn-ssl-text');
+  if (!btn || !txt) return;
+
+  const turningOn = !state.ssl;
+  state.ssl = turningOn;
+
+  if (state.protocol === 'ldap' || state.protocol === 'ldaps') {
+    state.protocol = turningOn ? 'ldaps' : 'ldap';
+    const sbProto = document.getElementById('sb-proto');
+    if (sbProto) sbProto.textContent = state.protocol.toUpperCase();
+  }
+
+  btn.classList.toggle('active', turningOn);
+  txt.textContent = turningOn ? 'SSL: ON' : 'SSL: OFF';
+  addLog(`LDAP SSL/TLS ${turningOn ? 'enabled (port 636)' : 'disabled (port 389)'}`, 'info');
 }
 
 

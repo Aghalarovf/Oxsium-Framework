@@ -112,6 +112,36 @@
 .saved-user-meta  { font-size: 10px; color: var(--text-sec); line-height: 1.45; word-break: break-word; }
 .saved-user-empty { font-size: 11px; color: var(--text-dim); padding: 8px; text-align: center; }
 
+.btn-ssl {
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 18px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-hi);
+    background: var(--bg-panel);
+    color: var(--text-sec);
+    font-family: var(--head);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.btn-ssl:hover { border-color: var(--accent-dim); color: var(--text-pri); }
+
+.btn-ssl.active {
+    background: linear-gradient(180deg, #f7d060, var(--accent) 55%, #c89a20);
+    border-color: var(--accent);
+    color: #1a1400;
+    box-shadow: 0 0 14px rgba(240,192,48,0.35);
+}
+
+.btn-ssl.active:hover { color: #1a1400; }
+
 .enumeration-output { margin-top: 14px; border: 1px solid rgba(240,192,48,0.20); background: rgba(0,0,0,0.55); padding: 10px; }
 .enum-output-title  { font-family: var(--head); font-size: 11px; letter-spacing: 0.08em; color: var(--text-hi); margin-bottom: 8px; }
 .enum-output-pre    { margin: 0; min-height: 180px; max-height: 280px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.45; color: var(--text-hi); background: #060500; border: 1px solid rgba(240,192,48,0.08); padding: 10px; white-space: pre-wrap; word-break: break-word; }

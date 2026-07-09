@@ -976,8 +976,13 @@ def _run_full_collector_pipeline(enum_req: dict, shared_session: "LdapSession | 
     domain   = enum_req.get("domain")
     username = enum_req.get("username")
     password = enum_req.get("password") or enum_req.get("hash")
-    use_ssl  = str(enum_req.get("protocol", "")).strip().lower() == "ldaps"
-    logger.info("collector pipeline started: ip=%s domain=%s", ip, domain)
+    use_ssl  = (
+        bool(enum_req.get("use_ssl"))
+        or str(enum_req.get("protocol", "")).strip().lower() == "ldaps"
+    )
+    logger.info(
+        "collector pipeline started: ip=%s domain=%s use_ssl=%s", ip, domain, use_ssl
+    )
 
     _clear_domain_object_dir()
 
@@ -1158,6 +1163,7 @@ def connect():
     proto        = req.get("protocol", "ldap").lower()
     connect_mode = str(req.get("connect_mode", "deep")).lower()
     skip_counts  = bool(req.get("skip_counts_probe", False))
+    use_ssl      = (proto == "ldaps")
 
     logger.info("/api/connect called: ip=%s proto=%s connect_mode=%s skip_counts_probe=%s", ip, proto, connect_mode, skip_counts)
 
@@ -1215,6 +1221,7 @@ def connect():
         enum_req["hash"]     = hash_value
         enum_req["protocol"] = proto
         enum_req["dc"]       = result.get("dc") or ip
+        enum_req["use_ssl"]  = use_ssl   # explicit boolean; avoids re-deriving from proto string
 
         # Open ONE shared LDAP session here and register it so every
         # subsequent enumeration endpoint (/api/users, /api/computers,
@@ -1228,7 +1235,7 @@ def connect():
                 try:
                     shared_session = LdapSession(
                         target, domain, username, auth_secret, Config,
-                        use_ssl=(proto == "ldaps"),
+                        use_ssl=use_ssl,
                     ).open()
                     logger.info("/api/connect: shared LDAP session established on %s", target)
                     break

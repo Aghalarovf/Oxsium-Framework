@@ -518,47 +518,40 @@ function validate() {
 }
 
 function setBtnLoading(loading, connectMode = 'deep') {
-  const fastBtn = document.getElementById('btn-connect-fast');
+  const sslBtn  = document.getElementById('btn-ssl-toggle');
   const deepBtn = document.getElementById('btn-connect-deep');
-  const fastTxt = document.getElementById('btn-connect-fast-text');
   const deepTxt = document.getElementById('btn-connect-deep-text');
 
   if (loading) {
-    if (fastBtn) fastBtn.disabled = true;
+    if (sslBtn) sslBtn.disabled = true;
     if (deepBtn) deepBtn.disabled = true;
-    if (connectMode === 'fast' && fastTxt) {
-      fastTxt.innerHTML = '<span class="spinner"></span>&nbsp;FAST...';
-      if (deepTxt) deepTxt.textContent = 'DEEP CONNECT';
-    } else {
-      if (deepTxt) deepTxt.innerHTML = '<span class="spinner"></span>&nbsp;DEEP...';
-      if (fastTxt) fastTxt.textContent = 'FAST CONNECT';
-    }
+    if (deepTxt) deepTxt.innerHTML = '<span class="spinner"></span>&nbsp;DEEP...';
   } else {
     updateConnectButtonState();
   }
 }
 
 function updateConnectButtonState() {
-  const fastBtn        = document.getElementById('btn-connect-fast');
+  const sslBtn          = document.getElementById('btn-ssl-toggle');
   const deepBtn        = document.getElementById('btn-connect-deep');
   const disconnectBtn  = document.getElementById('btn-disconnect');
-  const fastTxt        = document.getElementById('btn-connect-fast-text');
   const deepTxt        = document.getElementById('btn-connect-deep-text');
   const localDiscBtn   = document.getElementById('btn-local-disconnect');
-  if (!fastBtn || !deepBtn || !fastTxt || !deepTxt || !disconnectBtn) return;
+  if (!sslBtn || !deepBtn || !deepTxt || !disconnectBtn) return;
 
   if (state.connected) {
-    fastBtn.style.display = 'none'; deepBtn.style.display = 'none';
+    sslBtn.style.display = 'none'; deepBtn.style.display = 'none';
     disconnectBtn.style.display = '';
     disconnectBtn.classList.add('btn-danger');
     disconnectBtn.classList.remove('btn-secondary');
   } else {
-    fastBtn.style.display = ''; deepBtn.style.display = '';
+    sslBtn.style.display = ''; deepBtn.style.display = '';
     disconnectBtn.style.display = 'none';
-    fastBtn.disabled = false; deepBtn.disabled = false;
-    fastBtn.classList.remove('btn-danger'); deepBtn.classList.remove('btn-danger');
-    fastBtn.classList.add('btn-secondary'); deepBtn.classList.add('btn-primary');
-    fastTxt.textContent = 'FAST CONNECT'; deepTxt.textContent = 'DEEP CONNECT';
+    sslBtn.disabled = false; deepBtn.disabled = false;
+    deepBtn.classList.remove('btn-danger');
+    deepBtn.classList.add('btn-primary');
+    deepTxt.textContent = 'DEEP CONNECT';
+    syncSSLButtonWithProtocol();
   }
   if (localDiscBtn) {
     const localActive = state.connected && state.protocol === 'local';
@@ -616,7 +609,8 @@ async function doConnect(connectMode = 'deep') {
       body:    JSON.stringify({
         mode: 'remote', connect_mode: connectMode,
         skip_counts_probe: connectMode === 'deep',
-        protocol: state.protocol,
+        protocol: state.ssl ? 'ldaps' : state.protocol,
+        use_ssl:  !!state.ssl,
         domain, ip, username, password, hash, dc: dcHost, ldap_host: dcHost,
       }),
     });

@@ -225,9 +225,12 @@
 
         <!-- Actions -->
         <div class="action-row">
-          <button class="btn-secondary" id="btn-connect-fast" onclick="handleConnectClick(event, 'fast')" type="button">
-            <img src="assets/Icons/fast_connect.png" alt="Fast" style="width:16px;height:16px;vertical-align:middle;margin-right:8px;filter:brightness(0) invert(1);" onerror="this.onerror=null;this.src='assets/favicon.png'">
-            <span id="btn-connect-fast-text">FAST CONNECT</span>
+          <button class="btn-ssl" id="btn-ssl-toggle" onclick="toggleSSL(event)" type="button">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="vertical-align:middle;margin-right:8px">
+              <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M5 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+            <span id="btn-ssl-text">SSL: OFF</span>
           </button>
           <button class="btn-primary" id="btn-connect-deep" onclick="handleConnectClick(event, 'deep')" type="button">
             <img src="assets/Icons/deep_connect.png" alt="Deep" style="width:16px;height:16px;vertical-align:middle;margin-right:8px" onerror="this.onerror=null;this.src='assets/favicon.png'">
