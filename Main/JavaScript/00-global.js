@@ -356,9 +356,9 @@ function refreshAllSectionsAfterConnect() {
     }
   });
 
-  if (called.length) {
-    addLog(`Loaded from DB: ${called.join(', ')}`, 'success');
-  }
+    if (called.length) {
+      // Loaded from DB log suppressed for cleaner UI
+    }
   if (missing.length) {
 
 
@@ -387,7 +387,7 @@ function handleConnectResponse(data) {
       state.justConnectedUntil = Date.now() + 5000;
       state.sessionStart = state.sessionStart || Date.now();
       showToast('Connection complete', 'success');
-      addLog('sqlite_reader.py (30104) is ready — loading tables', 'success');
+      // sqlite_reader ready log suppressed
       refreshAllSectionsAfterConnect();
     });
     return;

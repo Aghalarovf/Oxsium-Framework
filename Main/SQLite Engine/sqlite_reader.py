@@ -600,9 +600,11 @@ def _setup_logging() -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler.setStream(sys.stdout)
 
+    handler.setFormatter(logging.Formatter(
+        fmt="[%(levelname)s] %(message)s",
+    ))
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[handler],
         force=True,
     )

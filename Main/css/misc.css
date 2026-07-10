@@ -79,3 +79,25 @@
 
 .locked-overlay svg { opacity: 0.3; }
 .locked-overlay p   { font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+/* ── Log terminal enhancements ─────────────────────────── */
+.log-line { font-size: 11.5px; line-height: 1.6; padding: 1px 0; }
+
+.log-collector-ok  .log-msg { color: var(--text-pri); }
+.log-collector-ok  .log-tag { color: #22ff6e; font-weight: 600; }
+.log-collector-err .log-msg { color: var(--text-pri); }
+.log-collector-err .log-tag { color: #ff4444; font-weight: 600; }
+
+.log-render-ok  .log-msg { color: var(--text-pri); }
+.log-render-ok  .log-tag { color: #22ff6e; font-weight: 600; }
+.log-render-err .log-msg { color: var(--text-pri); }
+.log-render-err .log-tag { color: #ff4444; font-weight: 600; }
+.log-render-warn .log-msg { color: var(--text-pri); }
+.log-render-warn .log-tag { color: #ff9922; font-weight: 600; }
+
+/* Inline highlight spans inside log messages */
+.log-upn    { color: #f0c030; font-weight: 600; letter-spacing: 0.3px; }
+.log-dc     { color: #5ecbff; font-weight: 600; }
+.log-domain { color: #c8a855; font-style: italic; }
+.log-ip     { color: #a0d0ff; }
+.log-proto  { color: #f0c030; letter-spacing: 1px; }
+.log-highlight-val { color: #e8d8a0; font-weight: 600; }

@@ -1,10 +1,13 @@
 import os
 import logging
+import warnings
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+DEBUG_MODE: bool = os.getenv("DEBUG", "false").lower() in ("1", "true", "yes")
 
 
 class Config:
@@ -21,7 +24,7 @@ class Config:
     DOMAIN_ACES_JSON = DOMAIN_OBJECT_DIR / "domain_aces.json"
     DOMAIN_EXTENDED_RIGHTS_JSON = DOMAIN_OBJECT_DIR / "domain_extended_rights.json"
     DOMAIN_DANGEROUS_ACE_JSON = DOMAIN_OBJECT_DIR / "domain_dangerous_ace.json"
-    
+
     DOMAIN_USERS_JSON = DOMAIN_OBJECT_DIR / "domain_users.json"
     DOMAIN_COMPUTERS_JSON = DOMAIN_OBJECT_DIR / "domain_computers.json"
     DOMAIN_GROUPS_JSON = DOMAIN_OBJECT_DIR / "domain_groups.json"
@@ -56,25 +59,39 @@ class Config:
     RATE_LIMIT_DCSYNC:  str = os.getenv("RATE_LIMIT_DCSYNC",  "60 per minute")
 
 
-_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-_LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+_LOG_FORMAT  = "%(asctime)s  %(levelname)-8s  %(message)s"
+_LOG_DATEFMT = "%H:%M:%S"
 
 _LOG_FILE_PATH = Path(os.getenv("CONNECTION_LOG_PATH", str(Config.PROJECT_ROOT / "connection.log")))
 
-logging.basicConfig(
-    level=logging.INFO,
-    format=_LOG_FORMAT,
-    datefmt=_LOG_DATEFMT,
-)
+_console_handler = logging.StreamHandler()
+_console_handler.setLevel(logging.DEBUG if DEBUG_MODE else logging.CRITICAL)
+_console_handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
+
+logging.basicConfig(handlers=[_console_handler], level=logging.DEBUG)
+
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+if not DEBUG_MODE:
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 logger = logging.getLogger("ad_api")
+logger.setLevel(logging.DEBUG)
 
 try:
     _file_handler = logging.FileHandler(_LOG_FILE_PATH, encoding="utf-8")
     _file_handler.setLevel(logging.DEBUG)
     _file_handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
     logger.addHandler(_file_handler)
-    logger.setLevel(logging.DEBUG)
-    logger.info("File logging enabled -> %s", _LOG_FILE_PATH)
+
+    if not DEBUG_MODE:
+        _flask_file_handler = logging.FileHandler(_LOG_FILE_PATH, encoding="utf-8")
+        _flask_file_handler.setLevel(logging.DEBUG)
+        _flask_file_handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
+        _flask_logger = logging.getLogger("flask.app")
+        _flask_logger.addHandler(_flask_file_handler)
+        _flask_logger.setLevel(logging.DEBUG)
+        _flask_logger.propagate = False
+
 except Exception as _log_exc:
-    logger.warning("Could not attach file handler for connection.log: %s", _log_exc)
+    logging.getLogger().critical("Could not attach file handler for connection.log: %s", _log_exc)

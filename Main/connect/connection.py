@@ -9,18 +9,16 @@ import threading
 import subprocess
 import urllib.request
 import urllib.error
+import logging
 from datetime import datetime
 from pathlib import Path
 
-# ── sys.path setup: Add Main directory to path ───────────────────────────────────
-_PROJECT_ROOT = Path(__file__).parent.parent  # /Main
+_PROJECT_ROOT = Path(__file__).parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-# ── Config import ────────────────────────────────────────────────────────────────
-from connect.config import Config, logger
+from connect.config import Config, logger, DEBUG_MODE
 
-# ── Read paths from Config ───────────────────────────────────────────────────────
 PROJECT_ROOT = Config.PROJECT_ROOT
 DOMAIN_OBJECT_DIR = Config.DOMAIN_OBJECT_DIR
 DOMAIN_ACES_PARQUET = Config.DOMAIN_ACES_PARQUET
@@ -38,9 +36,9 @@ LEGACY_DOMAIN_GPOS_JSON = Path(PROJECT_ROOT) / "domain_gpos.json"
 LEGACY_DOMAIN_ACES_JSON = Path(PROJECT_ROOT) / "domain_aces.json"
 
 _SQLITE_ENGINE_CANDIDATES = [
-    Path(__file__).parent.parent / 'SQLite Engine' / 'sqlite_engine.py',  # canonical
-    Path(__file__).parent / 'SQLite Engine' / 'sqlite_engine.py',         # fallback
-    Path(__file__).parent / 'sqlite_engine.py',                            # fallback
+    Path(__file__).parent.parent / 'SQLite Engine' / 'sqlite_engine.py',
+    Path(__file__).parent / 'SQLite Engine' / 'sqlite_engine.py',
+    Path(__file__).parent / 'sqlite_engine.py',                   
 ]
 _SQLITE_ENGINE_PATH = next((p for p in _SQLITE_ENGINE_CANDIDATES if p.exists()), None)
 
@@ -48,7 +46,7 @@ if _SQLITE_ENGINE_PATH is None:
     logger.warning('sqlite_engine not found -- searched: %s',
                    ', '.join(str(p) for p in _SQLITE_ENGINE_CANDIDATES))
 else:
-    logger.info('sqlite_engine found: %s', _SQLITE_ENGINE_PATH)
+    logger.debug('sqlite_engine found: %s', _SQLITE_ENGINE_PATH)
 
 _db_build_timer: threading.Timer | None = None
 _db_build_lock  = threading.Lock()
@@ -124,7 +122,6 @@ from connect.ldap_core     import (
 )
 from connect.protocols     import connect_ldap_fast, connect_local, PROTOCOL_HANDLERS
 from connect.shell         import (
-    run_local_command,
     _collect_powershell_profile, _apply_powershell_profile,
 )
 from connect.saved_users   import _read_old_users, _write_old_users
@@ -555,7 +552,6 @@ def _extract_dangerous_rows(result: dict) -> list[dict]:
         sid = str(ace.get("principal_sid") or "").strip()
         disabled = bool(ace.get("principal_is_disabled"))
 
-        # If principal is disabled, include their ACEs regardless of SID filters
         if not disabled:
             if not _dangerous_sid_is_interesting(sid):
                 continue
@@ -566,7 +562,6 @@ def _extract_dangerous_rows(result: dict) -> list[dict]:
         if not _dangerous_has_interesting_right(rights):
             continue
 
-        # Ignore non-actionable entries where only ReadProperty/Self-like rights exist.
         if rights and rights.issubset({"readproperty", "self"}):
             continue
 
@@ -855,24 +850,6 @@ def health():
     return jsonify({"status": "ok", "version": "1.0.0", "protocols": list(PROTOCOL_HANDLERS.keys())})
 
 
-@app.route("/api/domain-object-sids", methods=["GET"])
-def domain_object_sids():
-    user_sids = _read_snapshot_sids(DOMAIN_USERS_JSON, "users")
-    computer_sids = _read_snapshot_sids(DOMAIN_COMPUTERS_JSON, "computers")
-    group_sids = _read_snapshot_sids(DOMAIN_GROUPS_JSON, "groups")
-
-    all_sids = sorted(set(user_sids) | set(computer_sids) | set(group_sids))
-
-    return jsonify({
-        "success": True,
-        "user_sids": user_sids,
-        "computer_sids": computer_sids,
-        "group_sids": group_sids,
-        "all_sids": all_sids,
-        "count": len(all_sids),
-    }), 200
-
-
 @app.route("/api/test", methods=["POST"])
 @require_json_fields("ip", "protocol")
 def test_connection():
@@ -959,13 +936,13 @@ def _clear_domain_object_dir() -> None:
         try:
             item.unlink()
             deleted += 1
-            logger.debug("clear_domain_object_dir: silindi — %s", item.name)
+            logger.debug("clear_domain_object_dir: deleted — %s", item.name)
         except Exception as exc:
             failed += 1
-            logger.warning("clear_domain_object_dir: silinə bilmədi %s: %s", item.name, exc)
+            logger.warning("clear_domain_object_dir: could not delete %s: %s", item.name, exc)
 
     logger.info(
-        "clear_domain_object_dir: %d fayl silindi, %d uğursuz — %s",
+        "clear_domain_object_dir: %d file(s) deleted, %d failed — %s",
         deleted, failed, DOMAIN_OBJECT_DIR,
     )
 
@@ -1221,12 +1198,8 @@ def connect():
         enum_req["hash"]     = hash_value
         enum_req["protocol"] = proto
         enum_req["dc"]       = result.get("dc") or ip
-        enum_req["use_ssl"]  = use_ssl   # explicit boolean; avoids re-deriving from proto string
+        enum_req["use_ssl"]  = use_ssl 
 
-        # Open ONE shared LDAP session here and register it so every
-        # subsequent enumeration endpoint (/api/users, /api/computers,
-        # /api/groups, /api/ous, /api/gpos, /api/trusts, /api/acl) reuses
-        # this same connection instead of each opening its own.
         shared_session = None
         try:
             session_targets = _build_ldap_targets(enum_req)
@@ -1443,32 +1416,6 @@ def list_groups():
     return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
 
 
-@app.route("/api/group-members", methods=["POST"])
-@limiter.limit(Config.RATE_LIMIT_ENUM)
-def list_group_members():
-    req, error_response = get_enumeration_request_data()
-    if error_response:
-        return error_response
-
-    if is_local_request(req):
-        result = {
-            "success": False,
-            "error": "Group member expansion is available for domain LDAP sessions only",
-            "code": 400,
-        }
-        return jsonify(result), 400
-
-    group_dn = str(req.get("group_dn", "")).strip()
-    if not group_dn:
-        group_dn = "__all__"
-
-    def _enum_group_members(ip, domain, username, password, config):
-        return groups.get_group_members(ip, domain, username, password, group_dn, config)
-
-    result = _run_enumeration_with_target_fallback(req, _enum_group_members)
-    return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
-
-
 @app.route("/api/trusts", methods=["POST"])
 @app.route("/api/trust", methods=["POST"])
 @limiter.limit(Config.RATE_LIMIT_ENUM)
@@ -1565,26 +1512,6 @@ def list_acl_entries():
             _write_domain_dangerous_ace_snapshot(snapshot_source, is_local=False)
 
     return (jsonify(result), 200) if result.get("success") else (jsonify(result), _enumeration_status(result))
-
-
-@app.route("/api/shell", methods=["POST"])
-def shell_command():
-    req = request.get_json(silent=True)
-    if not req:
-        return jsonify({"error": "JSON body is required"}), 400
-
-    command  = req.get("command", "").strip()
-    mode     = req.get("mode", "remote").lower()
-    protocol = req.get("protocol", "local").lower()
-
-    if not command:
-        return jsonify({"error": "Command is required"}), 400
-
-    if mode == "local":
-        result = run_local_command(command)
-        return jsonify(result) if result.get("success") else (jsonify(result), 500)
-
-    return jsonify({"success": False, "error": f"Shell is not supported for protocol: {protocol}"}), 400
 
 
 @app.route("/api/decision-engine/graph", methods=["POST"])
@@ -1950,7 +1877,6 @@ def upload_zip():
             return jsonify({"success": False, "error": "ZIP file is empty.", "code": 400}), 400
 
         with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
-            # Zip bomb protection: max 500 MB
             total_size = sum(info.file_size for info in zf.infolist())
             if total_size > 500 * 1024 * 1024:
                 return jsonify({"success": False, "error": "ZIP file is too large (max 500 MB).", "code": 400}), 400
@@ -2013,9 +1939,41 @@ def build_sqlite_db():
 
 
 if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 30100)),
-        debug=False,
-        use_reloader=False,
-    )
+    import socket
+
+    _host = "0.0.0.0"
+    _port = int(os.getenv("PORT", 30100))
+
+    _local_ips: list[str] = []
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as _s:
+            _s.connect(("8.8.8.8", 80))
+            _local_ips.append(_s.getsockname()[0])
+    except Exception:
+        pass
+
+    if "127.0.0.1" not in _local_ips:
+        _local_ips.insert(0, "127.0.0.1")
+
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+    print()
+    print("  Oxsium LDAP Engine")
+    print(f"  {'-' * 36}")
+    for _ip in _local_ips:
+        print(f"  http://{_ip}:{_port}")
+    print(f"  {'-' * 36}")
+    print()
+
+    try:
+        app.run(
+            host=_host,
+            port=_port,
+            debug=DEBUG_MODE,
+            use_reloader=False,
+        )
+    except OSError as _start_exc:
+        logging.getLogger().critical(
+            "Server failed to start — port=%s error: %s", _port, _start_exc
+        )
+        raise

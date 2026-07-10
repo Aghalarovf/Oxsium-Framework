@@ -188,20 +188,20 @@ async function loadDomainInfoFromDb() {
   try {
     const resp = await fetch(`${DB_READER_BASE}/api/domain-info`, { signal: AbortSignal.timeout(3000) });
     if (!resp.ok) {
-      const errData = await resp.json().catch(() => null);
-      addLog(`domain_info fetch failed (HTTP ${resp.status}): ${(errData && (errData.error || errData.detail)) || 'no domain_info records in domain_data.db'}`, 'warn');
+      // domain_info fetch errors suppressed
       return;
     }
     const data = await resp.json();
     if (!data || !data.success) {
-      addLog(`domain_info response missing success flag: ${(data && data.error) || 'unknown error'}`, 'warn');
+      // domain_info missing success flag suppressed
       return;
     }
     applyDomainInfoStats(data.domain_info);
     const dcInfo = Array.isArray(data.domain_info?.domain_controllers) ? data.domain_info.domain_controllers[0] : null;
-    addLog(`domain_info loaded from domain_data.db · OS: ${dcInfo?.os || '—'} · SMB Signing: ${data.domain_info?.smb_signing_required} · NTLM: ${data.domain_info?.ntlm_supported}`, 'ok');
+    const os = dcInfo?.os || '—';
+    addLog(`<span class="log-tag">[Collector]</span> Domain Infos: enumeration complete.`, 'collector-ok');
   } catch (err) {
-    addLog(`domain_info could not be loaded from domain_data.db: ${err.message}`, 'warn');
+    // domain_info load errors suppressed
   }
 }
 
@@ -338,13 +338,13 @@ async function _waitForDbReaderReady(timeoutMs = 60000, intervalMs = 1000) {
 async function runDeepDiscoveryCounts() {
   const payload = buildEnumerationPayload();
   const modules = [
-    { name: 'Access Control List', path: '/api/acl',       cntId: null,          navId: 'nav-acl-count',       section: 'acl' },
+    { name: 'Domain ACEs',         path: '/api/acl',       cntId: null,          navId: 'nav-acl-count',       section: 'acl' },
     { name: 'Domain Groups',       path: '/api/groups',    cntId: 'cnt-groups',  navId: 'nav-groups-count',    section: 'groups' },
-    { name: 'Group Policies',      path: '/api/gpo',       cntId: 'cnt-gpos',    navId: 'nav-gpo-count',       section: 'gpos' },
-    { name: 'Org. Units',          path: '/api/ous',       cntId: 'cnt-ous',     navId: 'nav-ous-count',       section: 'ous' },
+    { name: 'Domain GPOs',         path: '/api/gpo',       cntId: 'cnt-gpos',    navId: 'nav-gpo-count',       section: 'gpos' },
+    { name: 'Domain OUs',          path: '/api/ous',       cntId: 'cnt-ous',     navId: 'nav-ous-count',       section: 'ous' },
     { name: 'Domain Trusts',       path: '/api/trusts',    cntId: 'cnt-trusts',  navId: 'nav-trusts-count',    section: 'trusts' },
-    { name: 'Computers',           path: '/api/computers', cntId: 'cnt-comp',    navId: 'nav-computers-count', section: 'computers' },
-    { name: 'Users',               path: '/api/users',     cntId: 'cnt-users',   navId: 'nav-users-count',     section: 'users' },
+    { name: 'Domain Computers',    path: '/api/computers', cntId: 'cnt-comp',    navId: 'nav-computers-count', section: 'computers' },
+    { name: 'Domain Users',        path: '/api/users',     cntId: 'cnt-users',   navId: 'nav-users-count',     section: 'users' },
   ];
 
   const setMini = (id, val) => {
@@ -371,9 +371,9 @@ async function runDeepDiscoveryCounts() {
       });
       const data = await resp.json().catch(() => ({}));
       const ok   = resp.ok && data && data.success !== false;
-      addLog(`[Collector] ${ep.name}: ${ok ? 'enumeration complete' : 'enumeration failed'}.`, ok ? 'ok' : 'err');
+      addLog(`<span class="log-tag">[Collector]</span> ${ep.name}: ${ok ? 'enumeration complete' : 'enumeration failed'}.`, ok ? 'collector-ok' : 'collector-err');
     } catch (err) {
-      addLog(`[Collector] ${ep.name}: request failed (${err.message || 'unknown error'})`, 'err');
+      addLog(`<span class="log-tag">[Collector]</span> ${ep.name}: request failed (${err.message || 'unknown error'})`, 'collector-err');
     }
 
     const percent = Math.round(((idx + 1) / modules.length) * 70);
@@ -469,10 +469,18 @@ async function runDeepDiscoveryCounts() {
         }
       }
       enumCacheLoaded[ep.section] = true;
-      addLog(`[Render] ${ep.name}: ${count} objects loaded from domain_data.db.`, 'ok');
+      if (ep.section === 'trusts' && count === 0) {
+        addLog(`<span class="log-tag">[Render]</span> ${ep.name}: No trust relationships found in this environment.`, 'render-warn');
+      } else {
+        addLog(`<span class="log-tag">[Render]</span> ${ep.name}: loaded.`, 'render-ok');
+      }
     } else {
       enumCacheLoaded[ep.section] = false;
-      addLog(`[Render] ${ep.name}: failed to read from domain_data.db (sqlite_reader unavailable).`, 'err');
+      if (ep.section === 'trusts') {
+        addLog(`<span class="log-tag">[Render]</span> ${ep.name}: No trust relationships found in this environment.`, 'render-warn');
+      } else {
+        addLog(`<span class="log-tag">[Render]</span> ${ep.name}: failed.`, 'render-err');
+      }
     }
 
     if (ep.cntId) setMini(ep.cntId, displayCount);
@@ -603,7 +611,7 @@ async function doConnect(connectMode = 'deep') {
 
   setBtnLoading(true, connectMode);
   setConnState('connecting');
-  addLog(`Initiating ${connectMode.toUpperCase()} ${state.protocol.toUpperCase()} connection to ${ip} (${domain})...`, 'info');
+  addLog(`Initiating ${connectMode.toUpperCase()} ${state.protocol.toUpperCase()} connection to <span class="log-ip">${ip}</span> (<span class="log-domain">${domain}</span>)...`, 'info');
 
   try {
     const resp = await fetch(`${API_BASE}/api/connect`, {
@@ -628,8 +636,8 @@ async function doConnect(connectMode = 'deep') {
       state.domain  = data.domain || domain;
       state.dc      = dcHost || data.dc || ip;
       setConnState('connected');
-      addLog(`Connected as ${username}@${state.domain} via ${state.protocol.toUpperCase()}`, 'ok');
-      addLog(`Domain Controller: ${state.dc || 'N/A'}`, 'ok');
+      addLog(`Connected as <span class="log-upn">${username}@${state.domain}</span> via <span class="log-proto">${state.protocol.toUpperCase()}</span>`, 'ok');
+      addLog(`Domain Controller: <span class="log-dc">${state.dc || 'N/A'}</span>`, 'ok');
       updateStats(data);
       if (typeof loadDomainInfoFromDb === 'function') loadDomainInfoFromDb();
       runQuickSecurityStatusProbe();
@@ -1147,7 +1155,7 @@ async function runQuickSecurityStatusProbe() {
     });
     addLog('Quick security status probe completed (connect-time).', 'ok');
   } catch (_) {
-    addLog('Quick security status probe skipped (backend unavailable).', 'warn');
+    // Quick security probe skipped silently
   }
 }
 

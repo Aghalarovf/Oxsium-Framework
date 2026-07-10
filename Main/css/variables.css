@@ -21,14 +21,14 @@
     --amber:      #f0c030;
     --amber-dim:  #6a5015;
 
-    --text-pri:   #e8d8a0;
-    --text-sec:   #9a8848;
-    --text-dim:   #504530;
-    --text-hi:    #fff8e0;
+    --text-pri:   #f5d980;
+    --text-sec:   #e0c060;
+    --text-dim:   #b89840;
+    --text-hi:    #fff0b8;
 
-    --mono:       'Share Tech Mono', monospace;
-    --head:       'Rajdhani', sans-serif;
-    --ui:         'Space Mono', monospace;
+    --mono:       'JetBrains Mono', monospace;
+    --head:       'Outfit', sans-serif;
+    --ui:         'Inter', sans-serif;
 
     --sidebar-w:  210px;
     --right-w:    260px;

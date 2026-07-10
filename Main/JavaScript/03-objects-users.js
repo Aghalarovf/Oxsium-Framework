@@ -412,7 +412,7 @@ function renderUsers() {
       <div class="u-flag-cell">${adminBadge}</div>
       <div class="u-flag-cell">${u.spn?.length > 0    ? '<span class="flag yes-spn">SPN</span>'   : '<span class="flag no">—</span>'}</div>
       <div class="u-flag-cell">${u.asrep              ? '<span class="flag yes-asrep">ASP</span>'   : '<span class="flag no">—</span>'}</div>
-      <div class="u-flag-cell">${u.deleted ? '<span class="flag yes-deleted">DEL</span>' : (u.disabled ? '<span class="flag yes-dis">DIS</span>' : '<span class="flag yes-ok">●</span>')}</div>
+      <div class="u-flag-cell">${u.deleted ? '<span class="flag yes-deleted">DEL</span>' : (u.disabled ? '<span class="flag yes-dis">DIS</span>' : '<span class="flag yes-ok">ACT</span>')}</div>
       <div class="u-flag-cell">${u.pwd_not_required   ? '<span class="flag yes-nopwd">NP</span>'  : '<span class="flag no">—</span>'}</div>
       <div class="u-flag-cell">${u.dcsync             ? '<span class="flag yes-dcsync">DCS</span>': '<span class="flag no">—</span>'}</div>
       <div class="u-flag-cell">${(() => {
