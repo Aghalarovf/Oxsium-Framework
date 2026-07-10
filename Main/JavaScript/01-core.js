@@ -208,6 +208,9 @@ async function loadDomainInfoFromDb() {
 function applyDomainInfoStats(info) {
   if (!info) return;
 
+  window.currentDomainInfo = info;
+  renderDomainDetailsPanel(info);
+
   const set = (id, val, cls) => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -1146,4 +1149,120 @@ async function runQuickSecurityStatusProbe() {
   } catch (_) {
     addLog('Quick security status probe skipped (backend unavailable).', 'warn');
   }
+}
+
+function _ddBool(val) {
+  if (val === true  || val === 1) return { text: 'True',  cls: 'green' };
+  if (val === false || val === 0) return { text: 'False', cls: 'red' };
+  return { text: '—', cls: 'dim' };
+}
+
+function _ddSeverityClass(sev) {
+  const s = String(sev || '').toLowerCase();
+  return ['info', 'low', 'medium', 'high', 'critical'].includes(s) ? s : 'info';
+}
+
+function renderDomainDetailsPanel(info) {
+  const body = document.getElementById('domain-details-body');
+  if (!body) return;
+
+  if (!info) {
+    body.innerHTML = `<div class="domain-details-empty">No domain information available. Connect to a domain first.</div>`;
+    return;
+  }
+
+  const smbSigning = _ddBool(info.smb_signing_required);
+  const ntlm       = _ddBool(info.ntlm_supported);
+  const smartCard  = _ddBool(info.smart_card_required);
+
+  let html = '';
+
+  html += detailSection('General', [
+    ['FQDN',              escapeHtml(info.fqdn || '—'), 'accent'],
+    ['NetBIOS Name',      escapeHtml(info.netbios_name || '—'), ''],
+    ['Domain SID',        escapeHtml(info.domain_sid || '—'), ''],
+    ['Functional Level',  escapeHtml(info.functional_level_name || '—'), ''],
+    ['Risk Score',        escapeHtml(info.risk_score ?? '—'), info.risk_score >= 6 ? 'red' : info.risk_score >= 3 ? 'amber' : 'green'],
+    ['Highest Severity',  escapeHtml(info.highest_severity || '—'), _ddSeverityClass(info.highest_severity)],
+  ]);
+
+  html += detailSection('Security Posture', [
+    ['SMB Signing Required', smbSigning.text, smbSigning.cls],
+    ['NTLM Supported',       ntlm.text,       ntlm.cls],
+    ['Smart Card Required',  smartCard.text,  smartCard.cls],
+    ['Machine Account Quota', escapeHtml(info.machine_account_quota ?? '—'), ''],
+  ]);
+
+  const dcs = Array.isArray(info.domain_controllers) ? info.domain_controllers : [];
+  if (dcs.length) {
+    const dcRowsHtml = dcs.map(dc => {
+      const roles = [];
+      if (dc.is_schema_master)         roles.push('Schema Master');
+      if (dc.is_naming_master)         roles.push('Naming Master');
+      if (dc.is_rid_master)            roles.push('RID Master');
+      if (dc.is_pdc_emulator)          roles.push('PDC Emulator');
+      if (dc.is_infrastructure_master) roles.push('Infrastructure Master');
+      return `
+        <div class="dd-dc-item">
+          <div class="detail-row"><span class="d-label">Name</span><span class="d-val accent">${escapeHtml(dc.dns_name || dc.cn || '—')}</span></div>
+          <div class="detail-row"><span class="d-label">OS</span><span class="d-val">${escapeHtml(dc.os || '—')}</span></div>
+          <div class="detail-row"><span class="d-label">SID</span><span class="d-val">${escapeHtml(dc.sid || '—')}</span></div>
+          <div class="detail-row"><span class="d-label">FSMO Roles</span><span class="d-val ${roles.length ? 'accent' : 'dim'}">${roles.length ? escapeHtml(roles.join(', ')) : '—'}</span></div>
+        </div>`;
+    }).join('');
+    html += `<div class="detail-section">
+      <div class="detail-section-title">Domain Controllers (${dcs.length})</div>
+      ${dcRowsHtml}
+    </div>`;
+  }
+
+  const findings = Array.isArray(info.risk_findings) ? info.risk_findings : [];
+  if (findings.length) {
+    const findingsHtml = findings.map(f => `
+      <div class="dd-finding">
+        <div class="dd-finding-top">
+          <span class="dd-sev ${_ddSeverityClass(f.severity)}">${escapeHtml(f.severity || 'info')}</span>
+          <span class="dd-finding-title">${escapeHtml(f.title || f.code || '—')}</span>
+        </div>
+        ${f.detail ? `<div class="dd-finding-detail">${escapeHtml(f.detail)}</div>` : ''}
+      </div>`).join('');
+    html += `<div class="detail-section">
+      <div class="detail-section-title">Risk Findings (${findings.length})</div>
+      ${findingsHtml}
+    </div>`;
+  }
+
+  const fsmo = info.fsmo && typeof info.fsmo === 'object' ? info.fsmo : null;
+  if (fsmo) {
+    html += detailSection('FSMO Roles', [
+      ['Schema Master',     escapeHtml(fsmo.schema_master || '—'), ''],
+      ['Naming Master',     escapeHtml(fsmo.naming_master || '—'), ''],
+      ['RID Master',        escapeHtml(fsmo.rid_master || '—'), ''],
+      ['PDC Emulator',      escapeHtml(fsmo.pdc_emulator || '—'), ''],
+      ['Infrastructure Master', escapeHtml(fsmo.infrastructure || '—'), ''],
+    ]);
+  }
+
+  body.innerHTML = html || `<div class="domain-details-empty">No domain information available.</div>`;
+}
+
+function openDomainDetailsPanel() {
+  const overlay = document.getElementById('domain-details-overlay');
+  if (!overlay) return;
+  if (!window.currentDomainInfo) {
+    renderDomainDetailsPanel(null);
+  }
+  overlay.classList.add('show');
+  document.addEventListener('keydown', _domainDetailsEscHandler);
+}
+
+function closeDomainDetailsPanel() {
+  const overlay = document.getElementById('domain-details-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('show');
+  document.removeEventListener('keydown', _domainDetailsEscHandler);
+}
+
+function _domainDetailsEscHandler(e) {
+  if (e.key === 'Escape') closeDomainDetailsPanel();
 }

@@ -1202,6 +1202,9 @@
           <button class="chip"        data-filter="admin"   onclick="setFilter('admin',this)">
             <span class="chip-dot" style="background:var(--amber)"></span>Admin
           </button>
+          <button class="chip"        data-filter="dcsync"  onclick="setFilter('dcsync',this)">
+            <span class="chip-dot" style="background:var(--red)"></span>DCSync
+          </button>
           <button class="chip"        data-filter="spn"     onclick="setFilter('spn',this)">
             <span class="chip-dot" style="background:var(--accent)"></span>SPN
           </button>
@@ -1988,6 +1991,10 @@
       <div class="stat-value dim" id="stat-ntlm-support">—</div>
     </div>
 
+    <div class="domain-details-btn-wrap">
+      <button class="domain-details-btn" id="domain-details-btn" onclick="openDomainDetailsPanel()">Domain Details</button>
+    </div>
+
     <div class="panel-header" style="margin-top: 4px;">Object Counts</div>
 
     <div class="stat-grid">
@@ -2151,4 +2158,16 @@ function _aclStartObserver() {
 
 document.addEventListener('DOMContentLoaded', _aclStartObserver);
 </script>
+<div class="domain-details-overlay" id="domain-details-overlay" onclick="if(event.target===this) closeDomainDetailsPanel()">
+  <div class="domain-details-panel">
+    <div class="domain-details-header">
+      <span>Domain Details</span>
+      <button class="domain-details-close" onclick="closeDomainDetailsPanel()">✕</button>
+    </div>
+    <div class="domain-details-body" id="domain-details-body">
+      <div class="domain-details-empty">No domain information available. Connect to a domain first.</div>
+    </div>
+  </div>
+</div>
+
 </body>
