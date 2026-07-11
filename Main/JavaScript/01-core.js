@@ -205,8 +205,55 @@ async function loadDomainInfoFromDb() {
   }
 }
 
+// domain_data.db stores password_policy / kerberos_policy as flattened
+// columns (e.g. "password_policy__min_length", "kerberos_policy__max_ticket_age_hours")
+// instead of nested objects. The DB-reader API passes the row through as-is,
+// so we rebuild the nested `password_policy` / `kerberos_policy` objects here
+// before rendering, since renderDomainDetailsPanel() expects nested objects.
+function _ddCoercePolicyValue(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string') return raw;
+  const trimmed = raw.trim();
+  if (trimmed === '' || trimmed.toLowerCase() === 'none' || trimmed.toLowerCase() === 'null') return null;
+  if (trimmed.toLowerCase() === 'true')  return true;
+  if (trimmed.toLowerCase() === 'false') return false;
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  return trimmed;
+}
+
+function _ddBuildNestedPolicy(info, prefix) {
+  const result = {};
+  let found = false;
+  Object.keys(info).forEach((key) => {
+    if (key.startsWith(prefix)) {
+      const shortKey = key.slice(prefix.length);
+      result[shortKey] = _ddCoercePolicyValue(info[key]);
+      found = true;
+    }
+  });
+  return found ? result : null;
+}
+
+function normalizeDomainInfoPolicies(info) {
+  if (!info) return info;
+
+  if (!info.password_policy || typeof info.password_policy !== 'object') {
+    const pp = _ddBuildNestedPolicy(info, 'password_policy__');
+    if (pp) info.password_policy = pp;
+  }
+
+  if (!info.kerberos_policy || typeof info.kerberos_policy !== 'object') {
+    const kp = _ddBuildNestedPolicy(info, 'kerberos_policy__');
+    if (kp) info.kerberos_policy = kp;
+  }
+
+  return info;
+}
+
 function applyDomainInfoStats(info) {
   if (!info) return;
+
+  info = normalizeDomainInfoPolicies(info);
 
   window.currentDomainInfo = info;
   renderDomainDetailsPanel(info);
@@ -1248,6 +1295,47 @@ function renderDomainDetailsPanel(info) {
       ['RID Master',        escapeHtml(fsmo.rid_master || '—'), ''],
       ['PDC Emulator',      escapeHtml(fsmo.pdc_emulator || '—'), ''],
       ['Infrastructure Master', escapeHtml(fsmo.infrastructure || '—'), ''],
+    ]);
+  }
+
+  const pp = info.password_policy && typeof info.password_policy === 'object' ? info.password_policy : null;
+  if (pp && Object.keys(pp).length) {
+    const complexity   = _ddBool(pp.complexity_enabled);
+    const reversible   = _ddBool(pp.reversible_encryption);
+    const maxAge       = pp.max_age_days   != null ? `${pp.max_age_days} days`   : '—';
+    const minAge       = pp.min_age_days   != null ? `${pp.min_age_days} days`   : '—';
+    const lockDur      = pp.lockout_duration_mins   != null ? `${pp.lockout_duration_mins} min`  : '—';
+    const lockObs      = pp.lockout_observation_mins != null ? `${pp.lockout_observation_mins} min` : '—';
+    const threshold    = pp.lockout_threshold != null ? String(pp.lockout_threshold) : '—';
+    const history      = pp.history_count    != null ? String(pp.history_count)    : '—';
+    const minLen       = pp.min_length       != null ? String(pp.min_length)       : '—';
+    // reversible encryption enabled is a significant risk → invert colour logic
+    const reversibleCls = pp.reversible_encryption === true  ? 'red'
+                        : pp.reversible_encryption === false ? 'green' : 'dim';
+    html += detailSection('Password Policy', [
+      ['Min Length',               minLen,         pp.min_length != null && pp.min_length < 8 ? 'red' : ''],
+      ['Complexity Enabled',       complexity.text, complexity.cls],
+      ['Max Age',                  maxAge,          pp.max_age_days === null ? 'amber' : ''],
+      ['Min Age',                  minAge,          ''],
+      ['History Count',            history,         pp.history_count != null && pp.history_count < 5 ? 'amber' : ''],
+      ['Lockout Threshold',        threshold,       pp.lockout_threshold === 0 ? 'red' : ''],
+      ['Lockout Duration',         lockDur,         ''],
+      ['Observation Window',       lockObs,         ''],
+      ['Reversible Encryption',    reversible.text, reversibleCls],
+    ]);
+  }
+
+  const kp = info.kerberos_policy && typeof info.kerberos_policy === 'object' ? info.kerberos_policy : null;
+  if (kp && Object.keys(kp).length) {
+    const ticketAge  = kp.max_ticket_age_hours != null ? `${kp.max_ticket_age_hours} hrs`  : '—';
+    const renewAge   = kp.max_renew_age_days   != null ? `${kp.max_renew_age_days} days`   : '—';
+    const serviceAge = kp.max_service_age_mins != null ? `${kp.max_service_age_mins} min`  : '—';
+    const clockSkew  = kp.max_clock_skew_mins  != null ? `${kp.max_clock_skew_mins} min`   : '—';
+    html += detailSection('Kerberos Policy', [
+      ['Max Ticket Age',   ticketAge,  kp.max_ticket_age_hours != null && kp.max_ticket_age_hours > 10 ? 'amber' : ''],
+      ['Max Renew Age',    renewAge,   ''],
+      ['Max Service Age',  serviceAge, ''],
+      ['Max Clock Skew',   clockSkew,  kp.max_clock_skew_mins  != null && kp.max_clock_skew_mins  > 5  ? 'amber' : ''],
     ]);
   }
 

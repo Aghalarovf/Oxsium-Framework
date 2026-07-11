@@ -990,7 +990,8 @@ def _run_full_collector_pipeline(enum_req: dict, shared_session: "LdapSession | 
     try:
         try:
             domain_info_result = get_domain_info(
-                ip, domain, username, password, Config, conn=conn, base_dn=base_dn
+                ip, domain, username, password, Config, conn=conn, base_dn=base_dn,
+                use_ssl=use_ssl,
             )
             _write_domain_info_jsonl_snapshot(domain_info_result, is_local=False)
         except Exception as exc:
@@ -1023,6 +1024,7 @@ def _run_full_collector_pipeline(enum_req: dict, shared_session: "LdapSession | 
                 acl_filter=AclFilterConfig(),
                 on_records=_acl_stream_write,
                 conn=conn, base_dn=base_dn,
+                use_ssl=use_ssl,
             )
 
             if acl_result.get("success") or acl_streamed:
@@ -1465,11 +1467,14 @@ def list_acl_entries():
             scope_filter       = list(acl_filter_raw.get("scope_filter",       [])),
         )
 
+        _use_ssl = str(req.get("protocol", "")).strip().lower() == "ldaps"
+
         def _get_acls_with_filter(ip, domain, username, password, config, conn=None, base_dn=None):
             return get_domain_acls(
                 ip, domain, username, password, config,
                 acl_filter=acl_filter,
                 conn=conn, base_dn=base_dn,
+                use_ssl=_use_ssl,
             )
 
         should_refresh_snapshots = False

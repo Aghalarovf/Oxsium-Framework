@@ -11,6 +11,8 @@ from ldap3.core.exceptions import (
 	LDAPException,
 	LDAPInvalidCredentialsResult,
 	LDAPSocketOpenError,
+	LDAPStrongerAuthRequiredResult,
+	LDAPUnwillingToPerformResult,
 )
 
 try:
@@ -35,6 +37,34 @@ try:
 	from connect.ldap_core import _open_ldap_connection
 except Exception:
 	_open_ldap_connection = None
+
+
+def _is_ldap_signing_required_error(exc: Exception) -> bool:
+	"""LDAP signing tələbindən qaynaqlanan xətanı aşkar edir.
+
+	DC-də 'LDAP server signing requirements = Require signing' siyasəti
+	aktiv olduqda server aşağıdakı yollarla rədd cavabı göndərə bilər:
+	  - ldap3 LDAPStrongerAuthRequiredResult exception qaldırır
+	  - LDAPUnwillingToPerformResult + resultCode 8 (strongerAuthRequired)
+	  - Ümumi LDAPException-da xəta mesajında 'strongerAuthRequired' və ya
+	    Win32 error kodu '0x2028' / '8232' keçir
+
+	Returns True yalnız signing tələbindən qaynaqlandığı aydın olduqda.
+	"""
+	if isinstance(exc, LDAPStrongerAuthRequiredResult):
+		return True
+	if isinstance(exc, LDAPUnwillingToPerformResult):
+		msg = str(exc).lower()
+		if "strongerauthreq" in msg or "stronger auth" in msg:
+			return True
+	msg = str(exc).lower()
+	# Win32 error 8232 = ERROR_DS_AUTH_METHOD_NOT_SUPPORTED (0x2028)
+	return (
+		"strongerauthreq" in msg
+		or "stronger auth" in msg
+		or "00002028" in msg
+		or "8232" in msg
+	)
 
 
 def is_ntlm_hash(value: str) -> bool:
@@ -110,6 +140,115 @@ def ldap_timestamp_to_iso(value):
 def _domain_level_name(raw_level) -> str:
 	level = str(safe_int(raw_level, -1))
 	return getattr(Config, "DOMAIN_LEVEL_MAP", {}).get(level, level if level != "-1" else "Unknown")
+
+
+# pwdProperties bitmask flags (MS-ADTS 6.1.4.1 / MS-SAMR)
+_DOMAIN_PASSWORD_COMPLEX          = 0x00000001
+_DOMAIN_PASSWORD_NO_ANON_CHANGE   = 0x00000002
+_DOMAIN_PASSWORD_NO_CLEAR_CHANGE  = 0x00000004
+_DOMAIN_LOCKOUT_ADMINS            = 0x00000008
+_DOMAIN_PASSWORD_STORE_CLEARTEXT  = 0x00000010  # "reversible encryption"
+_DOMAIN_REFUSE_PASSWORD_CHANGE    = 0x00000020
+
+# AD stores certain policy intervals as *negative* 100-nanosecond ticks
+# (e.g. maxPwdAge, lockoutDuration, lockOutObservationWindow). A value of
+# -0x8000000000000000 (INTEGER8_MIN) conventionally means "never" / "not set".
+_AD_INTERVAL_NEVER = -0x8000000000000000
+_TICKS_PER_MINUTE = 600_000_000        # 60s * 10^7 (100ns ticks/sec)
+_TICKS_PER_DAY    = 864_000_000_000    # 86400s * 10^7
+
+
+def _ad_negative_interval_to_minutes(raw) -> float | None:
+	"""Convert a negative-100ns-tick AD interval attribute (lockoutDuration,
+	lockOutObservationWindow, ...) into minutes. Returns None for 0/"never"."""
+	value = safe_int(raw, 0)
+	if value == 0 or value <= _AD_INTERVAL_NEVER:
+		return None
+	return round(abs(value) / _TICKS_PER_MINUTE, 2)
+
+
+def _ad_negative_interval_to_days(raw) -> float | None:
+	"""Convert a negative-100ns-tick AD interval attribute (maxPwdAge, ...)
+	into days. Returns None for 0/"never" (password never expires)."""
+	value = safe_int(raw, 0)
+	if value == 0 or value <= _AD_INTERVAL_NEVER:
+		return None
+	return round(abs(value) / _TICKS_PER_DAY, 2)
+
+
+def _build_password_and_kerberos_policy(domain_entry, diagnostics: list[str] | None = None) -> tuple[dict, dict]:
+	"""Extracts Default Domain Policy password/Kerberos settings from the
+	attributes of the domain root object (class domainDNS). These are plain
+	LDAP attributes on the domain NC head — no separate GPO parsing needed.
+
+	Requires an authenticated (or sufficiently privileged) bind; most AD
+	environments do not expose these to anonymous/unauthenticated binds.
+
+	NOTE: the sub-dict key names below (short form, no "password_policy_"/
+	"kerberos_policy_" prefix) are a fixed contract with sqlite_engine.py's
+	_DOMAIN_INFO_FLATTEN_DICTS, which flattens them into columns named
+	"password_policy__<key>" / "kerberos_policy__<key>". Do not rename
+	these keys without updating sqlite_engine.py's mapping to match.
+	"""
+	password_policy: dict = {}
+	kerberos_policy: dict = {}
+
+	if domain_entry is None:
+		return password_policy, kerberos_policy
+
+	# NOTE: plain getattr(entry, name, default) does NOT protect us here.
+	# ldap3's Entry.__getattr__ raises LDAPCursorAttributeError (not a
+	# subclass of AttributeError) whenever an attribute wasn't requested in
+	# the search or wasn't returned by the server. getattr()'s fallback
+	# default only catches AttributeError, so that exception used to
+	# propagate straight out of this function's single try/except and
+	# silently blank out BOTH password_policy and kerberos_policy even if
+	# only one of the ~14 attributes below was missing/inaccessible.
+	# _safe_ldap_attr() catches that (and any other lookup error) so a
+	# single missing attribute degrades to None for that one field instead
+	# of wiping out every other successfully-read field.
+	def _safe_ldap_attr(name):
+		try:
+			return getattr(domain_entry, name, None)
+		except Exception as exc:
+			if diagnostics is not None:
+				diagnostics.append(f"password_kerberos_policy_attr:{name}: {exc}")
+			return None
+
+	try:
+		pwd_properties_raw = safe_int(_safe_ldap_attr("pwdProperties"), None)
+
+		password_policy = {
+			"min_length":              safe_int(_safe_ldap_attr("minPwdLength"), None),
+			"complexity_enabled":      bool(pwd_properties_raw & _DOMAIN_PASSWORD_COMPLEX) if pwd_properties_raw is not None else None,
+			"max_age_days":            _ad_negative_interval_to_days(_safe_ldap_attr("maxPwdAge")),
+			"min_age_days":            _ad_negative_interval_to_days(_safe_ldap_attr("minPwdAge")),
+			"history_count":           safe_int(_safe_ldap_attr("pwdHistoryLength"), None),
+			"lockout_threshold":       safe_int(_safe_ldap_attr("lockoutThreshold"), None),
+			"lockout_duration_mins":   _ad_negative_interval_to_minutes(_safe_ldap_attr("lockoutDuration")),
+			"lockout_observation_mins": _ad_negative_interval_to_minutes(_safe_ldap_attr("lockOutObservationWindow")),
+			"reversible_encryption":   bool(pwd_properties_raw & _DOMAIN_PASSWORD_STORE_CLEARTEXT) if pwd_properties_raw is not None else None,
+			"pwd_properties_raw":      pwd_properties_raw,
+		}
+	except Exception as exc:
+		if diagnostics is not None:
+			diagnostics.append(f"password_policy_parse: {exc}")
+
+	try:
+		# maxTicketAge/maxRenewAge/maxServiceAge/maxClockSkew are stored as
+		# plain (non-negative-interval) integers, already in their natural
+		# AD unit: hours / days / minutes / minutes respectively.
+		kerberos_policy = {
+			"max_ticket_age_hours": safe_int(_safe_ldap_attr("maxTicketAge"), None),
+			"max_renew_age_days":   safe_int(_safe_ldap_attr("maxRenewAge"), None),
+			"max_service_age_mins": safe_int(_safe_ldap_attr("maxServiceAge"), None),
+			"max_clock_skew_mins":  safe_int(_safe_ldap_attr("maxClockSkew"), None),
+		}
+	except Exception as exc:
+		if diagnostics is not None:
+			diagnostics.append(f"kerberos_policy_parse: {exc}")
+
+	return password_policy, kerberos_policy
 
 
 def _connect_anonymous(ip: str, config) -> Connection:
@@ -189,7 +328,7 @@ def _resolve_domain_netbios_name_prebind(ip: str, domain: str, config, diagnosti
 	return fallback
 
 
-def _connect(ip: str, domain: str, username: str, password: str, config, netbios_name: str | None = None) -> Connection:
+def _connect(ip: str, domain: str, username: str, password: str, config, netbios_name: str | None = None, use_ssl: bool = False) -> Connection:
 	auth_type = SIMPLE
 	if is_ntlm_hash(password):
 		password = f"00000000000000000000000000000000:{password}"
@@ -201,16 +340,25 @@ def _connect(ip: str, domain: str, username: str, password: str, config, netbios
 	# /api/connect. A plain Connection(auto_bind=True) here would fail with
 	# "strongerAuthRequired" on any DC that enforces LDAP signing, even
 	# though the same credentials succeed through the signing-safe path.
+	# `use_ssl` must be forwarded (not hardcoded) — on LDAPs-only / signing-
+	# enforced DCs, forcing plain LDAP here silently drops or blocks access
+	# to sensitive attributes such as the password/Kerberos policy fields.
 	if _open_ldap_connection is not None:
 		return _open_ldap_connection(
 			ldap_target=ip,
 			bind_user=bind_user,
 			bind_secret=password,
 			auth_type=auth_type,
-			use_ssl=False,
+			use_ssl=use_ssl,
 		)
 
-	server = Server(ip, get_info=ALL, connect_timeout=getattr(config, "LDAP_CONNECT_TIMEOUT", 15))
+	server = Server(
+		ip,
+		port=636 if use_ssl else None,
+		use_ssl=use_ssl,
+		get_info=ALL,
+		connect_timeout=getattr(config, "LDAP_CONNECT_TIMEOUT", 15),
+	)
 	return Connection(
 		server,
 		user=bind_user,
@@ -221,30 +369,125 @@ def _connect(ip: str, domain: str, username: str, password: str, config, netbios
 	)
 
 
-def _probe_ntlm_support(ip: str, domain: str, config, diagnostics: list[str] | None = None) -> bool | None:
+def _probe_ntlm_via_smb(ip: str, timeout: float = 5.0, diagnostics: list[str] | None = None) -> bool:
+	"""SMB2 üzərindən NTLMSSP CHALLENGE alınaraq NTLM dəstəyini yoxlayır.
+
+	Bu yanaşma LDAP signing tələb edən mühitlərdə də işləyir, çünki
+	TCP 445 portuna birbaşa soket bağlantısı qurulur — LDAP stack istifadə edilmir.
+	DC-dən NTLMSSP\x00 imzalı CHALLENGE mesajı gəlməsi NTLM-in aktiv olduğunu
+	birbaşa sübut edir.
+
+	Returns:
+		True   — DC NTLMSSP challenge qaytardı (NTLM dəstəklənir)
+		False  — Bağlantı xətası, timeout, gözlənilməz cavab və ya DC NTLM-i rədd etdi
+	"""
+	sock = None
+	try:
+		sock = socket.create_connection((ip, 445), timeout=timeout)
+		sock.settimeout(timeout)
+
+		sock.sendall(_build_smb2_negotiate_request())
+		negotiate_nb_header = _recv_exact(sock, 4)
+		negotiate_len = int.from_bytes(negotiate_nb_header[1:4], "big")
+		negotiate_response = _recv_exact(sock, negotiate_len)
+
+		if len(negotiate_response) < 4 or negotiate_response[0:4] != b"\xfeSMB":
+			if diagnostics is not None:
+				diagnostics.append("ntlm_smb_probe: unexpected SMB2 negotiate response — assuming NTLM not supported")
+			return False
+
+		security_blob = _build_ntlm_negotiate_message()
+		sock.sendall(_build_smb2_session_setup_request(security_blob))
+
+		response_nb_header = _recv_exact(sock, 4)
+		response_len = int.from_bytes(response_nb_header[1:4], "big")
+		response = _recv_exact(sock, response_len)
+
+		if len(response) < 72 or response[0:4] != b"\xfeSMB":
+			if diagnostics is not None:
+				diagnostics.append("ntlm_smb_probe: unexpected SMB2 session setup response — assuming NTLM not supported")
+			return False
+
+		status = struct.unpack("<I", response[8:12])[0]
+
+		# 0xC0000016 = STATUS_MORE_PROCESSING_REQUIRED → DC NTLM challenge qaytardı
+		if status == 0xC0000016:
+			body = response[64:]
+			if len(body) >= 8:
+				sec_buf_offset = struct.unpack("<H", body[4:6])[0]
+				sec_buf_len = struct.unpack("<H", body[6:8])[0]
+				security_buffer = response[sec_buf_offset:sec_buf_offset + sec_buf_len]
+				if security_buffer.startswith(b"NTLMSSP\x00"):
+					if diagnostics is not None:
+						diagnostics.append("ntlm_smb_probe: DC returned NTLMSSP challenge over SMB2 (NTLM is supported)")
+					return True
+			# STATUS_MORE_PROCESSING_REQUIRED gəldi amma NTLMSSP yoxdur —
+			# başqa bir auth mexanizmi (Kerberos GSSAPI) istifadə edilir, NTLM yoxdur
+			if diagnostics is not None:
+				diagnostics.append("ntlm_smb_probe: STATUS_MORE_PROCESSING_REQUIRED but no NTLMSSP blob — assuming NTLM not supported")
+			return False
+
+		# 0xC000006D = STATUS_LOGON_FAILURE, 0xC0000022 = STATUS_ACCESS_DENIED
+		if status in (0xC000006D, 0xC0000022):
+			if diagnostics is not None:
+				diagnostics.append(f"ntlm_smb_probe: DC rejected NTLM auth (NT status 0x{status:08x}) — NTLM is disabled")
+			return False
+
+		if diagnostics is not None:
+			diagnostics.append(f"ntlm_smb_probe: unexpected NT status 0x{status:08x} — assuming NTLM not supported")
+		return False
+
+	except (OSError, socket.timeout, struct.error) as exc:
+		if diagnostics is not None:
+			diagnostics.append(f"ntlm_smb_probe: {exc} — assuming NTLM not supported")
+		return False
+	finally:
+		if sock is not None:
+			try:
+				sock.close()
+			except Exception:
+				pass
+
+
+def _probe_ntlm_support(ip: str, domain: str, config, diagnostics: list[str] | None = None) -> dict:
+	"""NTLM dəstəyini və LDAP signing tələbini yoxlayır.
+
+	Yoxlama sırası:
+	  1. LDAP (389) üzərindən NTLM cəhdi
+	  2. LDAP xətası varsa → LDAPs (636) üzərindən NTLM cəhdi
+	  3. LDAPs də uğursuz olarsa → SMB2 (445) üzərindən NTLM probe
+
+	Returns:
+		{
+			"ntlm_supported": bool,       # həmişə True ya False, heç vaxt None
+			"ldap_signing_required": bool,
+		}
+	"""
 	probe_user = get_bind_user(f"probe_{os.urandom(4).hex()}", domain)
 	probe_password = os.urandom(16).hex()
+	smb_timeout = getattr(config, "SMB_PROBE_TIMEOUT", 5)
+	ldap_connect_timeout = getattr(config, "LDAP_CONNECT_TIMEOUT", 15)
+	ldap_receive_timeout = getattr(config, "LDAP_RECEIVE_TIMEOUT", 120)
 
+	# Mərhələ 1: LDAP (389)
 	test_conn = None
 	try:
-		server = Server(ip, connect_timeout=getattr(config, "LDAP_CONNECT_TIMEOUT", 15))
-		test_conn = Connection(
-			server,
-			user=probe_user,
-			password=probe_password,
-			authentication=NTLM,
-			auto_bind=True,
-			receive_timeout=getattr(config, "LDAP_RECEIVE_TIMEOUT", 120),
-		)
-		return True
+		server = Server(ip, connect_timeout=ldap_connect_timeout)
+		test_conn = Connection(server, user=probe_user, password=probe_password,
+			authentication=NTLM, auto_bind=True, receive_timeout=ldap_receive_timeout)
+		return {"ntlm_supported": True, "ldap_signing_required": False}
 	except LDAPInvalidCredentialsResult:
 		if diagnostics is not None:
 			diagnostics.append("ntlm_probe: DC processed the NTLM handshake and rejected the probe credentials (NTLM is supported)")
-		return True
-	except (LDAPSocketOpenError, LDAPException, OSError, ValueError) as exc:
-		if diagnostics is not None:
-			diagnostics.append(f"ntlm_probe: inconclusive ({exc})")
-		return None
+		return {"ntlm_supported": True, "ldap_signing_required": False}
+	except (LDAPSocketOpenError, LDAPException, OSError, ValueError) as ldap_exc:
+		ldap_signing = _is_ldap_signing_required_error(ldap_exc)
+		if ldap_signing:
+			if diagnostics is not None:
+				diagnostics.append(f"ntlm_probe: LDAP signing required ({ldap_exc})")
+		else:
+			if diagnostics is not None:
+				diagnostics.append(f"ntlm_probe: LDAP (389) failed ({ldap_exc}), trying LDAPs (636)")
 	finally:
 		if test_conn is not None:
 			try:
@@ -252,40 +495,136 @@ def _probe_ntlm_support(ip: str, domain: str, config, diagnostics: list[str] | N
 			except Exception:
 				pass
 
+	# Mərhələ 2: LDAPs (636) — həm LDAP signing xətası, həm də port bağlı halında cəhd et.
+	# LDAPs TLS kanalı öz-özünə imzalanma təmin etdiyindən signing tələbi olmur.
+	# Əgər bu da uğurlu olursa → mühit yalnız LDAPs istifadə edir, signing tələbi var.
+	test_conn = None
+	try:
+		server_ssl = Server(ip, port=636, use_ssl=True, connect_timeout=ldap_connect_timeout)
+		test_conn = Connection(server_ssl, user=probe_user, password=probe_password,
+			authentication=NTLM, auto_bind=True, receive_timeout=ldap_receive_timeout)
+		if diagnostics is not None:
+			diagnostics.append("ntlm_probe: LDAPs (636) NTLM bind succeeded — LDAPs-only environment, LDAP signing enforced")
+		return {"ntlm_supported": True, "ldap_signing_required": True}
+	except LDAPInvalidCredentialsResult:
+		if diagnostics is not None:
+			diagnostics.append("ntlm_probe: LDAPs (636) processed NTLM handshake, rejected probe credentials — NTLM is supported, LDAPs-only environment")
+		return {"ntlm_supported": True, "ldap_signing_required": True}
+	except (LDAPSocketOpenError, LDAPException, OSError, ValueError) as ldaps_exc:
+		if diagnostics is not None:
+			diagnostics.append(f"ntlm_probe: LDAPs (636) also failed ({ldaps_exc}), falling back to SMB2 probe")
 
-def _check_ntlm_supported(ip: str, domain: str, username: str, password: str, config, diagnostics: list[str] | None = None, netbios_name: str | None = None) -> bool | None:
+	# Mərhələ 3: SMB2 (445)
+	return {
+		"ntlm_supported": _probe_ntlm_via_smb(ip, timeout=smb_timeout, diagnostics=diagnostics),
+		"ldap_signing_required": False,
+	}
 
+
+def _check_ntlm_supported(ip: str, domain: str, username: str, password: str, config, diagnostics: list[str] | None = None, netbios_name: str | None = None, use_ssl: bool = False) -> dict:
+	"""NTLM dəstəyini və LDAP signing tələbini yoxlayır.
+
+	`use_ssl` — istifadəçinin /api/connect zamanı seçdiyi rejimi bildirir.
+	  * use_ssl=False (default): əvvəlcə LDAP (389), sonra LDAPs (636), sonra SMB2 (445)
+	  * use_ssl=True: əvvəlcə LDAPs (636), yalnız o uğursuz olarsa LDAP (389),
+	    sonra SMB2 (445). Bu, istifadəçi açıq şəkildə SSL seçdikdə (məsələn,
+	    plain LDAP portu mühitdə bağlı/qadağan olduqda) yoxlamanın həmin
+	    kanal üzərindən aparılmasını təmin edir və plain-LDAP-a lazımsız/
+	    yanlış nəticəli cəhdin qarşısını alır.
+
+	Returns:
+		{
+			"ntlm_supported": bool,        # həmişə True ya False, heç vaxt None
+			"ldap_signing_required": bool,
+		}
+	"""
 	bind_password = password
 	if is_ntlm_hash(password):
 		bind_password = f"00000000000000000000000000000000:{password}"
 	bind_user = get_bind_user(username, domain, netbios_name)
+	smb_timeout = getattr(config, "SMB_PROBE_TIMEOUT", 5)
+	ldap_connect_timeout = getattr(config, "LDAP_CONNECT_TIMEOUT", 15)
+	ldap_receive_timeout = getattr(config, "LDAP_RECEIVE_TIMEOUT", 120)
 
-	test_conn = None
-	try:
-		server = Server(ip, connect_timeout=getattr(config, "LDAP_CONNECT_TIMEOUT", 15))
-		test_conn = Connection(
-			server,
-			user=bind_user,
-			password=bind_password,
-			authentication=NTLM,
-			auto_bind=True,
-			receive_timeout=getattr(config, "LDAP_RECEIVE_TIMEOUT", 120),
-		)
-		return True
-	except LDAPInvalidCredentialsResult as exc:
+	def _try_plain_ldap():
+		test_conn = None
+		try:
+			server = Server(ip, connect_timeout=ldap_connect_timeout)
+			test_conn = Connection(server, user=bind_user, password=bind_password,
+				authentication=NTLM, auto_bind=True, receive_timeout=ldap_receive_timeout)
+			return {"ntlm_supported": True, "ldap_signing_required": False}
+		except LDAPInvalidCredentialsResult as exc:
+			if diagnostics is not None:
+				diagnostics.append(f"ntlm_check: DC rejected NTLM bind with otherwise-valid credentials: {exc}")
+			return {"ntlm_supported": False, "ldap_signing_required": False}
+		except (LDAPSocketOpenError, LDAPException, OSError, ValueError) as ldap_exc:
+			if _is_ldap_signing_required_error(ldap_exc):
+				if diagnostics is not None:
+					diagnostics.append(f"ntlm_check: LDAP signing required ({ldap_exc})")
+			else:
+				if diagnostics is not None:
+					diagnostics.append(f"ntlm_check: LDAP (389) failed ({ldap_exc})")
+			return None
+		finally:
+			if test_conn is not None:
+				try:
+					test_conn.unbind()
+				except Exception:
+					pass
+
+	def _try_ldaps():
+		test_conn = None
+		try:
+			server_ssl = Server(ip, port=636, use_ssl=True, connect_timeout=ldap_connect_timeout)
+			test_conn = Connection(server_ssl, user=bind_user, password=bind_password,
+				authentication=NTLM, auto_bind=True, receive_timeout=ldap_receive_timeout)
+			if diagnostics is not None:
+				diagnostics.append("ntlm_check: LDAPs (636) NTLM bind succeeded — LDAPs-only environment, LDAP signing enforced")
+			return {"ntlm_supported": True, "ldap_signing_required": True}
+		except LDAPInvalidCredentialsResult as exc:
+			# LDAPs üzərindən credentials rədd edildi → NTLM işləmir (credentials doğru idi)
+			if diagnostics is not None:
+				diagnostics.append(f"ntlm_check: LDAPs (636) rejected NTLM bind with valid credentials: {exc} — NTLM disabled")
+			return {"ntlm_supported": False, "ldap_signing_required": True}
+		except (LDAPSocketOpenError, LDAPException, OSError, ValueError) as ldaps_exc:
+			if diagnostics is not None:
+				diagnostics.append(f"ntlm_check: LDAPs (636) failed ({ldaps_exc})")
+			return None
+		finally:
+			if test_conn is not None:
+				try:
+					test_conn.unbind()
+				except Exception:
+					pass
+
+	if use_ssl:
+		# İstifadəçi SSL seçib — əvvəlcə LDAPs (636) sınanır.
+		result = _try_ldaps()
+		if result is not None:
+			return result
 		if diagnostics is not None:
-			diagnostics.append(f"ntlm_check: DC rejected NTLM bind with otherwise-valid credentials: {exc}")
-		return False
-	except (LDAPSocketOpenError, LDAPException, OSError, ValueError) as exc:
+			diagnostics.append("ntlm_check: LDAPs (636) failed, falling back to plain LDAP (389)")
+		result = _try_plain_ldap()
+		if result is not None:
+			return result
+	else:
+		result = _try_plain_ldap()
+		if result is not None:
+			return result
 		if diagnostics is not None:
-			diagnostics.append(f"ntlm_check: inconclusive ({exc})")
-		return None
-	finally:
-		if test_conn is not None:
-			try:
-				test_conn.unbind()
-			except Exception:
-				pass
+			diagnostics.append("ntlm_check: trying LDAPs (636)")
+		result = _try_ldaps()
+		if result is not None:
+			return result
+
+	if diagnostics is not None:
+		diagnostics.append("ntlm_check: LDAP/LDAPs both failed, falling back to SMB2 probe")
+
+	# Son mərhələ: SMB2 (445)
+	return {
+		"ntlm_supported": _probe_ntlm_via_smb(ip, timeout=smb_timeout, diagnostics=diagnostics),
+		"ldap_signing_required": False,
+	}
 
 _SMB2_CLIENT_DIALECTS = (0x0202, 0x0210, 0x0300, 0x0302)
 
@@ -800,7 +1139,7 @@ def _collect_certificate_services(conn: Connection, config_dn: str) -> list[dict
 	return cas
 
 
-def _build_risk_findings(*, machine_account_quota: int, smart_card_required: bool, ntlm_supported: bool | None, smb_signing_required: bool | None) -> list[dict]:
+def _build_risk_findings(*, machine_account_quota: int, smart_card_required: bool, ntlm_supported: bool, smb_signing_required: bool | None, ldap_signing_required: bool) -> list[dict]:
 	findings: list[dict] = []
 
 	if machine_account_quota > 10:
@@ -823,13 +1162,23 @@ def _build_risk_findings(*, machine_account_quota: int, smart_card_required: boo
 			}
 		)
 
-	if ntlm_supported is True:
+	if ntlm_supported:
 		findings.append(
 			{
 				"severity": "medium",
 				"code": "NTLM_ENABLED",
 				"title": "NTLM authentication is allowed",
 				"detail": "The domain controller accepted an NTLM bind, meaning NTLM authentication is not restricted at the domain level. This exposes the domain to NTLM relay and pass-the-hash style attacks.",
+			}
+		)
+
+	if ldap_signing_required:
+		findings.append(
+			{
+				"severity": "info",
+				"code": "LDAP_SIGNING_REQUIRED",
+				"title": "LDAP signing is required",
+				"detail": "The domain controller requires LDAP signing (strongerAuthRequired). Plain-text and unsigned LDAP binds are rejected. This is a positive security control.",
 			}
 		)
 
@@ -873,7 +1222,8 @@ def get_domain_info_unauth(ip: str, domain: str, config) -> dict:
 		"smb_signing_policy_present": None,
 		"smb_signing_enabled": None,
 		"smb_signing_required": None,
-		"ntlm_supported": None,
+		"ntlm_supported": False,
+		"ldap_signing_required": False,
 		"smart_card_required": None,
 		"machine_account_quota": None,
 		"risk_score": 0,
@@ -907,7 +1257,9 @@ def get_domain_info_unauth(ip: str, domain: str, config) -> dict:
 	if host_netbios.get("domain_name"):
 		result["netbios_name"] = host_netbios["domain_name"]
 
-	result["ntlm_supported"] = _probe_ntlm_support(ip, domain, config, diagnostics=diagnostics)
+	ntlm_probe = _probe_ntlm_support(ip, domain, config, diagnostics=diagnostics)
+	result["ntlm_supported"] = ntlm_probe["ntlm_supported"]
+	result["ldap_signing_required"] = ntlm_probe["ldap_signing_required"]
 
 	conn = None
 	try:
@@ -957,6 +1309,30 @@ def get_domain_info_unauth(ip: str, domain: str, config) -> dict:
 				netbios_name = _get_netbios_name(conn, base_dn, config_dn, diagnostics=diagnostics)
 				if netbios_name:
 					result["netbios_name"] = netbios_name
+
+				# Best-effort: most AD environments do NOT expose password/
+				# Kerberos policy attributes to an anonymous bind, but some
+				# legacy/misconfigured domains do — try, and silently leave
+				# password_policy/kerberos_policy empty if access is denied.
+				try:
+					anon_domain_entry = _search_base_entry(
+						conn,
+						base_dn,
+						[
+							"minPwdLength", "pwdProperties", "pwdHistoryLength",
+							"maxPwdAge", "minPwdAge", "lockoutThreshold", "lockoutDuration",
+							"lockOutObservationWindow", "maxTicketAge",
+							"maxRenewAge", "maxServiceAge", "maxClockSkew",
+						],
+						debug_label="domain_entry_anon_policy",
+						diagnostics=diagnostics,
+					)
+					if anon_domain_entry:
+						password_policy, kerberos_policy = _build_password_and_kerberos_policy(anon_domain_entry, diagnostics=diagnostics)
+						result["password_policy"] = password_policy
+						result["kerberos_policy"] = kerberos_policy
+				except Exception as exc:
+					diagnostics.append(f"anon_policy_lookup: {exc}")
 			else:
 				result["meta"]["default_naming_context"] = base_dn
 
@@ -993,6 +1369,7 @@ def get_domain_info_unauth(ip: str, domain: str, config) -> dict:
 		smart_card_required=True,
 		ntlm_supported=result["ntlm_supported"],
 		smb_signing_required=result["smb_signing_required"],
+		ldap_signing_required=result["ldap_signing_required"],
 	)
 	result["risk_findings"] = findings
 	result["highest_severity"] = _highest_severity(findings)
@@ -1006,7 +1383,7 @@ def get_domain_info_unauth(ip: str, domain: str, config) -> dict:
 	return result
 
 
-def get_domain_info(ip: str, domain: str, username: str, password: str, config, conn=None, base_dn=None) -> dict:
+def get_domain_info(ip: str, domain: str, username: str, password: str, config, conn=None, base_dn=None, use_ssl: bool = False) -> dict:
 	generated_at = datetime.now(timezone.utc).isoformat()
 	base_dn = base_dn or domain_to_dn(domain)
 	owns_connection = conn is None
@@ -1025,7 +1402,8 @@ def get_domain_info(ip: str, domain: str, username: str, password: str, config, 
 		"smb_signing_policy_present": None,
 		"smb_signing_enabled": None,
 		"smb_signing_required": None,
-		"ntlm_supported": None,
+		"ntlm_supported": False,
+		"ldap_signing_required": False,
 		"smart_card_required": False,
 		"machine_account_quota": 0,
 		"risk_score": 0,
@@ -1068,7 +1446,7 @@ def get_domain_info(ip: str, domain: str, username: str, password: str, config, 
 
 	try:
 		if owns_connection:
-			conn = _connect(ip, domain, username, password, config, netbios_name=resolved_netbios_name)
+			conn = _connect(ip, domain, username, password, config, netbios_name=resolved_netbios_name, use_ssl=use_ssl)
 	except (LDAPInvalidCredentialsResult, LDAPSocketOpenError, LDAPException, OSError, ValueError) as exc:
 		result["error"] = str(exc)
 		if diagnostics:
@@ -1127,6 +1505,18 @@ def get_domain_info(ip: str, domain: str, username: str, password: str, config, 
 				"distinguishedName",
 				"name",
 				"description",
+				"minPwdLength",
+				"pwdProperties",
+				"pwdHistoryLength",
+				"maxPwdAge",
+				"minPwdAge",
+				"lockoutThreshold",
+				"lockoutDuration",
+				"lockOutObservationWindow",
+				"maxTicketAge",
+				"maxRenewAge",
+				"maxServiceAge",
+				"maxClockSkew",
 			],
 			debug_label="domain_entry",
 			diagnostics=diagnostics,
@@ -1139,6 +1529,10 @@ def get_domain_info(ip: str, domain: str, username: str, password: str, config, 
 				result["functional_level_name"] = _domain_level_name(behavior_version)
 			result["machine_account_quota"] = safe_int(getattr(domain_entry, "ms-DS-MachineAccountQuota", None), 0)
 			result["meta"]["domain_dn"] = str(normalize_value(getattr(domain_entry, "distinguishedName", None)) or base_dn)
+
+			password_policy, kerberos_policy = _build_password_and_kerberos_policy(domain_entry, diagnostics=diagnostics)
+			result["password_policy"] = password_policy
+			result["kerberos_policy"] = kerberos_policy
 
 		fsmo_roles = _collect_fsmo_roles(conn, base_dn, config_dn, schema_dn, diagnostics=diagnostics)
 		result["fsmo"] = {
@@ -1156,7 +1550,9 @@ def get_domain_info(ip: str, domain: str, username: str, password: str, config, 
 		result["fine_grained_policies"] = []
 		result["smart_card_required"] = False
 
-		result["ntlm_supported"] = _check_ntlm_supported(ip, domain, username, password, config, diagnostics=diagnostics, netbios_name=resolved_netbios_name)
+		ntlm_check = _check_ntlm_supported(ip, domain, username, password, config, diagnostics=diagnostics, netbios_name=resolved_netbios_name, use_ssl=use_ssl)
+		result["ntlm_supported"] = ntlm_check["ntlm_supported"]
+		result["ldap_signing_required"] = ntlm_check["ldap_signing_required"]
 
 		smb_signing = _check_smb_signing(ip, timeout=getattr(config, "SMB_PROBE_TIMEOUT", 5), diagnostics=diagnostics)
 		result["smb_signing_enabled"] = smb_signing.get("enabled")
@@ -1171,6 +1567,7 @@ def get_domain_info(ip: str, domain: str, username: str, password: str, config, 
 			smart_card_required=result["smart_card_required"],
 			ntlm_supported=result["ntlm_supported"],
 			smb_signing_required=result["smb_signing_required"],
+			ldap_signing_required=result["ldap_signing_required"],
 		)
 		result["risk_findings"] = findings
 		result["highest_severity"] = _highest_severity(findings)
@@ -1285,6 +1682,7 @@ def print_domain_info(result: dict, use_color: bool | None = None) -> None:
 
 	_section("Security indicators", use_color)
 	_kv("NTLM supported", _bool_str(result.get("ntlm_supported"), use_color), use_color)
+	_kv("LDAP signing required", _bool_str(result.get("ldap_signing_required"), use_color), use_color)
 	_kv("SMB signing enabled", _bool_str(result.get("smb_signing_enabled"), use_color), use_color)
 	_kv("SMB signing required", _bool_str(result.get("smb_signing_required"), use_color), use_color)
 	_kv("Smart card required", _bool_str(result.get("smart_card_required"), use_color), use_color)

@@ -116,6 +116,7 @@ def get_domain_acls(
     io_workers: Optional[int] = None,
     conn=None,
     base_dn: str | None = None,
+    use_ssl: bool = False,
 ) -> dict:
 
     flt      = acl_filter or AclFilterConfig()
@@ -149,7 +150,7 @@ def get_domain_acls(
             LDAPSocketOpenError,
         )
         if owns_connection:
-            backend = Ldap3Backend(ip, bind_user, password, auth_type, ldap_cfg)
+            backend = Ldap3Backend(ip, bind_user, password, auth_type, ldap_cfg, use_ssl=use_ssl)
         else:
             backend = Ldap3Backend.from_connection(conn)
     except LDAPInvalidCredentialsResult as e:
@@ -176,7 +177,7 @@ def get_domain_acls(
                 pre_errors.append(_capture_error("build_guid_map", base_dn, e))
 
         conn_factory = None if sequential else make_conn_factory(
-            ip, bind_user, password, auth_type, ldap_cfg,
+            ip, bind_user, password, auth_type, ldap_cfg, use_ssl=use_ssl,
         )
 
         collector = AclCollector(

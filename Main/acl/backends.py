@@ -123,7 +123,8 @@ class ImpacketParser:
 
 class Ldap3Backend:
     def __init__(self, ip: str = None, bind_user: str = None, password: str = None,
-                 auth_type: str = None, cfg: LdapConfig = None, _conn=None) -> None:
+                 auth_type: str = None, cfg: LdapConfig = None, use_ssl: bool = False,
+                 _conn=None) -> None:
         if _conn is not None:
             self._conn = _conn
             return
@@ -145,7 +146,7 @@ class Ldap3Backend:
             bind_user=bind_user,
             bind_secret=password,
             auth_type=auth_type,
-            use_ssl=False,
+            use_ssl=use_ssl,
         )
         if not self._conn.bound:
             result_code = (self._conn.result or {}).get("result")
@@ -180,7 +181,7 @@ class Ldap3Backend:
 
 
 def make_conn_factory(ip: str, bind_user: str, password: str,
-                       auth_type: str, cfg: LdapConfig):
+                       auth_type: str, cfg: LdapConfig, use_ssl: bool = False):
     def factory() -> Ldap3Backend:
-        return Ldap3Backend(ip, bind_user, password, auth_type, cfg)
+        return Ldap3Backend(ip, bind_user, password, auth_type, cfg, use_ssl=use_ssl)
     return factory
