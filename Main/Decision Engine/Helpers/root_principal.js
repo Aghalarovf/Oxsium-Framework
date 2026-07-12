@@ -19,13 +19,12 @@
     window.SELECTED_PRINCIPAL = null;
     window.SELECTED_ROOT_PRINCIPAL_SID = '';
 
-    const domainObjectBaseUrl = new URL('../../Domain%20Object/', window.location.href);
     const defaultIconHref = new URL('../../assets/Icons/root_principal.png', window.location.href).href;
     const fallbackHref = new URL('../../assets/favicon.png', window.location.href).href;
 
-    // Engine API port control (default 5100). Click the status label to change.
+    // Engine API port control (default 30101). Click the status label to change.
     window.ENGINE_API_HOST = window.ENGINE_API_HOST || '127.0.0.1';
-    window.ENGINE_API_PORT = window.ENGINE_API_PORT || '5100';
+    window.ENGINE_API_PORT = window.ENGINE_API_PORT || '30101';
 
     function setEngineStatus(isActive) {
         if (statusLabel) {
@@ -83,51 +82,49 @@
     ══════════════════════════════════════════════════════════ */
 
     /**
-     * Fetch a JSON file and return parsed data.
-     * Resolves to null on failure so the other file can still load.
+     * Fetch JSON from the Decision Engine API and return parsed data.
+     * Resolves to null on failure.
      */
-    async function fetchJSON(path) {
+    async function fetchJSON(url) {
         try {
-            const res = await fetch(path);
+            const res = await fetch(url, { cache: 'no-store' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return await res.json();
         } catch (err) {
-            console.warn(`[RootPrincipal] Could not load ${path}:`, err.message);
+            console.warn(`[RootPrincipal] Could not load ${url}:`, err.message);
             return null;
         }
     }
 
-    /** Load both JSON files and extract relevant fields. */
+    /** Load principals from the Engine API (backed by domain_data.db) and extract relevant fields. */
     async function loadPrincipals() {
         scrollArea.innerHTML = '<div class="rp-loading">Loading principals…</div>';
 
-        const [usersData, computersData] = await Promise.all([
-            fetchJSON(new URL('domain_users.json', domainObjectBaseUrl).href),
-            fetchJSON(new URL('domain_computers.json', domainObjectBaseUrl).href)
-        ]);
+        const apiUrl = `http://${window.ENGINE_API_HOST}:${window.ENGINE_API_PORT}/api/root-principals`;
+        const data = await fetchJSON(apiUrl);
 
         /* ── Users ──────────────────────────────────────────── */
-        if (usersData && Array.isArray(usersData.users)) {
-            rpUsers = usersData.users.map(u => ({
+        if (data && Array.isArray(data.users)) {
+            rpUsers = data.users.map(u => ({
                 username: u.username || '(unnamed)',
                 sid:      u.sid      || '',
-                target_attributes: u
+                target_attributes: u.target_attributes || u
             }));
         } else {
             rpUsers = [];
-            console.warn('[RootPrincipal] domain_users.json: missing or invalid users array');
+            console.warn('[RootPrincipal] /api/root-principals: missing or invalid users array (is the Engine API running?)');
         }
 
         /* ── Computers ──────────────────────────────────────── */
-        if (computersData && Array.isArray(computersData.computers)) {
-            rpComputers = computersData.computers.map(c => ({
+        if (data && Array.isArray(data.computers)) {
+            rpComputers = data.computers.map(c => ({
                 computer_name: (c.computer_name || '(unnamed)').replace(/\$$/, ''), // strip trailing $
                 sid:           c.sid || '',
-                target_attributes: c
+                target_attributes: c.target_attributes || c
             }));
         } else {
             rpComputers = [];
-            console.warn('[RootPrincipal] domain_computers.json: missing or invalid computers array');
+            console.warn('[RootPrincipal] /api/root-principals: missing or invalid computers array (is the Engine API running?)');
         }
 
         /* ── Build flat allItems list (for search) ──────────── */
@@ -168,14 +165,14 @@
                     <span class="rp-source-label">Users</span>
                     <span class="rp-source-count">${rpUsers.length}</span>
                 </div>
-                <div class="rp-source-file">domain_users.json</div>
+                <div class="rp-source-file">domain_data.db (users)</div>
             </div>
             <div class="rp-source-card">
                 <div class="rp-source-top">
                     <span class="rp-source-label">Computers</span>
                     <span class="rp-source-count">${rpComputers.length}</span>
                 </div>
-                <div class="rp-source-file">domain_computers.json</div>
+                <div class="rp-source-file">domain_data.db (computers)</div>
             </div>
         </div>`;
     }
@@ -454,7 +451,7 @@
 
     /* ── Expose public API ───────────────────────────────────── */
     window.RootPrincipal = {
-        /** Reload data from JSON files (call after file update) */
+        /** Reload data from the Engine API / domain_data.db (call after DB update) */
         reload: () => { loaded = false; loadPrincipals(); },
         /** Reset selected principal and restore default button state */
         reset: resetSelection,

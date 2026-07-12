@@ -2,6 +2,7 @@
 
 import json
 import platform
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +25,32 @@ def resolve_graph_engine_executable(base_dir) -> Path:
     return engine_dir / "graph_engine"
 
 
+def find_domain_db(start_dir) -> Path:
+    """Locate Domain Object/domain_data.db, searching `start_dir` itself and
+    then walking up through its parent directories.
+
+    Some deployments keep "Domain Object" *inside* the Decision Engine
+    folder; others keep it as a sibling folder next to it
+    (ParentFolder/Decision Engine + ParentFolder/Domain Object). This checks
+    both layouts (and a few levels beyond) instead of assuming one of them,
+    mirroring the same upward search graph_engine.cpp does for its root.
+    """
+    p = Path(start_dir).resolve()
+    checked = []
+    for _ in range(8):
+        candidate = p / "Domain Object" / "domain_data.db"
+        checked.append(candidate)
+        if candidate.exists():
+            return candidate
+        if p.parent == p:
+            break
+        p = p.parent
+
+    # Nothing found — return the most likely path (inside start_dir) so the
+    # caller's "file not found" behaviour / logging still makes sense.
+    return checked[0] if checked else Path(start_dir) / "Domain Object" / "domain_data.db"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  Read Database
 # ─────────────────────────────────────────────────────────────────────────────
@@ -34,46 +61,66 @@ def get_root_principals(base_dir=None):
     else:
         base_dir = Path(base_dir)
 
-    db_dir         = base_dir / "Domain Object"
-    users_file     = db_dir / "domain_users.json"
-    computers_file = db_dir / "domain_computers.json"
+    db_file = find_domain_db(base_dir)
 
     result = {"users": [], "computers": [], "all": [], "sources": []}
-    result["users"] = _read_field(users_file, list_key="users", field="username")
-    result["computers"] = _read_field(computers_file, list_key="computers", field="computer_name")
-    result["all"] = sorted(set(result["users"] + result["computers"]))
+
+    users_rows = _read_table(db_file, table="users", name_field="username")
+    computers_rows = _read_table(db_file, table="computers", name_field="computer_name")
+
+    result["users"] = users_rows
+    result["computers"] = computers_rows
+    result["all"] = sorted(set(
+        [u["username"] for u in users_rows] +
+        [c["computer_name"] for c in computers_rows]
+    ))
     result["sources"] = [
         {
             "label": "Users",
-            "file": "Domain Object/domain_users.json",
-            "list_key": "users",
+            "file": str(db_file),
+            "table": "users",
             "field": "username",
-            "count": len(result["users"]),
+            "count": len(users_rows),
         },
         {
             "label": "Computers",
-            "file": "Domain Object/domain_computers.json",
-            "list_key": "computers",
+            "file": str(db_file),
+            "table": "computers",
             "field": "computer_name",
-            "count": len(result["computers"]),
+            "count": len(computers_rows),
         },
     ]
     return result
 
 
-def _read_field(filepath: Path, list_key: str, field: str) -> list:
-    if not filepath.exists() or filepath.stat().st_size == 0:
+def _read_table(db_path: Path, table: str, name_field: str) -> list:
+    """Read every row of `table` from the SQLite DB and return a list of
+    {name_field, sid, target_attributes} dicts, mirroring the shape the
+    old JSON-file based helper used to hand back."""
+    if not db_path.exists() or db_path.stat().st_size == 0:
         return []
+
     try:
-        raw  = json.loads(filepath.read_text(encoding="utf-8"))
-        rows = raw.get(list_key) if isinstance(raw, dict) else []
-        return [
-            str(row[field]).strip()
-            for row in (rows or [])
-            if isinstance(row, dict) and row.get(field)
-        ]
+        con = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            cur = con.cursor()
+            cur.execute(f'SELECT * FROM "{table}"')
+            rows = cur.fetchall()
+        finally:
+            con.close()
+
+        out = []
+        for row in rows:
+            attrs = dict(row)
+            name = str(attrs.get(name_field) or "").strip()
+            sid = str(attrs.get("sid") or "").strip()
+            if not name:
+                continue
+            out.append({name_field: name, "sid": sid, "target_attributes": attrs})
+        return out
     except Exception as exc:
-        print(f"[root_principal] {filepath.name} not found: {exc}", file=sys.stderr)
+        print(f"[root_principal] {db_path.name} ({table}) read failed: {exc}", file=sys.stderr)
         return []
 
 def start_api_server(port=PORT, host="localhost", base_dir=None):
@@ -202,7 +249,7 @@ def start_api_server(port=PORT, host="localhost", base_dir=None):
         return jsonify({"status": "ok", "service": "root-principal-api"})
 
     _base = base_dir or Path(__file__).parent.parent
-    print(f"[Root Principal API] http://{host}:{port}  |  db: {_base}/Domain Object")
+    print(f"[Root Principal API] http://{host}:{port}  |  db: {find_domain_db(_base)}")
     app.run(host=host, port=port, debug=False, use_reloader=False)
 
 

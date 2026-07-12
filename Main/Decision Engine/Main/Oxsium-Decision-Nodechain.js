@@ -1,23 +1,12 @@
-/* ═══════════════════════════════════════════════════════════
-   Oxsium Framework · Decision Engine · Node Chain Panel
-   ─────────────────────────────────────────────────────────
-   Sağ panel: Node kliklənəndə root-dan həmin node-a qədər
-   olan bütün chain-i və edge adlarını vizual göstərir.
-   Hər hop altında Hint barı, üzərinə basılanda detail panel.
-═══════════════════════════════════════════════════════════ */
-
-// ── State ─────────────────────────────────────────────────
 let _chainActiveNode = null;
 let _hintPanelOpen   = false;
 let _hintPanelData   = null;
 
-// ── Entry point: node kliklənəndə çağırılır ───────────────
 function renderNodeChainPanel(nodeData) {
     _chainActiveNode = nodeData;
     const panel = document.getElementById('panel-right-inner');
     if (!panel) return;
 
-    // Root-dan bu node-a chain qur
     const chain = buildChainToNode(nodeData);
 
     if (!chain || chain.length === 0) {
@@ -25,7 +14,6 @@ function renderNodeChainPanel(nodeData) {
         return;
     }
 
-    // Header
     let html = `
     <div class="nc-header">
         <div class="nc-header-top">
@@ -56,7 +44,6 @@ function renderNodeChainPanel(nodeData) {
         </div>
     </div>`;
 
-    // Chain items
     html += '<div class="nc-chain">';
 
     chain.forEach((step, idx) => {
@@ -83,7 +70,7 @@ function renderNodeChainPanel(nodeData) {
             </div>`;
 
         } else if (step.kind === 'edge') {
-            // Edge step: göstər + Hint barı
+
             const critClass = step.crit ? 'red' : 'blue';
             const hintIdx   = idx;
 
@@ -111,15 +98,12 @@ function renderNodeChainPanel(nodeData) {
         }
     });
 
-    html += '</div>'; // .nc-chain
+    html += '</div>';
 
-    // Additional node stats at bottom
     html += _buildNodeStatsFooter(nodeData, chain);
 
     panel.innerHTML = html;
 
-    // ── Bind events ───────────────────────────────────────
-    // Close button
     const closeBtn = panel.querySelector('#nc-close-btn');
     if (closeBtn) {
         closeBtn.addEventListener('click', () => {
@@ -129,7 +113,6 @@ function renderNodeChainPanel(nodeData) {
         });
     }
 
-    // Hint bars
     panel.querySelectorAll('.nc-hint-bar').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -139,15 +122,13 @@ function renderNodeChainPanel(nodeData) {
         });
     });
 
-    // Node steps — click to focus on sub-chain
     panel.querySelectorAll('.nc-node-step').forEach(el => {
         el.addEventListener('click', () => {
-            // Could extend: focus on sub-path in graph
+
         });
     });
 }
 
-// ── Build chain from root to target node ──────────────────
 function buildChainToNode(targetNode) {
     if (!targetNode || !window.GRAPH_DATA) return [];
 
@@ -160,7 +141,6 @@ function buildChainToNode(targetNode) {
     const rootNode = nodes.find(n => n.root);
     if (!rootNode) return _fallbackChain(targetNode);
 
-    // BFS from root to target, tracking path
     const targetId = String(targetNode.id).toLowerCase();
     const rootId   = String(rootNode.id).toLowerCase();
 
@@ -171,7 +151,6 @@ function buildChainToNode(targetNode) {
         }];
     }
 
-    // Build adjacency: source → [{rel, crit, target}]
     const adj = new Map();
     links.forEach(link => {
         const srcId = String(link.source?.id || link.source || '').toLowerCase();
@@ -182,19 +161,16 @@ function buildChainToNode(targetNode) {
         adj.get(srcId).push({ tgtId, rel, crit });
     });
 
-    // Also try _parentId path (faster for tree layouts)
     const parentPath = _traceParentPath(targetNode, nodeById);
     if (parentPath.length > 0) {
         return _buildChainFromNodePath(parentPath, adj, nodeById);
     }
 
-    // BFS fallback
     const bfsPath = _bfsPath(rootId, targetId, adj, nodeById);
     if (bfsPath.length > 0) {
         return _buildChainFromNodePath(bfsPath, adj, nodeById);
     }
 
-    // Last resort: just show root → target with direct edge if exists
     return _fallbackChain(targetNode, rootNode, adj);
 }
 
@@ -211,13 +187,12 @@ function _traceParentPath(targetNode, nodeById) {
         safety++;
     }
 
-    // Must start from root
     if (path.length === 0 || !path[0]?.root) return [];
     return path;
 }
 
 function _bfsPath(rootId, targetId, adj, nodeById) {
-    const visited = new Map(); // id → parentId
+    const visited = new Map();
     const queue = [rootId];
     visited.set(rootId, null);
 
@@ -235,7 +210,6 @@ function _bfsPath(rootId, targetId, adj, nodeById) {
 
     if (!visited.has(targetId)) return [];
 
-    // Trace back
     const path = [];
     let cur = targetId;
     while (cur !== null) {
@@ -272,7 +246,6 @@ function _buildChainFromNodePath(nodePath, adj, nodeById) {
             const srcLabel = node.label || node.id;
             const tgtLabel = nodePath[i + 1].label || nodePath[i + 1].id;
 
-            // Find matching edge(s) in adj
             const edges = (adj.get(srcId) || []).filter(e => e.tgtId === tgtId);
             const mainEdge = edges[0] || { rel: 'CONNECTS', crit: false };
 
@@ -282,7 +255,7 @@ function _buildChainFromNodePath(nodePath, adj, nodeById) {
                 crit:   mainEdge.crit,
                 source: srcLabel,
                 target: tgtLabel,
-                allEdges: edges, // for hint panel
+                allEdges: edges,
                 srcId, tgtId
             });
         }
@@ -309,7 +282,6 @@ function _fallbackChain(targetNode, rootNode, adj) {
     return chain;
 }
 
-// ── Footer stats ──────────────────────────────────────────
 function _buildNodeStatsFooter(nodeData, chain) {
     const edgeCount    = (window.GRAPH_DATA?.links || []).filter(l => {
         const src = String(l.source?.id || l.source || '').toLowerCase();
@@ -320,7 +292,6 @@ function _buildNodeStatsFooter(nodeData, chain) {
 
     const hopCount = chain.filter(s => s.kind === 'node').length - 1;
 
-    // Edge names in chain (normalize DS-Replication variants)
     const chainEdges = chain.filter(s => s.kind === 'edge').map(s => {
         const r = String(s.rel || '');
         if (/ds[-_ ]?replication.*get[-_ ]?changes/i.test(r) || /dcsync/i.test(r)) return 'DS-Replication-Get-Changes-All';
@@ -343,7 +314,6 @@ function _buildNodeStatsFooter(nodeData, chain) {
     </div>`;
 }
 
-// ── Hint Panel (genişlənən overlay) ───────────────────────
 function openHintPanel(edgeStep, nodeData) {
     _hintPanelOpen = true;
     _hintPanelData = { edgeStep, nodeData };
@@ -355,7 +325,7 @@ function openHintPanel(edgeStep, nodeData) {
         panel.className = 'nc-hint-panel';
         document.querySelector('.oxsium-shell').appendChild(panel);
     }
-    // Determine source/target nodes and display names (append $ for computer accounts)
+
     const sourceNode = _getNodeByLabel(edgeStep.source);
     const targetNode = _getNodeByLabel(edgeStep.target);
     const _formatDisplayName = (node, rawLabel) => {
@@ -445,20 +415,19 @@ function openHintPanel(edgeStep, nodeData) {
 
     requestAnimationFrame(() => panel.classList.add('open'));
 
-    // ── Dinamik Attack Vectors-i doldur ────────────────────
     const vectorsContent = document.getElementById('nc-attack-vectors-content');
     if (vectorsContent && typeof window.renderAttackVectors === 'function') {
         const vectorsHtml = window.renderAttackVectors(edgeStep.rel, sourceNode, targetNode);
         vectorsContent.innerHTML = vectorsHtml;
         
-        // Copy düymələrinə listener bağla
+
         setTimeout(() => {
             vectorsContent.querySelectorAll('.nc-vector-copy').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const cmd = btn.dataset.cmd;
                     navigator.clipboard.writeText(cmd).then(() => {
-                        // Visual feedback
+
                         btn.classList.add('copied');
                         const originalHTML = btn.innerHTML;
                         btn.innerHTML = '<span class="nc-copy-icon">✓</span>';
@@ -468,7 +437,7 @@ function openHintPanel(edgeStep, nodeData) {
                             btn.innerHTML = originalHTML;
                         }, 1500);
                         
-                        // Toast notification
+
                         _showToastNotification('Command copied to clipboard', 'success', 2000);
                     }).catch(err => {
                         _showToastNotification('Failed to copy command', 'error', 2000);
@@ -481,7 +450,6 @@ function openHintPanel(edgeStep, nodeData) {
     const closeBtn = document.getElementById('nc-hint-close');
     if (closeBtn) closeBtn.addEventListener('click', closeHintPanel);
 
-    // Kənar klik bağla
     panel.addEventListener('click', (e) => {
         if (e.target === panel) closeHintPanel();
     });
@@ -495,7 +463,6 @@ function closeHintPanel() {
     setTimeout(() => panel.remove(), 260);
 }
 
-// ── Clear right panel ─────────────────────────────────────
 function clearNodeChainPanel() {
     _chainActiveNode = null;
     const panel = document.getElementById('panel-right-inner');
@@ -519,14 +486,12 @@ function _emptyState(msg) {
     </div>`;
 }
 
-// ── Helpers ───────────────────────────────────────────────
 function _riskClass(risk) {
     if (risk >= 80) return 'risk-crit';
     if (risk >= 50) return 'risk-high';
     return 'risk-low';
 }
 
-// Normalize relation names (canonicalize DCSync/DS-Replication variants)
 function _normalizeRel(rel) {
     if (!rel) return rel;
     const r = String(rel || '');
@@ -534,18 +499,15 @@ function _normalizeRel(rel) {
     return r;
 }
 
-// ── Get node by label ──────────────────────────────────────
 function _getNodeByLabel(label) {
     if (!label || !window.GRAPH_DATA || !window.GRAPH_DATA.nodes) return null;
     const raw = String(label);
     const search = raw.toLowerCase();
     const nodes = window.GRAPH_DATA.nodes;
 
-    // 1) Exact match on label or id
     let found = nodes.find(n => String(n.label || n.id).toLowerCase() === search);
     if (found) return found;
 
-    // 2) Try matching with/without trailing $ (common for computer accounts)
     const stripped = search.endsWith('$') ? search.slice(0, -1) : search;
     found = nodes.find(n => {
         const nlabel = String(n.label || n.id).toLowerCase();
@@ -553,22 +515,19 @@ function _getNodeByLabel(label) {
     });
     if (found) return found;
 
-    // 3) Match by id directly
     found = nodes.find(n => String(n.id).toLowerCase() === search || String(n.id).toLowerCase() === stripped);
     if (found) return found;
 
-    // 4) Fallback: substring match on label
     found = nodes.find(n => String(n.label || '').toLowerCase().includes(stripped));
     return found || null;
 }
 
-// ── Toast notification ─────────────────────────────────────
 function _showToastNotification(message, type = 'info', duration = 3000) {
     const toast = document.createElement('div');
     toast.className = `nc-toast nc-toast-${type}`;
     toast.textContent = message;
     
-    // Style inline
+
     Object.assign(toast.style, {
         position: 'fixed',
         bottom: '20px',
@@ -593,12 +552,10 @@ function _showToastNotification(message, type = 'info', duration = 3000) {
     }, duration);
 }
 
-// ── Public API ────────────────────────────────────────────
 window.renderNodeChainPanel = renderNodeChainPanel;
 window.clearNodeChainPanel  = clearNodeChainPanel;
 window.closeHintPanel       = closeHintPanel;
 
-// ── Init right panel HTML structure ──────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     const right = document.querySelector('.panel-right');
     if (!right) return;

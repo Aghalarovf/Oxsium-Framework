@@ -1,33 +1,9 @@
-/* ═══════════════════════════════════════════════════════════
-   Oxsium Framework · Decision Engine · v2.1
-   UI & Page Structure Module
-   ─────────────────────────────────────────────────────────
-   Əhatə edir:
-     - Runtime state (GRAPH_DATA, ATTACK_PATHS, NODE_COLORS)
-     - loadGraphData()  — C++ engine bridge
-     - renderPathCards() — sol panel kartları
-     - initRootPrincipal() — root principal seçici
-     - Nav tabs, ilkin render
-   ─────────────────────────────────────────────────────────
-   Bu modul D3-dən asılı DEYİL.
-   D3 əməliyyatları: Oxsium-Decision-Graph.js
-     Yüklənmə sırası (HTML-də):
-         1. d3.js
-         2. Oxsium-Decision.js       ← bu fayl
-         3. Oxsium-Decision-Graph.js ← D3 modulu
-═══════════════════════════════════════════════════════════ */
-
-// ══════════════════════════════════════════════════════════════
-//  Runtime state (C++ engine tərəfindən doldurulur)
-// ══════════════════════════════════════════════════════════════
 let GRAPH_DATA   = { nodes: [], links: [] };
 let ATTACK_PATHS = [];
 
-// Qlobal scope-a dəm (digər modullar tərəfindən istifadə olunur)
 window.GRAPH_DATA   = GRAPH_DATA;
 window.ATTACK_PATHS = ATTACK_PATHS;
 
-// ── Node rəng xəritəsi ───────────────────────────────────────
 const NODE_COLORS = {
     user:     { fill: '#6366f1', glow: '#6366f1', stroke: '#818cf8' },
     group:    { fill: '#0ea5e9', glow: '#0ea5e9', stroke: '#38bdf8' },
@@ -35,22 +11,10 @@ const NODE_COLORS = {
     domain:   { fill: '#f59e0b', glow: '#f59e0b', stroke: '#fbbf24' },
 };
 
-// ══════════════════════════════════════════════════════════════
-//  PUBLIC API — C++ engine bridge tərəfindən çağırılır
-//
-//  graphData   : { nodes: [...], links: [...] }
-//    node sahələri : { id, label, type, risk, depth, edges }
-//    link sahələri : { source, target, rel, crit }
-//
-//  attackPaths : [ { id, sev, score, from, to, hops: [...] } ]
-//    hop sahələri  : { name, type, nodeType }  — node hop
-//                    { edge, edgeCrit }         — edge hop
-// ══════════════════════════════════════════════════════════════
 function loadGraphData(graphData, attackPaths) {
     GRAPH_DATA   = graphData   || { nodes: [], links: [] };
     ATTACK_PATHS = attackPaths || [];
 
-    // Qlobal scope-a yenilə
     window.GRAPH_DATA   = GRAPH_DATA;
     window.ATTACK_PATHS = ATTACK_PATHS;
 
@@ -87,9 +51,6 @@ function loadGraphData(graphData, attackPaths) {
     buildGraph();
 }
 
-// ══════════════════════════════════════════════════════════════
-//  Sol panel — path kartları
-// ══════════════════════════════════════════════════════════════
 function renderPathCards() {
     const list = document.getElementById('path-list');
     list.innerHTML = '';
@@ -134,7 +95,6 @@ function renderPathCards() {
         `;
 
         card.addEventListener('click', () => {
-            // Path card seçimi — sağ panel sonradan uygulanacak
             document.querySelectorAll('.path-card').forEach(c => c.classList.remove('active'));
             card.classList.add('active');
         });
@@ -144,9 +104,6 @@ function renderPathCards() {
     restorePathFocusIfNeeded();
 }
 
-// ══════════════════════════════════════════════════════════════
-//  Nav tabları (vizual)
-// ══════════════════════════════════════════════════════════════
 document.querySelectorAll('.nav-tab').forEach(tab => {
     tab.addEventListener('click', () => {
         document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
@@ -154,18 +111,12 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
     });
 });
 
-// ══════════════════════════════════════════════════════════════
-//  İlkin boş render
-//  Engine data göndərənə qədər sıfır göstər
-// ══════════════════════════════════════════════════════════════
 const _nodeCountEl = document.getElementById('node-count') || document.getElementById('stat-nodes');
 const _pathCountEl = document.getElementById('path-count') || document.getElementById('stat-hops');
 if (_nodeCountEl) _nodeCountEl.textContent = '—';
 if (_pathCountEl) _pathCountEl.textContent = '—';
-renderPathCards();   // "AWAITING ENGINE DATA" göstərir
-// buildGraph() — Graph modulu yüklənəndə özü çağırılır
+renderPathCards();
 
-// Root principal seçimi yalnız saxlanır; qrafı `Analyze Paths` açacaq.
 window.onRootPrincipalSelected = (principal) => {
     if (!principal) return;
     window.SELECTED_PRINCIPAL = principal;
@@ -175,218 +126,28 @@ window.onRootPrincipalSelected = (principal) => {
     sessionStorage.setItem('selectedRootPrincipalSID', principal.sid || '');
 };
 
-// Apply selected root principal to currently loaded GRAPH_DATA (if present)
 function applyRootPrincipalToGraph(principal) {
     if (!principal || !GRAPH_DATA || !GRAPH_DATA.nodes) return;
     const label = String(principal.label || '').toLowerCase();
     const kind  = principal.kind || '';
 
-    // Clear existing root flags
     GRAPH_DATA.nodes.forEach(n => { n.root = false; });
 
-    // Try to find matching node by label and/or type
     let matched = GRAPH_DATA.nodes.find(n => String(n.label || '').toLowerCase() === label && (!kind || n.type === kind));
     if (!matched) {
-        // Fallback: match by startsWith or includes
         matched = GRAPH_DATA.nodes.find(n => String(n.label || '').toLowerCase().includes(label));
     }
 
     if (matched) {
         matched.root = true;
-        // Rebuild graph to reflect root styling
         try { buildGraph(); } catch (e) { console.warn('[Decision] rebuild failed:', e && e.message); }
     } else {
         console.info('[Decision] Selected root principal not found in current graph:', principal.label);
     }
 }
 
-// If other modules call window.onRootPrincipalSelected, also apply to graph
 const _origOnRoot = window.onRootPrincipalSelected;
 window.onRootPrincipalSelected = (p) => {
     try { if (typeof _origOnRoot === 'function') _origOnRoot(p); } catch (e) {}
     try { applyRootPrincipalToGraph(p); } catch (e) {}
 };
-
-// ══════════════════════════════════════════════════════════════
-//  ROOT PRINCIPAL SELECTOR
-// ══════════════════════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', () => {
-    if (window.RootPrincipal) return;
-    initRootPrincipal();
-});
-
-function initRootPrincipal() {
-    const btn         = document.getElementById('root-principal-trigger');
-    const dropdown    = document.getElementById('root-principal-dropdown');
-    const scrollArea  = document.getElementById('rp-scroll-area');
-    const searchInput = document.getElementById('rp-search-input');
-
-    if (!btn || !dropdown) return;
-
-    // ── Tip müəyyənləşdirmə ──────────────────────────────────
-    // Backend "users" / "computers" siyahısını ayırır.
-    // Yedək: adın sonundakı "$" kompüter olduğunu göstərir.
-    let _userSet     = new Set();
-    let _computerSet = new Set();
-
-    function principalType(name) {
-        if (_computerSet.has(name)) return 'computer';
-        if (_userSet.has(name))     return 'user';
-        return name.endsWith('$')   ? 'computer' : 'user';
-    }
-
-    // ── Yükləmə ──────────────────────────────────────────────
-    // Dropdown hər açıldığında fayllar yenidən oxunur
-    async function loadPrincipals() {
-        scrollArea.innerHTML = '<div class="rp-loading">Yüklənir...</div>';
-        try {
-            const runnerUrl = 'http://127.0.0.1:5200/run-root-js';
-            const rresp = await fetch(`${runnerUrl}?_t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
-            if (!rresp.ok) throw new Error(`Runner HTTP ${rresp.status}`);
-            const data = await rresp.json();
-            _userSet     = new Set(data.users     || []);
-            _computerSet = new Set(data.computers || []);
-            renderPrincipals(data);
-        } catch (rerr) {
-            console.warn('[Root Principal] Runner əlçatmazdır:', rerr.message);
-            scrollArea.innerHTML = '<div class="rp-loading rp-error">Runner işə düşmür — node .\\Helpers\\rp_runner.js işlədin</div>';
-        }
-    }
-
-    // ── Render ───────────────────────────────────────────────
-    function renderPrincipals(data) {
-        const users     = data.users     || [];
-        const computers = data.computers || [];
-        const sources   = data.sources   || [];
-
-        scrollArea.innerHTML = '';
-
-        const totalCount = users.length + computers.length;
-
-        if (totalCount === 0) {
-            scrollArea.innerHTML =
-                '<div class="rp-loading">Heç bir principal tapılmadı</div>';
-            return;
-        }
-
-        const header = document.createElement('div');
-        header.className = 'rp-section-header';
-        header.innerHTML =
-            `<span>Cəmi: <strong>${totalCount}</strong></span>` +
-            `<span>👤 ${users.length} &nbsp; 💻 ${computers.length}</span>`;
-        scrollArea.appendChild(header);
-
-        if (sources.length > 0) {
-            const sourcePanel = document.createElement('div');
-            sourcePanel.className = 'rp-source-panel';
-            sourcePanel.innerHTML = sources.map(source => `
-                <div class="rp-source-card">
-                    <div class="rp-source-top">
-                        <span class="rp-source-label">${source.label}</span>
-                        <span class="rp-source-count">${source.count}</span>
-                    </div>
-                    <div class="rp-source-file">${source.file}</div>
-                    <div class="rp-source-meta">list: ${source.list_key} · attribute: ${source.field}</div>
-                </div>
-            `).join('');
-            scrollArea.appendChild(sourcePanel);
-        }
-
-        // İstifadəçilər qrupu
-        if (users.length > 0) {
-            scrollArea.appendChild(_makeGroupLabel('👤 İstifadəçilər', users.length, 'user'));
-            users.forEach(name => scrollArea.appendChild(_makeItem(name, 'user')));
-        }
-
-        // Kompüterlər qrupu
-        if (computers.length > 0) {
-            scrollArea.appendChild(_makeGroupLabel('💻 Kompüterlər', computers.length, 'computer'));
-            computers.forEach(name => scrollArea.appendChild(_makeItem(name, 'computer')));
-        }
-    }
-
-    function _makeGroupLabel(text, count, type) {
-        const el = document.createElement('div');
-        el.className    = 'rp-group-label';
-        el.dataset.type = type;
-        el.innerHTML    = `${text} <span class="rp-group-count">${count}</span>`;
-        return el;
-    }
-
-    function _makeItem(name, type) {
-        const item = document.createElement('div');
-        item.className    = 'rp-item';
-        item.dataset.name = name.toLowerCase();
-        item.dataset.type = type;
-
-        const file = type === 'computer' ? 'computer.png' : 'user.png';
-        const href = new URL(`../../assets/Icons/${file}`, window.location.href).href;
-        item.innerHTML = `
-            <span class="rp-item-icon"><img src="${href}" alt="${type}" style="width:18px;height:18px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'"></span>
-            <span class="rp-item-text">${name}</span>
-        `;
-
-        item.addEventListener('click', () => selectPrincipal(name, type, item));
-        return item;
-    }
-
-    // ── Seçim ────────────────────────────────────────────────
-    function selectPrincipal(name, type, itemEl) {
-        document.querySelectorAll('.rp-item.selected').forEach(el =>
-            el.classList.remove('selected'));
-
-        itemEl.classList.add('selected');
-
-        const sid = window.RootPrincipal?.getSID?.(name) || '';
-        const file = type === 'computer' ? 'computer.png' : 'user.png';
-        const href = new URL(`../../assets/Icons/${file}`, window.location.href).href;
-        btn.innerHTML = `<span class="rp-icon"><img src="${href}" alt="${type}" style="width:18px;height:18px;vertical-align:middle" onerror="this.onerror=null;this.src='../../assets/favicon.png'"></span><span>${name}</span>`;
-        btn.classList.add('active');
-
-        sessionStorage.setItem('selectedRootPrincipal', name);
-        sessionStorage.setItem('selectedRootPrincipalType', type);
-        sessionStorage.setItem('selectedRootPrincipalSID', sid);
-        window.SELECTED_PRINCIPAL = { label: name, kind: type, sid };
-        window.SELECTED_ROOT_PRINCIPAL_SID = sid;
-
-        dropdown.classList.remove('open');
-        console.log(`[Root Principal] Seçildi: ${name} (${type}) SID: ${sid || '(none)'}`);
-    }
-
-    // ── Toggle ────────────────────────────────────────────────
-    btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const isOpen = dropdown.classList.toggle('open');
-        if (isOpen) {
-            loadPrincipals();
-            searchInput.value = '';
-            setTimeout(() => searchInput.focus(), 80);
-        }
-    });
-
-    // ── Axtarış ──────────────────────────────────────────────
-    searchInput.addEventListener('input', (e) => {
-        const q = e.target.value.toLowerCase().trim();
-        scrollArea.querySelectorAll('.rp-item').forEach(item => {
-            item.style.display = item.dataset.name.includes(q) ? 'flex' : 'none';
-        });
-        scrollArea.querySelectorAll('.rp-group-label').forEach(lbl => {
-            const type    = lbl.dataset.type;
-            const visible = [...scrollArea.querySelectorAll(`.rp-item[data-type="${type}"]`)]
-                .some(el => el.style.display !== 'none');
-            lbl.style.display = visible ? '' : 'none';
-        });
-    });
-
-    // ── Kənar klik ilə bağla ─────────────────────────────────
-    document.addEventListener('click', (e) => {
-        if (!e.target.closest('.root-principal-section')) {
-            dropdown.classList.remove('open');
-        }
-    });
-
-    // ── Escape ilə bağla ─────────────────────────────────────
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') dropdown.classList.remove('open');
-    });
-}

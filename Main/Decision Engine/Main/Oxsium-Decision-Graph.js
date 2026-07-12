@@ -20,7 +20,6 @@ const defs = svgEl.append('defs');
         .attr('fill', color);
 });
 
-// inject DC animation styles from node rules (if available)
 try { if (typeof injectDcAnimationStyles === 'function') injectDcAnimationStyles(); } catch (e) {}
 
 const glowFilter = defs.append('filter').attr('id', 'glow').attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
@@ -33,7 +32,7 @@ feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 const zoomGroup = svgEl.append('g').attr('class', 'zoom-root');
 
 let currentTransform = d3.zoomIdentity;
-let currentDomainName = ''; // Domain adını saxla
+let currentDomainName = '';
 
 const zoom = d3.zoom()
     .scaleExtent([0.001, 5])
@@ -42,7 +41,7 @@ const zoom = d3.zoom()
         zoomGroup.attr('transform', evt.transform);
         updateScaleDisplay(Math.round(evt.transform.k * 100));
         
-        // Scale 50% altında node labels'ı gizle
+
         const nodeLabels = zoomGroup.selectAll('.node-label');
         const nodeTypeLabels = zoomGroup.selectAll('.node-type-label');
         const labelOpacity = evt.transform.k < 0.5 ? 0 : 1;
@@ -50,15 +49,13 @@ const zoom = d3.zoom()
         nodeLabels.transition().duration(300).attr('opacity', labelOpacity);
         nodeTypeLabels.transition().duration(300).attr('opacity', labelOpacity);
         
-        // Scale-bağlı domain boundary vizualizasiyası
+
         const boundaryGroup = zoomGroup.select('.domain-boundary-group');
         if (boundaryGroup && !boundaryGroup.empty()) {
             const scale = evt.transform.k;
-            // Scale < 20 (20%) olduqda görünür olur
-            // Scale 20% - 10% arasında: opacity artır (20%'de 0 → 10%'de 1)
-            // Scale ≤ 10% olduqda: opacity 1 (fulla görünən qalır)
-            const VISIBILITY_START = 0.2;  // 20%
-            const OPACITY_PEAK = 0.1;      // 10% (pik opacity noktası)
+
+            const VISIBILITY_START = 0.2;
+            const OPACITY_PEAK = 0.1;
             
             let opacity = 0;
             let visible = false;
@@ -66,11 +63,11 @@ const zoom = d3.zoom()
             if (scale < VISIBILITY_START) {
                 visible = true;
                 if (scale > OPACITY_PEAK) {
-                    // 20% ile 10% arasında: opacity artır
+
                     opacity = (VISIBILITY_START - scale) / (VISIBILITY_START - OPACITY_PEAK);
                     opacity = Math.min(1, Math.max(0, opacity));
                 } else {
-                    // 10% və altında: tam opak (fulla görünən)
+
                     opacity = 1;
                 }
             }
@@ -80,7 +77,7 @@ const zoom = d3.zoom()
                 .attr('opacity', opacity);
         }
         
-        // 10%-də node'lar və link'ləri gizlə
+
         const nodesGroup = zoomGroup.select('.nodes');
         const linksGroup = zoomGroup.select('.links');
         const currentScale = evt.transform.k;
@@ -118,7 +115,6 @@ canvas.addEventListener('click', evt => {
     resetHighlight();
 });
 
-// Domain boundary adını yeniləmə funksiyası
 window.updateDomainBoundaryName = function(domainName) {
     currentDomainName = domainName || '';
 };
@@ -259,7 +255,6 @@ function prepareLayeredNodePositions(nodes, width, height) {
     const cx = width / 2;
     const cy = height / 2;
 
-    // Root node-u həmişə tam mərkəzdə saxla
     const rootNode = nodes.find(n => n.root);
     if (!rootNode) return;
 
@@ -268,15 +263,12 @@ function prepareLayeredNodePositions(nodes, width, height) {
     rootNode.fx = cx;
     rootNode.fy = cy;
 
-    // Root-dan birbaşa çıxan linklər (source id uyğunluğu)
-    // Qeyd: buildGraph çağrılmadan əvvəl linklər hələ string id-lərlə ola bilər
     const rootId = String(rootNode.id).toLowerCase();
     const rootLinks = GRAPH_DATA.links.filter(l => {
         const sid = typeof l.source === 'object' ? String(l.source.id) : String(l.source);
         return sid.toLowerCase() === rootId;
     });
 
-    // Collect unique child node ids for root (angle distribution should be per-node)
     const rootChildIds = [];
     const rootChildSet = new Set();
     for (const l of rootLinks) {
@@ -285,15 +277,11 @@ function prepareLayeredNodePositions(nodes, width, height) {
         if (!rootChildSet.has(key)) { rootChildSet.add(key); rootChildIds.push(key); }
     }
 
-    // Hər bir birbaşa uşağın branch oxunu müəyyənləşdir
-    // Root-dan çıxan hər node üçün bərabər bucaq bölgüsü (node-based, not edge-based)
-    const STEP = 190;  // branch boyunca ardıcıl node-lar arasındakı məsafə (px)
+    const STEP = 190;
     const branchCount = rootChildIds.length;
     const branchStep  = branchCount > 0 ? (2 * Math.PI) / branchCount : 0;
 
-    // Hər node-un hansı branch-a aid olduğunu müəyyən etmək üçün
-    // BFS ilə root-dan ağacı gəzirik
-    const nodeBranch = new Map();   // nodeId → { angle, depth }
+    const nodeBranch = new Map();
     const nodeById   = new Map(nodes.map(n => [String(n.id).toLowerCase(), n]));
 
     const getEdgeDegree = (id) => {
@@ -316,7 +304,6 @@ function prepareLayeredNodePositions(nodes, width, height) {
         return sid === sourceId;
     });
 
-    // Bir node-a gələn bütün edge-ləri qaytarır (istiqamətdən asılı olmayaraq)
     const getIncomingLinks = (targetId) => GRAPH_DATA.links.filter(l => {
         const tid = typeof l.target === 'object'
             ? String(l.target.id).toLowerCase()
@@ -324,18 +311,14 @@ function prepareLayeredNodePositions(nodes, width, height) {
         return tid === targetId;
     });
 
-    // Branch açıları: üstdən başlayaraq saat istiqamətinə
-    // (başlanğıc açı: -90° yəni yuxarı) — istifadəçi öz zövqünə uyğun dəyişə bilər
     const startAngle = -Math.PI / 2;
 
-    // Iterate unique child ids in preserved order
     rootChildIds.forEach((tid, i) => {
         const angle = startAngle + i * branchStep;
         const factor = Math.max(getSpacingScale(rootId), getSpacingScale(tid));
         nodeBranch.set(tid, { angle, depth: 1, parent: rootId, segmentLength: STEP * factor });
     });
 
-    // Hər node öz child-larını da eyni qayda ilə fan-out etsin
     const queue = [...nodeBranch.keys()];
     while (queue.length > 0) {
         const currentId = queue.shift();
@@ -344,7 +327,6 @@ function prepareLayeredNodePositions(nodes, width, height) {
         const childLinks = getOutgoingLinks(currentId);
         if (!childLinks.length) continue;
 
-        // Collect unique child node ids (node-based expansion)
         const uniqueChildren = [];
         const uSet = new Set();
         for (const link of childLinks) {
@@ -354,7 +336,6 @@ function prepareLayeredNodePositions(nodes, width, height) {
         }
         if (!uniqueChildren.length) continue;
 
-        // Calculate angular slots based on unique node counts: incoming unique nodes + outgoing unique children
         const incomingNodes = (function() {
             const inc = new Set();
             for (const l of GRAPH_DATA.links) {
@@ -370,7 +351,6 @@ function prepareLayeredNodePositions(nodes, width, height) {
         const totalNodes = Math.max(incomingNodes + uniqueChildren.length, 2);
         const angleStep  = (2 * Math.PI) / totalNodes;
 
-        // Slot 0 reserved for parent; children start from slot 1
         const backAngle = currentInfo.angle + Math.PI;
 
         uniqueChildren.forEach((tid, slotIndex) => {
@@ -387,10 +367,6 @@ function prepareLayeredNodePositions(nodes, width, height) {
         });
     }
 
-    // Hər node-u öz PARENT-indən nisbi olaraq yerləşdir.
-    // Əvvəlki üsul (mərkəzdən dist * cos/sin) yanlış idi: child açısı
-    // dəyişdikdə node mərkəzdən uzaqlaşırdı, parent-dən deyil.
-    // İndi: position(node) = position(parent) + segmentLength * [cos(angle), sin(angle)]
     const absPos = new Map();
     absPos.set(rootId, { x: cx, y: cy });
 
@@ -400,7 +376,6 @@ function prepareLayeredNodePositions(nodes, width, height) {
         rootRecord._parentLabel = '';
     }
 
-    // Depth-ə görə sırala ki, parent həmişə child-dan əvvəl yerləşdirilsin
     const sortedIds = [...nodeBranch.keys()].sort(
         (a, b) => nodeBranch.get(a).depth - nodeBranch.get(b).depth
     );
@@ -424,7 +399,6 @@ function prepareLayeredNodePositions(nodes, width, height) {
         }
     }
 
-        // Branch-a düşməyən node-ları (varsa) mərkəz ətrafında yerləşdir
     nodes.forEach(n => {
         if (n.root) return;
         const nid = String(n.id).toLowerCase();
@@ -493,11 +467,9 @@ function buildGraph() {
     const cx = cw / 2;
     const cy = ch / 2;
 
-    // Node mövqelərini əvvəlcə hazırla (boundary radius hesablamaq üçün)
     prepareLayeredNodePositions(GRAPH_DATA.nodes, cw, ch);
 
-    // Ən uzaq node-a qədər olan maksimum məsafəni hesabla
-    let maxDistance = 200; // minimum radius
+    let maxDistance = 200;
     GRAPH_DATA.nodes.forEach(node => {
         if (node.x != null && node.y != null && !isNaN(node.x) && !isNaN(node.y)) {
             const dx = node.x - cx;
@@ -507,16 +479,14 @@ function buildGraph() {
         }
     });
 
-    // Padding əlavə et ki dairə node-ları tam əhatə etsin
-    const BOUNDARY_PADDING = 60; // ekstra boşluq
+    const BOUNDARY_PADDING = 60;
     const BOUNDARY_RADIUS = maxDistance + BOUNDARY_PADDING;
 
-    // Domain boundary visualization group (nodes/links-dən arxada olsun)
     const boundaryGroup = zoomGroup.append('g').attr('class', 'domain-boundary-group')
         .style('display', 'none')
         .attr('opacity', 0);
     
-    // Transparent circle (domain sınırı)
+
     boundaryGroup.append('circle')
         .attr('class', 'domain-boundary-circle')
         .attr('cx', cx)
@@ -527,7 +497,7 @@ function buildGraph() {
         .attr('stroke-width', 2)
         .attr('pointer-events', 'none');
     
-    // Domain adı text (dairənin üst kenarında)
+
     if (currentDomainName) {
         boundaryGroup.append('text')
             .attr('class', 'domain-boundary-label')
@@ -542,11 +512,9 @@ function buildGraph() {
             .text(currentDomainName);
     }
 
-    // ── Links ──────────────────────────────────────────────
     const linkGroup = zoomGroup.append('g').attr('class', 'links');
     const link = linkGroup.selectAll('g').data(GRAPH_DATA.links).enter().append('g');
 
-    // Use path elements so we can render curved arcs for parallel links
     linkHitLine = link.append('path')
         .attr('class', 'link-hit-line')
         .attr('stroke', 'transparent')
@@ -569,8 +537,8 @@ function buildGraph() {
         .attr('font-size',  EDGE_RULES.label.fontSize)
         .attr('font-family',EDGE_RULES.label.fontFamily)
         .attr('font-weight',EDGE_RULES.label.fontWeight)
-        .attr('opacity',    0)          // default gizli
-        .attr('pointer-events', 'none') // mouse event-i line-a ötür
+        .attr('opacity',    0)
+        .attr('pointer-events', 'none')
         .attr('text-anchor','middle')
         .text(d => formatEdgeLabel(d.rel));
 
@@ -604,7 +572,6 @@ function buildGraph() {
         .on('mouseout.label', hideLinkLabel)
         .on('click', clickEdge);
 
-    // ── Nodes ──────────────────────────────────────────────
     const nodeGroup = zoomGroup.append('g').attr('class', 'nodes');
     node = nodeGroup.selectAll('g').data(GRAPH_DATA.nodes).enter().append('g')
         .attr('class', 'node-group')
@@ -647,12 +614,11 @@ function buildGraph() {
         .on('mousemove', moveTooltip)
         .on('mouseout',  hideTooltip);
 
-    // Map node types to icon image files located in assets/Icons
     const NODE_ICON_FILES = {
         user:      'user.png',
         computer:  'computer.png',
         group:     'group.png',
-        domain:    'ou.png',    // fallback to folder-style icon
+        domain:    'ou.png',
         ou:        'ou.png',
         gpo:       'gpo.png',
         container: 'ou.png',
@@ -660,13 +626,13 @@ function buildGraph() {
     };
 
     function getNodeIconSize(d) {
-        // return numeric px size
+
         const v = getNodeIconFontSize(d) || '16px';
         return parseInt(String(v).replace('px', ''));
     }
 
     function getNodeIconHref(d) {
-        // Build absolute URL for the icon relative to the current page so paths resolve
+
         try {
             const sel = window.SELECTED_PRINCIPAL;
             let file;
@@ -676,14 +642,13 @@ function buildGraph() {
             } else {
                 file = NODE_ICON_FILES[d.type] || NODE_ICON_FILES.object || 'acl.png';
             }
-            // icons live under Main/assets/Icons — use URL() to resolve correctly from any page location
+
             return new URL(`../../assets/Icons/${file}`, window.location.href).href;
         } catch (e) {
             return new URL('../../assets/favicon.png', window.location.href).href;
         }
     }
 
-    // Render image icons centered on node
     node.append('image')
         .attr('class', 'node-icon-img')
         .attr('width', d => getNodeIconSize(d))
@@ -693,7 +658,7 @@ function buildGraph() {
         .attr('pointer-events', 'none')
         .attr('preserveAspectRatio', 'xMidYMid meet')
         .each(function(d) {
-            // set both href and xlink:href for broader compatibility
+
             const href = getNodeIconHref(d);
             d3.select(this).attr('href', href).attr('xlink:href', href);
         })
@@ -735,7 +700,6 @@ function buildGraph() {
         .attr('letter-spacing', '1.5px')
         .text(d => (d.type || 'OBJECT').toUpperCase());
 
-    // Hər node üçün başlanğıc (branch) mövqeyini yadda saxla
     GRAPH_DATA.nodes.forEach(n => {
         if (!n.root) {
             n._bx = n.x;
@@ -753,7 +717,7 @@ function buildGraph() {
         .force('collision', d3.forceCollide().radius(d => getNodeCollisionRadius(d)));
 
     simulation.on('tick', () => {
-        // Root həmişə mərkəzdə sabit
+
         const rootNode = GRAPH_DATA.nodes.find(n => n.root);
         if (rootNode) {
             rootNode.x = cx;
@@ -762,17 +726,15 @@ function buildGraph() {
             rootNode.vy = 0;
         }
 
-        // Drag edilməmiş node-ları öz branch ox mövqeyinə qaytar
         GRAPH_DATA.nodes.forEach(n => {
             if (n.root || n._dragged) return;
-            // Yavaş-yavaş branch oxuna çəkilsin (lerp)
+
             n.x += (n._bx - n.x) * 0.15;
             n.y += (n._by - n.y) * 0.15;
             n.vx = 0;
             n.vy = 0;
         });
 
-        // Update path d attribute; use quadratic curve for parallel links
         linkLine.attr('d', d => {
             const p = getTrimmedLinkPoints(d);
             const sx = p.x1, sy = p.y1, tx = p.x2, ty = p.y2;
@@ -780,11 +742,11 @@ function buildGraph() {
                 return `M ${sx} ${sy} L ${tx} ${ty}`;
             }
             const dx = tx - sx, dy = ty - sy;
-            const nx = -dy, ny = dx; // perpendicular
+            const nx = -dy, ny = dx;
             const nlen = Math.hypot(nx, ny) || 1;
             const ux = nx / nlen, uy = ny / nlen;
             const gap = Math.max(24, getEdgeWidth(d) * 10);
-            // center offset so arcs are symmetrically placed
+
             const midIndex = (d.parallelTotal - 1) / 2;
             const offset = (d.parallelIndex - midIndex) * gap;
             const cx = (sx + tx) / 2 + ux * offset;
@@ -808,7 +770,6 @@ function buildGraph() {
             return `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`;
         });
 
-        // Position label at curve midpoint (t=0.5) for quadratic curve
         linkLabel
             .attr('x', d => {
                 const p = getTrimmedLinkPoints(d);
@@ -822,7 +783,7 @@ function buildGraph() {
                 const midIndex = (d.parallelTotal - 1) / 2;
                 const offset = (d.parallelIndex - midIndex) * gap;
                 const cx = (sx + tx) / 2 + ux * offset;
-                // quadratic midpoint at t=0.5
+
                 const mx = 0.25 * sx + 0.5 * cx + 0.25 * tx;
                 return mx;
             })
@@ -838,9 +799,9 @@ function buildGraph() {
                 const midIndex = (d.parallelTotal - 1) / 2;
                 const offset = (d.parallelIndex - midIndex) * gap;
                 const cx = (sx + tx) / 2 + ux * offset;
-                const my = 0.25 * sy + 0.5 * cx * 0 + 0.5 * cx * 0 + 0.25 * ty; // keep fallback
-                // compute quadratic midpoint y properly
-                const my2 = 0.25 * sy + 0.5 * cx * 0 + 0.25 * ty; // simplified; use cy below
+                const my = 0.25 * sy + 0.5 * cx * 0 + 0.5 * cx * 0 + 0.25 * ty;
+
+                const my2 = 0.25 * sy + 0.5 * cx * 0 + 0.25 * ty;
                 const myFinal = 0.25 * sy + 0.5 * ((sy + ty) / 2 + uy * offset) + 0.25 * ty;
                 return myFinal;
             });
@@ -848,8 +809,6 @@ function buildGraph() {
         node.attr('transform', d => `translate(${d.x},${d.y})`);
     });
 
-    // Avtomatik fit deaktiv - sadəcə fit düyməsi istifadə olunacaq
-    // simulation.on('end', fitGraph);
 }
 
 function fitGraph() {
@@ -916,10 +875,9 @@ function hideTooltip() {
 }
 
 function clickNode(evt, d) {
-    // Graph focus (highlight chain in graph)
+
     applyGraphFocusToNode(d);
 
-    // Right panel: render node chain from root to clicked node
     if (typeof window.renderNodeChainPanel === 'function') {
         window.renderNodeChainPanel(d);
     }
@@ -1271,15 +1229,15 @@ function edgeLabel(record) {
 }
 
 function buildGraphDataFromEngine(engineData, selected) {
-    // Extract target_attributes for the selected principal from graph_objects
+
     let selectedAttributes = null;
     if (engineData?.graph_objects && Array.isArray(engineData.graph_objects)) {
         const matchingRecord = engineData.graph_objects.find(record => {
-            // Match by SID if available
+
             if (selected?.sid && record?.target_sid === selected.sid) return true;
-            // Match by name
+
             if (selected?.label && record?.target_name === selected.label) return true;
-            // Match by principal SID as fallback
+
             if (selected?.sid && record?.principal_sid === selected.sid) return true;
             return false;
         });
@@ -1325,7 +1283,7 @@ function buildGraphDataFromEngine(engineData, selected) {
             nodes.push(node);
             seenNodes.set(nodeKey, node);
         } else {
-            // If node already exists but this record has target_attributes and the node doesn't, update it
+
             const existingNode = seenNodes.get(nodeKey);
             if (record?.target_attributes && !existingNode.target_attributes) {
                 existingNode.target_attributes = record.target_attributes;
@@ -1339,7 +1297,6 @@ function buildGraphDataFromEngine(engineData, selected) {
             ? record.edge_rights.filter(Boolean)
             : (Array.isArray(record?.rights) ? record.rights.filter(Boolean) : []);
 
-        // If multiple rights, create one link per right so each is rendered separately
         const rightsToUse = edgeRights.length ? edgeRights : (edgeLabel(record) ? [edgeLabel(record)] : ['ACE']);
 
         for (const r of rightsToUse) {
@@ -1355,7 +1312,7 @@ function buildGraphDataFromEngine(engineData, selected) {
                 rel: r,
                 crit,
                 edge_rights: [r],
-                // parallel properties will be assigned after all links are collected
+
                 parallelIndex: 0,
                 parallelTotal: 1
             });
@@ -1365,7 +1322,6 @@ function buildGraphDataFromEngine(engineData, selected) {
     function walkRecord(record, parentNode, depth) {
         if (!record || typeof record !== 'object') return;
 
-        // Ensure principal node exists so we can attach principal_attributes
         if (record.principal_sid) {
             const principalRec = {
                 target_sid: record.principal_sid,
@@ -1379,14 +1335,14 @@ function buildGraphDataFromEngine(engineData, selected) {
                 principalRec.target_type || 'user',
                 Math.max(0, depth - 1)
             );
-            // Merge principal_attributes into node.target_attributes (if present)
+
             if (record.principal_attributes) {
                 try {
-                    // If node has no target_attributes, copy principal attrs directly
+
                     if (!principalNode.target_attributes) {
                         principalNode.target_attributes = record.principal_attributes;
                     } else if (typeof principalNode.target_attributes === 'object' && !Array.isArray(principalNode.target_attributes)) {
-                        // Merge keys from principal_attributes into target_attributes without overwriting
+
                         const src = record.principal_attributes;
                         if (src && typeof src === 'object' && !Array.isArray(src)) {
                             for (const k of Object.keys(src)) {
@@ -1397,7 +1353,7 @@ function buildGraphDataFromEngine(engineData, selected) {
                         }
                     }
                 } catch (e) {
-                    // No-op on merge errors
+
                     console.warn('Failed to merge principal_attributes:', e && e.message);
                 }
             }
@@ -1411,10 +1367,6 @@ function buildGraphDataFromEngine(engineData, selected) {
             depth
         );
 
-        // If record carries principal_attributes (old engine output), merge
-        // them into the target node's target_attributes so highlighting
-        // logic (which looks at target_attributes) works without rebuilding
-        // the C++ engine.
         if (record.principal_attributes) {
             try {
                 if (!targetNode.target_attributes) {
@@ -1447,8 +1399,7 @@ function buildGraphDataFromEngine(engineData, selected) {
         walkRecord(record, rootNode, 1);
     }
 
-    // Compute parallel link counts for same source->target so we can render arcs
-    const buckets = new Map(); // key: source::target -> [indexes]
+    const buckets = new Map();
     links.forEach((l, idx) => {
         const s = String(l.source).toLowerCase();
         const t = String(l.target).toLowerCase();
@@ -1461,7 +1412,7 @@ function buildGraphDataFromEngine(engineData, selected) {
         for (let i = 0; i < idxs.length; ++i) {
             const li = links[idxs[i]];
             li.parallelTotal = total;
-            li.parallelIndex = i; // 0..total-1
+            li.parallelIndex = i;
         }
     }
 
@@ -1479,14 +1430,14 @@ async function loadGraphObjectsFile() {
     for (const url of candidates) {
         try {
             const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 3000); // 3s timeout
+            const timer = setTimeout(() => ctrl.abort(), 3000);
             const resp = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
             clearTimeout(timer);
             if (resp.ok) return await resp.json();
-        } catch (_) { /* növbəti yola keç */ }
+        } catch (_) {  }
     }
 
-    throw new Error('graph_objects.json heç bir yolda tapılmadı');
+    throw new Error('graph_objects.json not found at any path');
 }
 
 const LOADING_STEPS = [
@@ -1548,7 +1499,6 @@ function _applyLoadingStep(card, idx) {
     _applyLoadingPct(step.pct);
 }
 
-
 async function analyzeSelectedRootPrincipal() {
     const selected    = getSelectedRootPrincipal();
     const selectedSid = selected?.sid || window.RootPrincipal?.getSelectedSID?.() || '';
@@ -1562,12 +1512,12 @@ async function analyzeSelectedRootPrincipal() {
 
     try {
         const apiCtrl  = new AbortController();
-        const apiTimer = setTimeout(() => apiCtrl.abort(), 60000); // 60s — engine uzun çəkə bilər
+        const apiTimer = setTimeout(() => apiCtrl.abort(), 60000);
         let resp;
         try {
             const host = window.ENGINE_API_HOST || '127.0.0.1';
-            const port = window.ENGINE_API_PORT || '5100';
-            const apiUrl = `http://${host}:${port}/api/analyze-root`;
+            const port = window.ENGINE_API_PORT || '30101';
+            const apiUrl = `http://${host}:${port}/analyze`;
             resp = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1594,7 +1544,7 @@ async function analyzeSelectedRootPrincipal() {
         return true;
 
     } catch (err) {
-        console.warn('[Analyze] Engine API uğursuz oldu, graph_objects.json birbaşa oxunur:', err.message);
+        console.warn('[Analyze] Engine API failed, falling back to graph_objects.json:', err.message);
 
         try {
             const fileData = await loadGraphObjectsFile();
@@ -1612,7 +1562,7 @@ async function analyzeSelectedRootPrincipal() {
             return true;
 
         } catch (fileErr) {
-            console.error('[Analyze] graph_objects.json oxuna bilmədi:', fileErr.message);
+            console.error('[Analyze] Failed to read graph_objects.json:', fileErr.message);
             setAnalyzeLoading(false);
             return renderSelectedRootPrincipal(selected);
         }

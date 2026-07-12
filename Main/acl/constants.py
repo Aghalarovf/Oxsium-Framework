@@ -85,6 +85,11 @@ OBJECT_TYPE_RIGHTS: dict[str, str] = {
     "e081f117-4944-4367-bb67-d5e2b56e3571": "msLAPS-Password",
     "3ff5040d-fed4-4fd0-8b83-9b9e57a76e4b": "msLAPS-PasswordExpirationTime",
     "f3531ec6-6330-4f8e-8d39-7a671fbac605": "msLAPS-EncryptedPassword",
+
+    # AD CS (Active Directory Certificate Services) extended rights - relevant to
+    # certificate template ACLs and ESC1/ESC4-style privilege escalation.
+    "0e10c968-78fb-11d2-90d4-00c04f79dc55": "Certificate-Enrollment",
+    "a05b8cc2-17bc-4802-a710-e7c15ab866a2": "Certificate-AutoEnrollment",
 }
 
 EXTENDED_RIGHT_NAMES = frozenset({
@@ -100,7 +105,26 @@ EXTENDED_RIGHT_NAMES = frozenset({
     "Send-As", "Receive-As",
     "Apply-Group-Policy", "Self-Membership",
     "Validated-Write-Computer", "Read-gMSA-Password", "All-Extended-Rights",
+    "Certificate-Enrollment", "Certificate-AutoEnrollment",
 })
+
+# --- Enterprise CA security descriptor rights -------------------------------
+# These are NOT AD-object ACE bits or extended-right GUIDs. An Enterprise CA
+# keeps its own security descriptor (retrieved via ICertAdmin2::GetCASecurity,
+# certsrv.msc's Security tab, PSPKI's Get-CertificationAuthorityAcl, or
+# `certipy ca -text`), and it uses this separate, CA-specific access mask.
+# ManageCA is the "CA administrator" role; ManageCertificates is the
+# "Certificate Manager" / "CA officer" role. Holding either (and especially
+# both, when role separation isn't enforced) is central to the ESC7 escalation
+# path: ManageCA can flip EDITF_ATTRIBUTESUBJECTALTNAME2 or grant itself
+# ManageCertificates, and ManageCertificates can approve pending/denied
+# certificate requests, bypassing manager-approval protections on templates.
+CA_SECURITY_RIGHTS: dict[str, int] = {
+    "ManageCA":           0x00000001,
+    "ManageCertificates": 0x00000002,
+}
+
+CA_SECURITY_DANGEROUS_RIGHTS = frozenset({"ManageCA", "ManageCertificates"})
 
 INTERESTING_RIGHTS = frozenset(
     {
@@ -130,6 +154,7 @@ DANGEROUS_RIGHTS = frozenset({
     "All-Extended-Rights", "ExtendedRights",
     "Self-Membership", "Read-gMSA-Password",
     "Apply-Group-Policy", "Reanimate-Tombstone",
+    "Certificate-Enrollment", "Certificate-AutoEnrollment",
 })
 
 AD_OBJECT_TYPE_MAP: dict[str, str] = {

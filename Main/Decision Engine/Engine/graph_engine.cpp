@@ -12,6 +12,42 @@
 #include <string>
 #include <vector>
 
+/* ══════════════════════════════════════════════════════════════════════
+ * Minimal SQLite3 C API declarations.
+ * libsqlite3-dev headers are not available in this build environment,
+ * but the runtime library (libsqlite3.so.0) is present, so we declare
+ * just the subset of the stable C ABI we need and link against it
+ * directly (see build command in the usage banner / README).
+ * ══════════════════════════════════════════════════════════════════════ */
+extern "C" {
+    typedef struct sqlite3 sqlite3;
+    typedef struct sqlite3_stmt sqlite3_stmt;
+
+    int sqlite3_open(const char* filename, sqlite3** ppDb);
+    int sqlite3_close(sqlite3*);
+    int sqlite3_prepare_v2(sqlite3*, const char* zSql, int nByte,
+                            sqlite3_stmt** ppStmt, const char** pzTail);
+    int sqlite3_step(sqlite3_stmt*);
+    int sqlite3_finalize(sqlite3_stmt*);
+    int sqlite3_column_count(sqlite3_stmt*);
+    const char* sqlite3_column_name(sqlite3_stmt*, int N);
+    int sqlite3_column_type(sqlite3_stmt*, int iCol);
+    const unsigned char* sqlite3_column_text(sqlite3_stmt*, int iCol);
+    long long sqlite3_column_int64(sqlite3_stmt*, int iCol);
+    double sqlite3_column_double(sqlite3_stmt*, int iCol);
+    int sqlite3_column_bytes(sqlite3_stmt*, int iCol);
+    const char* sqlite3_errmsg(sqlite3*);
+}
+
+#define SQLITE_OK      0
+#define SQLITE_ROW   100
+#define SQLITE_DONE  101
+#define SQLITE_INTEGER 1
+#define SQLITE_FLOAT   2
+#define SQLITE_TEXT    3
+#define SQLITE_BLOB    4
+#define SQLITE_NULL    5
+
 struct JsonVal;
 using JsonArr = std::vector<JsonVal>;
 using JsonObj = std::vector<std::pair<std::string, JsonVal>>;
@@ -230,6 +266,298 @@ static JsonVal loadAcls(const std::string& path) {
         std::cerr << "[ERROR] Parse error in " << path << ": " << e.what() << "\n";
         return JsonVal{};
     }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * SQLite → JsonVal loading layer.
+ *
+ * This replaces the old "read domain_*.json from disk" mechanism with
+ * "run a SQL query against domain_data.db and build the identical
+ * JsonVal tree". Every function below feeds into exactly the same
+ * downstream machinery (extractMatching, extractAttrs, lookupAttrs,
+ * buildSidLookup, ...) that used to consume parsed JSON files, so
+ * nothing past this loading layer needs to change.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static sqlite3* openDomainDb(const std::string& path) {
+    sqlite3* db = nullptr;
+    if (sqlite3_open(path.c_str(), &db) != SQLITE_OK) {
+        std::string msg = db ? sqlite3_errmsg(db) : "unknown error";
+        if (db) sqlite3_close(db);
+        throw std::runtime_error("Cannot open database: " + path + " (" + msg + ")");
+    }
+    return db;
+}
+
+/* Columns whose SQL value should be interpreted as a JSON-array-of-strings
+ * (or JSON-array-of-objects) that was stored as serialized TEXT. */
+static bool isJsonArrayColumn(const std::string& table, const std::string& col) {
+    static const std::map<std::string, std::set<std::string>> map = {
+        {"dangerous_ace",   {"rights", "edge_rights"}},
+        {"extended_rights", {"rights", "edge_rights"}},
+        {"aces",            {"rights", "edge_rights"}},
+        {"users", {
+            "spn", "msds_supportedencryptiontypesname",
+            "msds_supportedencryptiontypes_name", "key_credential_link",
+            "msds_allowedtodelegateto_structurized"
+        }},
+        {"computers", {
+            "rbcd_principals", "rbcd_principal_names", "ipv4_addresses",
+            "ipv6_addresses", "sid_history", "token_group_sids",
+            "risk_factors", "risk_controls",
+            "allowed_to_delegate_to_structured", "laps_attributes"
+        }},
+        {"groups", {}},
+    };
+    auto it = map.find(table);
+    if (it == map.end()) return false;
+    return it->second.count(col) != 0;
+}
+
+/* Columns whose 0/1 (or "0"/"1"/NULL) SQL value should become a real
+ * JSON boolean, matching how the original domain_*.json files encoded
+ * these flags (the rest of the code checks isBool() on them). */
+static bool isBooleanColumn(const std::string& table, const std::string& col) {
+    static const std::map<std::string, std::set<std::string>> map = {
+        {"users", {
+            "disabled", "normal_account", "pwd_not_required", "is_admin",
+            "is_direct_admin", "is_nested_admin", "dcsync", "asrep",
+            "kerberoastable", "unconstrained_delegation",
+            "has_key_credential_link", "locked_out", "must_change_pwd",
+            "smartcard_required", "pwd_never_expires", "pwd_cant_change",
+            "preauth_required", "trusted_for_delegation",
+            "constrained_delegation", "trusted_to_auth_for_delegation",
+            "protocol_transition_delegation", "not_delegated",
+            "account_never_expires", "deleted", "enc_implicit_rc4"
+        }},
+        {"computers", {
+            "disabled", "is_workstation", "is_server",
+            "is_domain_controller", "potential_privileged", "is_stale",
+            "stale_by_pwd", "stale_by_logon", "has_spn",
+            "trusted_for_delegation", "trusted_to_auth_for_delegation",
+            "unconstrained_delegation", "constrained_delegation",
+            "rbcd_enabled", "has_laps", "haslaps", "isaclprotected",
+            "kerberoastable", "asrep", "has_shadow_credential"
+        }},
+        {"groups", {
+            "is_empty", "is_privileged", "is_protected", "is_nested",
+            "isaclprotected"
+        }},
+    };
+    auto it = map.find(table);
+    if (it == map.end()) return false;
+    return it->second.count(col) != 0;
+}
+
+static JsonVal boolJson(bool b) {
+    JsonVal v; v.type = JsonVal::T::Bool; v.b = b; return v;
+}
+
+/* Converts one SQLite column value (for row `stmt`, column `i`) into a
+ * JsonVal, honoring the boolean / json-array column overrides above. */
+static JsonVal sqliteColumnToJson(sqlite3_stmt* stmt, int i,
+                                   const std::string& table,
+                                   const std::string& colName)
+{
+    int type = sqlite3_column_type(stmt, i);
+
+    if (isBooleanColumn(table, colName)) {
+        if (type == SQLITE_NULL) return boolJson(false);
+        if (type == SQLITE_INTEGER) return boolJson(sqlite3_column_int64(stmt, i) != 0);
+        if (type == SQLITE_TEXT) {
+            std::string s = reinterpret_cast<const char*>(sqlite3_column_text(stmt, i));
+            return boolJson(s == "1" || s == "true" || s == "True" || s == "TRUE");
+        }
+        return boolJson(false);
+    }
+
+    if (isJsonArrayColumn(table, colName)) {
+        if (type == SQLITE_NULL) { JsonVal v; v.type = JsonVal::T::Array; return v; }
+        std::string s = reinterpret_cast<const char*>(sqlite3_column_text(stmt, i));
+        if (s.empty()) { JsonVal v; v.type = JsonVal::T::Array; return v; }
+        try {
+            JsonVal parsed = parseJson(s);
+            if (parsed.isArr()) return parsed;
+        } catch (...) { /* fall through — not valid JSON, treat as plain string below */ }
+        JsonVal v; v.type = JsonVal::T::String; v.s = s; return v;
+    }
+
+    switch (type) {
+        case SQLITE_NULL: return JsonVal{};
+        case SQLITE_INTEGER: {
+            JsonVal v; v.type = JsonVal::T::Number;
+            v.n = static_cast<double>(sqlite3_column_int64(stmt, i));
+            return v;
+        }
+        case SQLITE_FLOAT: {
+            JsonVal v; v.type = JsonVal::T::Number;
+            v.n = sqlite3_column_double(stmt, i);
+            return v;
+        }
+        default: {
+            const unsigned char* txt = sqlite3_column_text(stmt, i);
+            JsonVal v; v.type = JsonVal::T::String;
+            v.s = txt ? reinterpret_cast<const char*>(txt) : "";
+            return v;
+        }
+    }
+}
+
+/* Runs `sql` and returns each result row as a JsonObj (column name -> value).
+ * `aliases` lets a query add extra key names pointing at an existing
+ * column's value (e.g. groups."group_sid" also exposed as "sid"), so the
+ * generic downstream code — written against the old JSON field names —
+ * keeps working unmodified. */
+static JsonArr runQueryAsJsonArr(sqlite3* db, const std::string& table,
+                                  const std::string& sql,
+                                  const std::vector<std::pair<std::string, std::string>>& aliases = {})
+{
+    JsonArr out;
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "[ERROR] SQL prepare failed for " << table << ": " << sqlite3_errmsg(db) << "\n";
+        return out;
+    }
+
+    int nCols = sqlite3_column_count(stmt);
+    std::vector<std::string> colNames(nCols);
+    for (int i = 0; i < nCols; ++i)
+        colNames[i] = sqlite3_column_name(stmt, i);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        JsonVal row; row.type = JsonVal::T::Object;
+        for (int i = 0; i < nCols; ++i)
+            row.obj.push_back({colNames[i], sqliteColumnToJson(stmt, i, table, colNames[i])});
+        for (const auto& alias : aliases) {
+            const JsonVal* src = row.find(alias.second);
+            if (src) row.obj.push_back({alias.first, *src});
+        }
+        out.push_back(std::move(row));
+    }
+
+    sqlite3_finalize(stmt);
+    return out;
+}
+
+/* member_of: aggregate user_member_of rows into a JSON array of group
+ * names, keyed by the owning user's rowid. */
+static std::map<long long, JsonVal> loadUserMemberOf(sqlite3* db) {
+    std::map<long long, JsonVal> out;
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql = "SELECT user_rowid, value FROM user_member_of ORDER BY user_rowid";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return out;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        long long uid = sqlite3_column_int64(stmt, 0);
+        const unsigned char* val = sqlite3_column_text(stmt, 1);
+        JsonVal item; item.type = JsonVal::T::String;
+        item.s = val ? reinterpret_cast<const char*>(val) : "";
+        auto& arr = out[uid];
+        arr.type = JsonVal::T::Array;
+        arr.arr.push_back(std::move(item));
+    }
+    sqlite3_finalize(stmt);
+    return out;
+}
+
+/* admin_rules: aggregate user_admin_rules rows into a JSON array of
+ * {level, severity, label, detail} objects, keyed by user rowid. */
+static std::map<long long, JsonVal> loadUserAdminRules(sqlite3* db) {
+    std::map<long long, JsonVal> out;
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql = "SELECT user_rowid, level, severity, label, detail_json "
+                       "FROM user_admin_rules ORDER BY user_rowid";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return out;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        long long uid = sqlite3_column_int64(stmt, 0);
+
+        JsonVal obj; obj.type = JsonVal::T::Object;
+        JsonVal level; level.type = JsonVal::T::Number;
+        level.n = static_cast<double>(sqlite3_column_int64(stmt, 1));
+        obj.obj.push_back({"level", level});
+
+        auto textOf = [&](int i) {
+            const unsigned char* t = sqlite3_column_text(stmt, i);
+            JsonVal v; v.type = JsonVal::T::String;
+            v.s = t ? reinterpret_cast<const char*>(t) : "";
+            return v;
+        };
+        obj.obj.push_back({"severity", textOf(2)});
+        obj.obj.push_back({"label", textOf(3)});
+
+        if (sqlite3_column_type(stmt, 4) == SQLITE_NULL) {
+            obj.obj.push_back({"detail", JsonVal{}});
+        } else {
+            std::string detailRaw = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
+            try {
+                obj.obj.push_back({"detail", parseJson(detailRaw)});
+            } catch (...) {
+                JsonVal v; v.type = JsonVal::T::String; v.s = detailRaw;
+                obj.obj.push_back({"detail", v});
+            }
+        }
+
+        auto& arr = out[uid];
+        arr.type = JsonVal::T::Array;
+        arr.arr.push_back(std::move(obj));
+    }
+    sqlite3_finalize(stmt);
+    return out;
+}
+
+/* Wraps a JsonArr as {"<key>": [...]}, mirroring the shape the rest of
+ * the code expects from the old domain_*.json files. */
+static JsonVal wrapAsRoot(const std::string& key, JsonArr arr) {
+    JsonVal root; root.type = JsonVal::T::Object;
+    JsonVal list; list.type = JsonVal::T::Array; list.arr = std::move(arr);
+    root.obj.push_back({key, std::move(list)});
+    return root;
+}
+
+/* dangerous_ace / extended_rights → {"acls": [...]} */
+static JsonVal loadAclsFromDb(sqlite3* db, const std::string& table) {
+    std::string sql = "SELECT * FROM \"" + table + "\"";
+    JsonArr rows = runQueryAsJsonArr(db, table, sql);
+    return wrapAsRoot("acls", std::move(rows));
+}
+
+/* users → {"users": [...]}, enriched with member_of / admin_rules
+ * aggregated from their join tables (id -> user_rowid). */
+static JsonVal loadUsersFromDb(sqlite3* db) {
+    JsonArr rows = runQueryAsJsonArr(db, "users", "SELECT * FROM \"users\"");
+
+    auto memberOf   = loadUserMemberOf(db);
+    auto adminRules = loadUserAdminRules(db);
+
+    /* id was selected via SELECT * so it's present as "id" on each row */
+    for (JsonVal& row : rows) {
+        const JsonVal* idVal = row.find("id");
+        long long uid = (idVal && idVal->isNum()) ? static_cast<long long>(idVal->n) : -1;
+
+        auto mIt = memberOf.find(uid);
+        row.obj.push_back({"member_of", mIt != memberOf.end() ? mIt->second : JsonVal{JsonVal::T::Array}});
+
+        auto aIt = adminRules.find(uid);
+        row.obj.push_back({"admin_rules", aIt != adminRules.end() ? aIt->second : JsonVal{JsonVal::T::Array}});
+    }
+
+    return wrapAsRoot("users", std::move(rows));
+}
+
+/* computers → {"computers": [...]} */
+static JsonVal loadComputersFromDb(sqlite3* db) {
+    JsonArr rows = runQueryAsJsonArr(db, "computers", "SELECT * FROM \"computers\"");
+    return wrapAsRoot("computers", std::move(rows));
+}
+
+/* groups → {"groups": [...]}. The groups table uses "group_sid" /
+ * "group_dn" while the rest of the engine (buildSidLookup, RBCD/MemberOf
+ * enrichment, GROUP_ATTRS) expects "sid" / "dn" — expose both via
+ * aliases instead of touching downstream code. */
+static JsonVal loadGroupsFromDb(sqlite3* db) {
+    JsonArr rows = runQueryAsJsonArr(
+        db, "groups", "SELECT * FROM \"groups\"",
+        { {"sid", "group_sid"}, {"dn", "group_dn"}, {"name", "group_name"} });
+    return wrapAsRoot("groups", std::move(rows));
 }
 
 static bool isNonEmpty(const JsonVal& v) {
@@ -1702,11 +2030,7 @@ int main(int argc, char* argv[]) {
     /* Argument Parsing */
     std::string sid           = "";
     std::string name          = "";
-    std::string dangerousFile = (repoRoot / "Domain Object" / "domain_dangerous_ace.json").string();
-    std::string extendedFile  = (repoRoot / "Domain Object" / "domain_extended_rights.json").string();
-    std::string usersFile     = (repoRoot / "Domain Object" / "domain_users.json").string();
-    std::string computersFile = (repoRoot / "Domain Object" / "domain_computers.json").string();
-    std::string groupsFile    = (repoRoot / "Domain Object" / "domain_groups.json").string();
+    std::string dbFile        = (repoRoot / "Domain Object" / "domain_data.db").string();
     std::string outFile       = (engineDir   / "graph_objects.json").string();
     int         maxDepth      = 50;
     
@@ -1724,11 +2048,7 @@ int main(int argc, char* argv[]) {
         std::string arg = argv[i];
         if      ((arg == "-r" || arg == "--root") && i + 1 < argc) sid           = argv[++i];
         else if ((arg == "-n" || arg == "--name") && i + 1 < argc) name          = argv[++i];
-        else if  (arg == "--dangerous"            && i + 1 < argc) dangerousFile = argv[++i];
-        else if  (arg == "--extended"             && i + 1 < argc) extendedFile  = argv[++i];
-        else if  (arg == "--users"                && i + 1 < argc) usersFile     = argv[++i];
-        else if  (arg == "--computers"            && i + 1 < argc) computersFile = argv[++i];
-        else if  (arg == "--groups"               && i + 1 < argc) groupsFile    = argv[++i];
+        else if  (arg == "--db"                   && i + 1 < argc) dbFile        = argv[++i];
         else if  (arg == "--out"                  && i + 1 < argc) outFile       = argv[++i];
         else if  (arg == "--gpos")                flagGpos              = true;
         else if  (arg == "--ous")                 flagOus               = true;
@@ -1761,16 +2081,8 @@ int main(int argc, char* argv[]) {
             << "  -r, --root  <SID>    Root principal SID to filter by\n"
             << "  -n, --name  <NAME>   Root principal name (computer_name or username)\n\n"
             << "Options:\n"
-            << "  --dangerous <file>   Path to domain_dangerous_ace.json\n"
-            << "                       (default: " << dangerousFile << ")\n"
-            << "  --extended  <file>   Path to domain_extended_rights.json\n"
-            << "                       (default: " << extendedFile  << ")\n"
-            << "  --users     <file>   Path to domain_users.json\n"
-            << "                       (default: " << usersFile     << ")\n"
-            << "  --computers <file>   Path to domain_computers.json\n"
-            << "                       (default: " << computersFile << ")\n"
-            << "  --groups    <file>   Path to domain_groups.json\n"
-            << "                       (default: " << groupsFile    << ")\n"
+            << "  --db        <file>   Path to domain_data.db (SQLite)\n"
+            << "                       (default: " << dbFile << ")\n"
             << "  --out       <file>   Output destination file\n"
             << "                       (default: " << outFile << ")\n"
             << "  --gpos               Enumerate Group Policy Objects\n"
@@ -1798,16 +2110,27 @@ int main(int argc, char* argv[]) {
     std::cout << "  Root SID   : " << sid           << "\n";
     std::cout << "  Root Name  : " << name          << "\n";
 
-    /* Load ACE files once — reused for both Level-1 and Level-2 */
-    std::cout << "[*] Loading ACE source files...\n";
-    JsonVal dangerousRoot = loadAcls(dangerousFile);
-    JsonVal extendedRoot  = loadAcls(extendedFile);
+    /* Load everything from the SQLite database once — reused for both
+     * Level-1 and Level-2 resolution. */
+    std::cout << "[*] Opening database: " << dbFile << "\n";
+    sqlite3* db = nullptr;
+    try {
+        db = openDomainDb(dbFile);
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] " << e.what() << "\n";
+        return 2;
+    }
 
-    /* Load domain object files for target attribute enrichment */
-    std::cout << "[*] Loading domain object files for enrichment...\n";
-    JsonVal usersRoot     = loadAcls(usersFile);
-    JsonVal computersRoot = loadAcls(computersFile);
-    JsonVal groupsRoot    = loadAcls(groupsFile);
+    std::cout << "[*] Loading ACE data via SQL (dangerous_ace, extended_rights)...\n";
+    JsonVal dangerousRoot = loadAclsFromDb(db, "dangerous_ace");
+    JsonVal extendedRoot  = loadAclsFromDb(db, "extended_rights");
+
+    std::cout << "[*] Loading domain objects via SQL (users, computers, groups) for enrichment...\n";
+    JsonVal usersRoot     = loadUsersFromDb(db);
+    JsonVal computersRoot = loadComputersFromDb(db);
+    JsonVal groupsRoot    = loadGroupsFromDb(db);
+
+    sqlite3_close(db);
 
     /* Build SID lookup tables */
     static const JsonArr emptyArr;
@@ -1846,8 +2169,7 @@ int main(int argc, char* argv[]) {
 
     std::cout << "  is_admin        : " << boolAttrText(rootUserAttrs, "is_admin") << "\n";
     std::cout << "  potential_admin  : " << boolAttrText(rootUserAttrs, "potential_admin") << "\n";
-    std::cout << "  Dangerous  : " << dangerousFile  << "\n";
-    std::cout << "  Extended   : " << extendedFile   << "\n";
+    std::cout << "  Database   : " << dbFile         << "\n";
     std::cout << "  Output     : " << outFile        << "\n";
     std::cout << "  Max Depth  : " << maxDepth       << " hop(s)\n\n";
 

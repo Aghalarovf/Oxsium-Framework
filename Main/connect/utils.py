@@ -2,25 +2,20 @@ import re
 import ipaddress
 
 
-# Common Active Directory sub-error codes embedded in LDAP bind error messages
-# (e.g. "80090308: LdapErr: ... data 775, v4563"). These explain the *real*
-# reason a bind was rejected, which is often not a credential/format issue.
 _AD_BIND_SUBCODES: dict[str, str] = {
-    "525": "İstifadəçi adı tapılmadı (user not found)",
-    "52e": "Şifrə/istifadəçi adı yanlışdır (invalid credentials)",
-    "530": "Bu hesab hazırkı saatlarda giriş etməyə icazəli deyil (logon hours restriction)",
-    "531": "Bu hesab bu iş stansiyasından giriş etməyə icazəli deyil (workstation restriction)",
-    "532": "Hesabın şifrəsinin vaxtı bitib (password expired)",
-    "533": "Hesab deaktiv edilib (account disabled)",
-    "701": "Hesabın vaxtı bitib (account expired)",
-    "773": "İstifadəçi ilk növbədə şifrəni dəyişməlidir (must reset password)",
-    "775": "Hesab kilidlənib (account locked out)",
+    "525": "User not found",
+    "52e": "Invalid credentials",
+    "530": "Account not permitted to log on at this time",
+    "531": "Account not permitted to log on from this workstation",
+    "532": "Password expired",
+    "533": "Account disabled",
+    "701": "Account expired",
+    "773": "User must reset password on next logon",
+    "775": "Account locked out",
 }
 
 
 def extract_ad_bind_subcode(message: str) -> tuple[str, str] | None:
-    """Extract the AD sub-error code (e.g. '775') from an LDAP bind error
-    message and return (code, human_readable_reason), or None if not found."""
     if not message:
         return None
     match = re.search(r"data\s+([0-9a-fA-F]{2,4})\b", message)
@@ -30,7 +25,7 @@ def extract_ad_bind_subcode(message: str) -> tuple[str, str] | None:
     reason = _AD_BIND_SUBCODES.get(code)
     if reason:
         return code, reason
-    return code, "Naməlum AD alt-xəta kodu"
+    return code, "Unknown AD sub-error code"
 
 
 def is_ntlm_hash(password: str) -> bool:
@@ -38,7 +33,6 @@ def is_ntlm_hash(password: str) -> bool:
 
 
 def get_upn_bind_user(username: str, domain: str) -> str:
-    """Build a UPN-style bind user (user@domain.local); no NETBIOS\\user needed."""
     raw_user = str(username or "").strip()
     domain = str(domain or "").strip()
 
@@ -56,8 +50,6 @@ def get_upn_bind_user(username: str, domain: str) -> str:
     return local_user
 
 
-# Kept for backwards compatibility with any external callers; no longer used
-# internally for bind-user construction (UPN is used instead).
 def get_netbios_bind_user(username: str, domain: str) -> str:
     if "\\" in username or "@" in username:
         return username
@@ -66,14 +58,6 @@ def get_netbios_bind_user(username: str, domain: str) -> str:
 
 
 def build_ldap_bind_users(username: str, domain: str) -> list[str]:
-    """Return bind-user candidates, UPN-first (user@domain.local).
-
-    Order tried:
-      1. UPN format: user@domain.local
-      2. Raw username, as passed in by the caller
-      3. Local username (no domain/netbios prefix)
-      4. NETBIOS format: DOMAIN\\user (last-resort fallback)
-    """
     raw_user = str(username or "").strip()
     domain = str(domain or "").strip()
     candidates: list[str] = []
@@ -93,14 +77,10 @@ def build_ldap_bind_users(username: str, domain: str) -> list[str]:
     else:
         local_user = raw_user
 
-    # UPN format first: user@domain.local
     add(get_upn_bind_user(raw_user, domain))
-
-    # Fallbacks, in case UPN bind is rejected for some reason
     add(raw_user)
     add(local_user)
 
-    # Last resort: NETBIOS\user format
     if domain:
         add(get_netbios_bind_user(local_user, domain))
 
@@ -171,4 +151,4 @@ def validate_domain(domain: str) -> bool:
 
 
 def validate_username(username: str) -> bool:
-    return bool(re.match(r"^[a-zA-Z0-9@.\\\-_]{1,128}$", username))
+    return bool(re.match(r"^[a-zA-Z0-9@.\\\-_$]{1,128}$", username))
