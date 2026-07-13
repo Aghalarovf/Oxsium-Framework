@@ -192,3 +192,55 @@
     text-shadow: 0 0 8px rgba(255,46,46,0.55);
     font-weight: 700;
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   API LOCK STATE — nav items
+   Greyed-out when Python backend (API_BASE) is unreachable.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Separate keyframes for each direction so forwards-fill never bleeds across */
+@keyframes api-nav-lock {
+    from { opacity: 1;    filter: saturate(1) brightness(1); }
+    to   { opacity: 0.55; filter: saturate(0.15) brightness(0.75); }
+}
+
+@keyframes api-nav-unlock {
+    from { opacity: 0.55; filter: saturate(0.15) brightness(0.75); }
+    to   { opacity: 1;    filter: saturate(1) brightness(1); }
+}
+
+/* Locked nav item — animate in, then hold at greyed-out values */
+.nav-item.api-locked {
+    animation: api-nav-lock 0.4s ease-out forwards;
+    pointer-events: none !important;
+    cursor: not-allowed !important;
+    background: none !important;
+    border-left-color: transparent !important;
+    text-shadow: none !important;
+    user-select: none;
+}
+
+/* Unlocking nav item — animate back to full opacity/saturation.
+   JS removes this class on animationend so the element returns to
+   its normal (no-animation) state with no lingering inline styles. */
+.nav-item.api-unlocking {
+    animation: api-nav-unlock 0.4s ease-out forwards;
+    pointer-events: auto;
+}
+
+/* Cascade delays — each nav item 55ms after the previous */
+#nav-users.api-unlocking,
+#nav-users.api-locked         { animation-delay: 0ms; }
+#nav-computers.api-unlocking,
+#nav-computers.api-locked     { animation-delay: 55ms; }
+#nav-groups.api-unlocking,
+#nav-groups.api-locked        { animation-delay: 110ms; }
+#nav-gpo.api-unlocking,
+#nav-gpo.api-locked           { animation-delay: 165ms; }
+#nav-ous.api-unlocking,
+#nav-ous.api-locked           { animation-delay: 220ms; }
+#nav-trusts.api-unlocking,
+#nav-trusts.api-locked        { animation-delay: 275ms; }
+#nav-acl.api-unlocking,
+#nav-acl.api-locked           { animation-delay: 330ms; }

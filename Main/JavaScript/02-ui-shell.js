@@ -422,11 +422,13 @@ async function pingApi() {
       document.getElementById('stat-api').className   = 'stat-value green';
       document.getElementById('stat-latency').textContent = `${ms} ms`;
       document.getElementById('api-ping-bar').style.width = `${Math.min(100, ms)}%`;
+      if (typeof updateApiLockState === 'function') updateApiLockState(true);
     } else { throw new Error(); }
   } catch {
     document.getElementById('stat-api').textContent = 'Unreachable';
     document.getElementById('stat-api').className   = 'stat-value red';
     document.getElementById('stat-latency').textContent = 'N/A';
+    if (typeof updateApiLockState === 'function') updateApiLockState(false);
   }
 }
 
@@ -464,3 +466,34 @@ document.addEventListener('keydown', (e) => {
     closeSecurityStatusPanel();
   }
 });
+
+// ── Backend lifecycle: /api/start and /api/stop via SSE-style polling ────────
+// The Python backend calls POST /api/start on itself after binding and
+// POST /api/stop before shutting down.  We expose matching route handlers here
+// so the GUI can react immediately instead of waiting for the 20-second ping.
+//
+// Because browsers cannot "receive" an inbound POST, we poll /api/lifecycle
+// at a short interval (2 s) which is reset to the normal 20 s once the backend
+// has confirmed it is alive.  Alternatively the backend can fire /api/stop and
+// the next fast-poll cycle will see the backend is gone.
+
+let _lifecyclePollId = null;
+
+async function _pollLifecycle() {
+  try {
+    const resp = await fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(1500) });
+    if (resp.ok) {
+      if (typeof updateApiLockState === 'function') updateApiLockState(true);
+      // Backend is alive — drop back to the normal 20-second ping rhythm
+      if (_lifecyclePollId) {
+        clearInterval(_lifecyclePollId);
+        _lifecyclePollId = null;
+      }
+    } else { throw new Error(); }
+  } catch {
+    if (typeof updateApiLockState === 'function') updateApiLockState(false);
+  }
+}
+
+// Fast 2-second poll on page load until backend answers, then normal pingApi takes over
+_lifecyclePollId = setInterval(_pollLifecycle, 2000);

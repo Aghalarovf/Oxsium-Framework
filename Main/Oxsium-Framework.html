@@ -102,7 +102,7 @@
         <span class="nav-count" id="nav-trusts-count">—</span>
       </div>
 
-      <div class="nav-item" id="nav-acl" onclick="switchTab('acl'); if(typeof prefetchACECount==='function') prefetchACECount();">
+      <div class="nav-item" id="nav-acl" onclick="switchTab('acl'); if(typeof prefetchACECount==='function' && state && state.domain) prefetchACECount();">
         <img class="nav-icon" src="assets/Icons/acl.png" alt="ACL" onerror="this.onerror=null;this.src='assets/favicon.png'">
         ACEs
         <span class="nav-count" id="nav-acl-count">—</span>
@@ -1251,10 +1251,13 @@
         </div>
         <div class="u-table-body" id="u-table-body">
           <div class="u-empty" id="u-empty">
-            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
-              <circle cx="18" cy="12" r="7" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M4 32c0-7.7 6.3-14 14-14s14 6.3 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
+            <div class="empty-icon-box">
+              <img src="assets/Icons/user.png" alt="Users" style="width:28px;height:28px;object-fit:contain;opacity:0.7;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+              <svg width="22" height="22" viewBox="0 0 36 36" fill="none" style="display:none">
+                <circle cx="18" cy="12" r="7" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M4 32c0-7.7 6.3-14 14-14s14 6.3 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </div>
             <p>Connect to a domain first or Import ZIP Module</p>
           </div>
         </div>
@@ -1358,10 +1361,13 @@
         </div>
         <div class="c-table-body" id="c-table-body">
           <div class="c-empty" id="c-empty">
-            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
-              <rect x="6" y="8" width="24" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M10 28h16M14 24h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
+            <div class="empty-icon-box">
+              <img src="assets/Icons/computer.png" alt="Computers" style="width:28px;height:28px;object-fit:contain;opacity:0.7;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+              <svg width="22" height="22" viewBox="0 0 36 36" fill="none" style="display:none">
+                <rect x="6" y="8" width="24" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M10 28h16M14 24h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </div>
             <p>Connect to a domain first or Import ZIP Module</p>
           </div>
         </div>
@@ -1458,9 +1464,12 @@
         </div>
         <div class="o-table-body" id="o-table-body">
           <div class="o-empty" id="o-empty">
-            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
-              <path d="M7 10c0-1 1-2 2-2h18c1 0 2 1 2 2v6h-3V9H9v16h8v3H9c-1 0-2-1-2-2V10Z" stroke="currentColor" stroke-width="1.5"/>
-            </svg>
+            <div class="empty-icon-box">
+              <img src="assets/Icons/ou.png" alt="OUs" style="width:28px;height:28px;object-fit:contain;opacity:0.7;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+              <svg width="22" height="22" viewBox="0 0 36 36" fill="none" style="display:none">
+                <path d="M7 10c0-1 1-2 2-2h18c1 0 2 1 2 2v6h-3V9H9v16h8v3H9c-1 0-2-1-2-2V10Z" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+            </div>
             <p>Connect to a domain first or Import ZIP Module</p>
           </div>
         </div>
@@ -1590,9 +1599,13 @@
         </div>
         <div class="g-table-body" id="g-table-body">
           <div class="g-empty" id="g-empty">
-            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" opacity="0.2">
-              <path d="M7 10c0-1 1-2 2-2h18c1 0 2 1 2 2v6h-3V9H9v16h8v3H9c-1 0-2-1-2-2V10Z" stroke="currentColor" stroke-width="1.5"/>
-            </svg>
+            <div class="empty-icon-box">
+              <img src="assets/Icons/gpo.png" alt="GPOs" style="width:28px;height:28px;object-fit:contain;opacity:0.7;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+              <svg width="22" height="22" viewBox="0 0 36 36" fill="none" style="display:none">
+                <path d="M18 5l11 4v8c0 8-4.7 13.2-11 15-6.3-1.8-11-7-11-15V9l11-4Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                <path d="M13 18.5l3.5 3.5L23 15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
             <p>Connect to a domain first or Import ZIP Module</p>
           </div>
         </div>
@@ -1683,7 +1696,17 @@
           <div class="gr-col gr-col-empty">Privilege</div>
         </div>
         <div class="gr-table-body" id="gr-table-body">
-          <div class="gr-empty" id="gr-empty"><p>Connect to a domain first or Import ZIP Module</p></div>
+          <div class="gr-empty" id="gr-empty">
+            <div class="empty-icon-box">
+              <img src="assets/Icons/group.png" alt="Groups" style="width:28px;height:28px;object-fit:contain;opacity:0.7;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+              <svg width="22" height="22" viewBox="0 0 36 36" fill="none" style="display:none">
+                <circle cx="14" cy="13" r="5.5" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M4 31c0-6.6 4.5-12 10-12s10 5.4 10 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M23 10.5a5 5 0 0 1 0 9.6M27 31c0-5.7-3.3-10.4-7.6-11.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <p>Connect to a domain first or Import ZIP Module</p>
+          </div>
         </div>
       </div>
 
@@ -1750,7 +1773,18 @@
           <div class="tr-col tr-col-type">Type</div>
         </div>
         <div class="tr-table-body" id="tr-table-body">
-          <div class="tr-empty" id="tr-empty"><p>Connect to a domain first or Import ZIP Module</p></div>
+          <div class="tr-empty" id="tr-empty">
+            <div class="empty-icon-box">
+              <img src="assets/Icons/trust.png" alt="Trusts" style="width:28px;height:28px;object-fit:contain;opacity:0.7;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+              <svg width="22" height="22" viewBox="0 0 36 36" fill="none" style="display:none">
+                <rect x="4" y="14" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                <rect x="22" y="14" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M14 19h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M17 16l-3 3 3 3M19 16l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <p>Connect to a domain first or Import ZIP Module</p>
+          </div>
         </div>
       </div>
 
@@ -1891,7 +1925,16 @@
           <div class="acl-col acl-col-type">Type</div>
         </div>
         <div class="acl-table-body" id="acl-table-body">
-          <div class="acl-empty" id="acl-empty"><p>Connect to a domain first or Import ZIP Module</p></div>
+          <div class="acl-empty" id="acl-empty">
+            <div class="empty-icon-box">
+              <img src="assets/Icons/acl.png" alt="ACL" style="width:28px;height:28px;object-fit:contain;opacity:0.7;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+              <svg width="22" height="22" viewBox="0 0 36 36" fill="none" style="display:none">
+                <circle cx="12" cy="12" r="6.5" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M16.5 16.5L31 31M25 25l4-4M29 29l3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <p>Connect to a domain first or Import ZIP Module</p>
+          </div>
         </div>
       </div>
 
@@ -2066,7 +2109,7 @@
   </div>
   <div class="statusbar-item">
     <span class="s-label">API:</span>
-    <span class="s-val" id="sb-api">localhost:5000</span>
+    <span class="s-val" id="sb-api">localhost:30200</span>
   </div>
   <div class="statusbar-item statusbar-right">
     <span class="s-label">SESSION:</span>

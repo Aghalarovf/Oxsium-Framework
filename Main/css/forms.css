@@ -145,3 +145,113 @@
 .enumeration-output { margin-top: 14px; border: 1px solid rgba(240,192,48,0.20); background: rgba(0,0,0,0.55); padding: 10px; }
 .enum-output-title  { font-family: var(--head); font-size: 11px; letter-spacing: 0.08em; color: var(--text-hi); margin-bottom: 8px; }
 .enum-output-pre    { margin: 0; min-height: 180px; max-height: 280px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.45; color: var(--text-hi); background: #060500; border: 1px solid rgba(240,192,48,0.08); padding: 10px; white-space: pre-wrap; word-break: break-word; }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   API LOCK STATE — credential cards & action buttons
+   Greyed-out when Python backend (API_BASE) is unreachable.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Separate keyframes for each direction so forwards-fill never bleeds across */
+@keyframes api-form-lock {
+    from { opacity: 1;    filter: saturate(1) brightness(1); }
+    to   { opacity: 0.55; filter: saturate(0.15) brightness(0.75); }
+}
+
+@keyframes api-form-unlock {
+    from { opacity: 0.55; filter: saturate(0.15) brightness(0.75); }
+    to   { opacity: 1;    filter: saturate(1) brightness(1); }
+}
+
+/* connect-card needs position:relative for the hint badge */
+.connect-card { position: relative; }
+
+/* ── Locked state ──
+   Note: the dim/desaturate animation is applied to the card's DIRECT
+   CHILDREN (not the card element itself). This keeps the ::before badge
+   (generated on .connect-card, not on a child) fully colored, since a
+   filter/opacity animation on an element also darkens its own pseudo-
+   elements — animating the children instead avoids that. */
+.connect-card.api-locked > *,
+.btn-ssl.api-locked,
+.btn-primary.api-locked,
+.btn-secondary.api-locked {
+    animation: api-form-lock 0.4s ease-out forwards;
+}
+
+.connect-card.api-locked,
+.btn-ssl.api-locked,
+.btn-primary.api-locked,
+.btn-secondary.api-locked {
+    pointer-events: none !important;
+    cursor: not-allowed !important;
+    box-shadow: none !important;
+    user-select: none;
+}
+
+/* Prevent inner inputs from catching events while card is locked */
+.connect-card.api-locked .form-input,
+.connect-card.api-locked .proto-btn,
+.connect-card.api-locked .eye-btn,
+.connect-card.api-locked select {
+    pointer-events: none !important;
+}
+
+/* "Backend offline" hint badge — first credential card only */
+.connect-card.api-locked::before {
+    content: 'Backend offline — start the Python API to enable';
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: max-content;
+    max-width: 100%;
+    min-width: 70%;
+    white-space: normal;
+    background: rgba(8, 6, 0, 0.85);
+    border: 1px solid rgba(255,167,51,0.45);
+    border-radius: 14px;
+    font-family: var(--head);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    color: #ffa733;
+    text-shadow: 0 0 6px rgba(0,0,0,0.9), 0 0 14px rgba(255,167,51,0.55);
+    padding: 18px 70px;
+    pointer-events: none;
+    z-index: 10;
+}
+
+#remote-form .connect-card:nth-of-type(1).api-locked::before { display: flex; }
+#remote-form .connect-card:nth-of-type(2).api-locked::before { display: none; }
+
+/* ── Unlocking state — separate keyframe, no bleed from forwards-fill ── */
+.connect-card.api-unlocking > *,
+.btn-ssl.api-unlocking,
+.btn-primary.api-unlocking,
+.btn-secondary.api-unlocking {
+    animation: api-form-unlock 0.4s ease-out forwards;
+}
+
+.connect-card.api-unlocking,
+.btn-ssl.api-unlocking,
+.btn-primary.api-unlocking,
+.btn-secondary.api-unlocking {
+    pointer-events: auto;
+}
+
+/* Stagger: cred card → proto card → SSL btn → connect btn → secondary btns */
+#remote-form .connect-card:nth-of-type(1).api-locked > *,
+#remote-form .connect-card:nth-of-type(1).api-unlocking > *  { animation-delay: 0ms; }
+#remote-form .connect-card:nth-of-type(2).api-locked > *,
+#remote-form .connect-card:nth-of-type(2).api-unlocking > *  { animation-delay: 55ms; }
+#btn-ssl-toggle.api-locked,
+#btn-ssl-toggle.api-unlocking                            { animation-delay: 110ms; }
+#btn-connect-deep.api-locked,
+#btn-connect-deep.api-unlocking                          { animation-delay: 165ms; }
+.btn-secondary.api-locked,
+.btn-secondary.api-unlocking                             { animation-delay: 220ms; }

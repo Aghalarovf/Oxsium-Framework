@@ -10,6 +10,8 @@ import subprocess
 import urllib.request
 import urllib.error
 import logging
+import atexit
+import signal
 from datetime import datetime
 from pathlib import Path
 
@@ -160,6 +162,85 @@ limiter = Limiter(
     default_limits=["10000 per day", "1000 per hour"],
     storage_uri=os.getenv("REDIS_URL", "memory://"),
 )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GUI Lifecycle Notifications
+#
+# When this backend process starts it fires  POST /api/start  to itself so the
+# GUI's pingApi() immediately learns the backend is alive.
+#
+# Before the process exits — for any reason (clean shutdown, Ctrl-C, SIGTERM,
+# unhandled exception, atexit) — it fires  POST /api/stop  so the GUI locks
+# itself before the socket closes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_GUI_PORT  = int(os.getenv("PORT", 30100))
+_GUI_BASE  = f"http://127.0.0.1:{_GUI_PORT}"
+_stop_sent = False
+_stop_lock = threading.Lock()
+
+
+def _notify_gui(endpoint: str) -> None:
+    """Fire a lightweight POST to ourselves; silently ignore any error."""
+    url  = f"{_GUI_BASE}{endpoint}"
+    body = json.dumps({"ts": time.time()}).encode()
+    try:
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=2)
+    except Exception:
+        pass
+
+
+def _send_stop_once() -> None:
+    """Send /api/stop exactly once, even if called from multiple paths."""
+    global _stop_sent
+    with _stop_lock:
+        if _stop_sent:
+            return
+        _stop_sent = True
+    logger.info("Sending /api/stop to GUI…")
+    _notify_gui("/api/stop")
+
+
+def _startup_notify() -> None:
+    """Wait briefly for Flask to bind, then send /api/start."""
+    time.sleep(0.8)
+    logger.info("Sending /api/start to GUI…")
+    _notify_gui("/api/start")
+
+
+# atexit covers normal exit and unhandled exceptions
+atexit.register(_send_stop_once)
+
+
+def _signal_handler(signum, frame) -> None:
+    """Catch SIGINT/SIGTERM: notify GUI then re-raise for clean shutdown."""
+    _send_stop_once()
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+
+signal.signal(signal.SIGINT,  _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
+
+
+@app.route("/api/start", methods=["POST", "GET"])
+def backend_start():
+    """GUI receives this signal: backend just came online."""
+    return jsonify({"status": "started", "ts": time.time()}), 200
+
+
+@app.route("/api/stop", methods=["POST", "GET"])
+def backend_stop():
+    """Backend sends this to itself before shutdown; GUI locks entire UI."""
+    _send_stop_once()
+    return jsonify({"status": "stopping", "ts": time.time()}), 200
 
 
 def _enumeration_status(result: dict) -> int:
@@ -1969,6 +2050,10 @@ if __name__ == "__main__":
         print(f"  http://{_ip}:{_port}")
     print(f"  {'-' * 36}")
     print()
+
+    # Notify the GUI that the backend has started.
+    # Runs in a daemon thread so it does not block Flask from binding first.
+    threading.Thread(target=_startup_notify, daemon=True).start()
 
     try:
         app.run(

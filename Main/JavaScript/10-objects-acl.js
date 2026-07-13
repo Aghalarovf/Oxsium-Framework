@@ -590,6 +590,9 @@ function _updateACLDbStat() {
 }
 
 async function prefetchACECount() {
+  // Do not show any count unless the user is connected to a domain
+  if (!state || !state.domain) return;
+
   if (_aclTotalInDB > 0) return;
 
   try {
@@ -622,6 +625,11 @@ async function loadACLs() {
   _aclOffset = 0;
   _aclTotalInDB = 0;
   aclDomainsSelected = null;
+
+  // Always reset the badge when loading starts; it will be repopulated only on success
+  const _aclBadge = document.getElementById('nav-acl-count');
+  if (_aclBadge) _aclBadge.textContent = '—';
+
   _updateLoadMoreBtn();
 
   try {

@@ -23,6 +23,7 @@
 
 .main-tab {
     height: 30px;
+    width: 150px;
     padding: 0 11px;
     border: 1px solid var(--border);
     background: var(--bg-card);
@@ -30,6 +31,7 @@
     border-radius: 3px;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 7px;
     font-family: var(--head);
     font-size: 10px;
@@ -41,8 +43,10 @@
 
 .main-tab:hover {
     color: var(--text-pri);
-    border-color: var(--border-hi);
+    border-color: var(--accent);
     background: var(--bg-panel);
+    box-shadow: 0 0 16px rgba(240,192,48,0.55), 0 0 4px rgba(240,192,48,0.8) inset;
+    filter: brightness(1.25);
 }
 
 .main-tab.active {
@@ -65,6 +69,8 @@
     color: var(--text-dim);
     border-color: var(--border);
     background: rgba(255,255,255,0.015);
+    transform: none;
+    box-shadow: none;
 }
 
 .main-tab .tab-dot {
@@ -303,7 +309,7 @@
 }
 
 .d-val.accent { color: var(--accent); }
-.d-val.green  { color: #22ff6e; text-shadow: 0 0 8px rgba(34,255,110,0.4); font-weight: 700; }
+.d-val.green  { color: #22ff6f; text-shadow: 0 0 8px rgba(34,255,110,0.4); font-weight: 700; }
 .d-val.red    { color: #ff2e2e; text-shadow: 0 0 8px rgba(255,46,46,0.4); font-weight: 700; }
 .d-val.amber  { color: var(--amber); }
 .d-val.dim    { color: var(--text-dim); }

@@ -627,6 +627,80 @@ function updateModeButtonState() {
   localBtn.disabled  = false; localBtn.classList.remove('disabled');
 }
 
+// ─── API Backend Lock / Unlock UI ───────────────────────────────────────────
+// When the Python backend (API_BASE) is unreachable the credential panel and
+// all sidebar nav items are greyed out and non-interactive.  Once the backend
+// comes back (or after a successful connect) they are animated back to life.
+
+let _apiWasReachable = null; // track previous state to avoid redundant DOM ops
+
+function updateApiLockState(reachable) {
+  if (_apiWasReachable === reachable) return; // nothing changed
+  _apiWasReachable = reachable;
+
+  // After the unlock animation finishes, strip both classes AND clear the
+  // animation property so the CSS `forwards` fill-mode cannot leave residual
+  // opacity/filter values that would prevent a future lock from animating.
+  function _afterUnlock(el) {
+    el.classList.remove('api-unlocking');
+    el.style.animation = '';   // wipe forwards-fill residue
+    el.style.opacity   = '';
+    el.style.filter    = '';
+  }
+
+  function _applyLockClass(el) {
+    // Cancel any in-progress unlock before locking
+    el.style.animation = '';
+    el.classList.remove('api-unlocking');
+    // Force reflow so the browser registers the class removal before we add
+    // api-locked — without this, removing and immediately re-adding the class
+    // can be batched and the animation won't restart.
+    void el.offsetWidth;
+    el.classList.add('api-locked');
+  }
+
+  function _applyUnlockClass(el) {
+    el.classList.remove('api-locked');
+    el.style.animation = '';   // clear any stale forwards-fill from lock
+    void el.offsetWidth;       // force reflow so unlock animation restarts cleanly
+    el.classList.add('api-unlocking');
+    el.addEventListener('animationend', () => _afterUnlock(el), { once: true });
+  }
+
+  // ── Sidebar nav items ────────────────────────────────────────────────────
+  const NAV_IDS = [
+    'nav-users', 'nav-computers', 'nav-groups',
+    'nav-gpo',   'nav-ous',       'nav-trusts', 'nav-acl',
+  ];
+  NAV_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    reachable ? _applyUnlockClass(el) : _applyLockClass(el);
+  });
+
+  // ── Credential card + Protocol card ─────────────────────────────────────
+  document.querySelectorAll('#remote-form .connect-card').forEach(el => {
+    reachable ? _applyUnlockClass(el) : _applyLockClass(el);
+  });
+
+  // ── Action buttons (SSL toggle, Connect) ────────────────────────────────
+  ['btn-connect-deep', 'btn-ssl-toggle'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    reachable ? _applyUnlockClass(el) : _applyLockClass(el);
+  });
+
+  // ── Secondary buttons inside the connect form ────────────────────────────
+  const actionRow = document.querySelector('#remote-form .action-row');
+  const savedWrap = document.querySelector('#remote-form .saved-users-wrap');
+  [
+    ...(actionRow ? actionRow.querySelectorAll('.btn-secondary') : []),
+    ...(savedWrap ? savedWrap.querySelectorAll('.btn-secondary') : []),
+  ].forEach(el => {
+    reachable ? _applyUnlockClass(el) : _applyLockClass(el);
+  });
+}
+
 function handleConnectClick(event, connectMode = 'deep') {
   if (event?.preventDefault) event.preventDefault();
   if (event?.stopPropagation) event.stopPropagation();
