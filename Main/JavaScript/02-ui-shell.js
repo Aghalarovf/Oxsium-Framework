@@ -102,6 +102,24 @@ function clearForm() {
   );
   updateAuthInputLockState();
   addLog('Form cleared', 'info');
+
+  // Clear the Logs/ directory on the backend.
+  fetch(`${API_BASE}/api/reset-logs`, { method: 'POST' })
+    .then(r => r.json().catch(() => null))
+    .then(data => {
+      if (data && data.success) {
+        const count = (data && data.deleted) ? data.deleted.length : 0;
+        addLog(`Reset complete — ${count} file(s) deleted`, 'success');
+      } else {
+        const errs = (data && data.errors && data.errors.length)
+          ? data.errors.join(', ')
+          : 'unknown error';
+        const paths = [data && data.logs_dir, data && data.domain_obj_dir]
+          .filter(Boolean).join(', ');
+        addLog(`Reset failed: ${errs} | paths: ${paths}`, 'error');
+      }
+    })
+    .catch(err => addLog(`Log reset network error: ${err.message}`, 'error'));
 }
 
 

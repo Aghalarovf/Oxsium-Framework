@@ -255,3 +255,37 @@
 #btn-connect-deep.api-unlocking                          { animation-delay: 165ms; }
 .btn-secondary.api-locked,
 .btn-secondary.api-unlocking                             { animation-delay: 220ms; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DEEP CONNECT — Connecting... animation
+   Spinner ring + brightness pulse on btn-primary while connecting.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes connect-pulse {
+    0%,100% { box-shadow: 0 0 8px  rgba(240,192,48,0.30), 0 0 0px  rgba(240,192,48,0); }
+    50%      { box-shadow: 0 0 22px rgba(240,192,48,0.75), 0 0 40px rgba(240,192,48,0.25); }
+}
+
+/* Spinning ring shown next to "CONNECTING..." text */
+.spinner {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    border: 2px solid rgba(26,20,0,0.35);
+    border-top-color: #1a1400;
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+/* Applied to #btn-connect-deep while state.connecting === true */
+#btn-connect-deep.connecting {
+    animation: connect-pulse 1.4s ease-in-out infinite;
+    cursor: wait !important;
+    pointer-events: none;
+}

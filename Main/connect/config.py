@@ -62,7 +62,8 @@ class Config:
 _LOG_FORMAT  = "%(asctime)s  %(levelname)-8s  %(message)s"
 _LOG_DATEFMT = "%H:%M:%S"
 
-_LOG_FILE_PATH = Path(os.getenv("CONNECTION_LOG_PATH", str(Config.PROJECT_ROOT / "connection.log")))
+_LOG_FILE_PATH = Path(os.getenv("CONNECTION_LOG_PATH", str(Config.PROJECT_ROOT / "Logs" / "connection.log")))
+_LOG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 _console_handler = logging.StreamHandler()
 _console_handler.setLevel(logging.DEBUG if DEBUG_MODE else logging.CRITICAL)

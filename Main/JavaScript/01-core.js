@@ -581,10 +581,14 @@ function setBtnLoading(loading, connectMode = 'deep') {
   const deepTxt = document.getElementById('btn-connect-deep-text');
 
   if (loading) {
-    if (sslBtn) sslBtn.disabled = true;
-    if (deepBtn) deepBtn.disabled = true;
-    if (deepTxt) deepTxt.innerHTML = '<span class="spinner"></span>&nbsp;DEEP...';
+    if (sslBtn)  sslBtn.disabled = true;
+    if (deepBtn) {
+      deepBtn.disabled = true;
+      deepBtn.classList.add('connecting');
+    }
+    if (deepTxt) deepTxt.innerHTML = '<span class="spinner"></span>&nbsp;CONNECTING...';
   } else {
+    if (deepBtn) deepBtn.classList.remove('connecting');
     updateConnectButtonState();
   }
 }
@@ -606,7 +610,7 @@ function updateConnectButtonState() {
     sslBtn.style.display = ''; deepBtn.style.display = '';
     disconnectBtn.style.display = 'none';
     sslBtn.disabled = false; deepBtn.disabled = false;
-    deepBtn.classList.remove('btn-danger');
+    deepBtn.classList.remove('btn-danger', 'connecting');
     deepBtn.classList.add('btn-primary');
     deepTxt.textContent = 'DEEP CONNECT';
     syncSSLButtonWithProtocol();

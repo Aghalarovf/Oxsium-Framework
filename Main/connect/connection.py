@@ -148,6 +148,7 @@ def _probe_ldap_ports(ip: str, timeout: float = 4.0) -> list[dict]:
 def _ldap_ports_refused(ports: list[dict]) -> bool:
     return bool(ports) and all(port_info.get("result") == "closed" for port_info in ports)
 
+
 app = Flask(__name__)
 CORS(
     app,
@@ -241,6 +242,84 @@ def backend_stop():
     """Backend sends this to itself before shutdown; GUI locks entire UI."""
     _send_stop_once()
     return jsonify({"status": "stopping", "ts": time.time()}), 200
+
+
+@app.route("/api/reset-logs", methods=["POST"])
+def reset_logs():
+    """Close all log file handlers, delete everything inside Logs/, then
+    reopen the handler.  Closing first is required on Windows because an
+    open file handle prevents deletion (WinError 32).
+    """
+    import shutil
+    from connect.config import _LOG_FILE_PATH
+
+    logs_dir = _PROJECT_ROOT / "Logs"
+    deleted  = []
+    errors   = []
+
+    # Step 1 — close EVERY FileHandler across ALL loggers that points into
+    # Logs/ so Windows releases every file lock before we try to delete.
+    # config.py attaches handlers to both "ad_api" and "flask.app"; missing
+    # any one of them causes WinError 32.
+    handlers_to_reopen = []
+    all_loggers = [logging.root] + list(logging.Logger.manager.loggerDict.values())
+    for lg in all_loggers:
+        if not isinstance(lg, logging.Logger):
+            continue
+        for handler in list(lg.handlers):
+            if not isinstance(handler, logging.FileHandler):
+                continue
+            try:
+                if Path(handler.baseFilename).resolve().parent.resolve() != logs_dir.resolve():
+                    continue
+            except Exception:
+                continue
+            try:
+                handler.acquire()
+                handler.flush()
+                handler.stream.close()
+                handler.stream = open(os.devnull, "w", encoding="utf-8")
+                handler.release()
+                handlers_to_reopen.append(handler)
+            except Exception as exc:
+                errors.append(f"handler close: {exc}")
+
+    # Step 2 — delete everything inside Logs/ and Domain Object/.
+    for target_dir in (logs_dir, DOMAIN_OBJECT_DIR):
+        if not target_dir.is_dir():
+            continue
+        for item in list(target_dir.iterdir()):
+            try:
+                if item.is_file() or item.is_symlink():
+                    item.unlink()
+                    deleted.append(str(item.relative_to(_PROJECT_ROOT)))
+                elif item.is_dir():
+                    shutil.rmtree(item)
+                    deleted.append(str(item.relative_to(_PROJECT_ROOT)))
+            except Exception as exc:
+                errors.append(f"{item.name}: {exc}")
+
+    # Step 3 — reopen the handler so logging continues into a fresh file.
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    for handler in handlers_to_reopen:
+        try:
+            new_stream = open(Path(handler.baseFilename), "w", encoding="utf-8")
+            handler.acquire()
+            handler.stream.close()
+            handler.stream = new_stream
+            handler.release()
+        except Exception as exc:
+            errors.append(f"handler reopen: {exc}")
+
+    logger.info("reset-logs: logs_dir=%s domain_obj_dir=%s deleted=%s errors=%s",
+                logs_dir, DOMAIN_OBJECT_DIR, deleted, errors)
+    return jsonify({
+        "success":       not errors,
+        "deleted":       deleted,
+        "errors":        errors,
+        "logs_dir":      str(logs_dir),
+        "domain_obj_dir": str(DOMAIN_OBJECT_DIR),
+    }), 200
 
 
 def _enumeration_status(result: dict) -> int:

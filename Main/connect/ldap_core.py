@@ -63,7 +63,12 @@ def open_standalone_connection(
             return conn, base_dn
         except (LDAPInvalidCredentialsResult, LDAPBindError) as exc:
             last_error = exc
-            if _is_ldap_bind_failure(str(exc)):
+            exc_msg = str(exc)
+            # Hard-stop: real AD policy error — raise immediately with the
+            # original message so callers see the actual reason.
+            if _is_hard_stop_bind_error(exc_msg):
+                raise
+            if _is_ldap_bind_failure(exc_msg):
                 continue
             raise
     raise last_error or LDAPBindError("LDAP bind failed")
@@ -160,6 +165,12 @@ def _is_retryable_ldap_error(message: str) -> bool:
 
 
 def _is_ldap_bind_failure(message: str) -> bool:
+    """Return True for errors where retrying with a different username format
+    makes sense (wrong UPN/NETBIOS format, not an actual auth failure).
+
+    Errors like strongerAuthRequired or accountExpired are *real* AD errors
+    that won't be fixed by a format retry — they must surface to the caller.
+    """
     msg = (message or "").lower()
     return any(marker in msg for marker in (
         "invalidcredentials",
@@ -167,6 +178,36 @@ def _is_ldap_bind_failure(message: str) -> bool:
         "invalid credentials",
         "ldapbinderror",
     ))
+
+
+# AD data codes that should NOT be retried with a different username format.
+# These are real policy/account errors where the bind_user format is correct
+# but AD itself is rejecting the attempt for a specific reason.
+_AD_HARD_STOP_MARKERS = (
+    "strongerauthre",        # strongerAuthRequired  (DC needs signing/TLS)
+    "insufficientaccessrigh", # insufficientAccessRights
+    "accountexpired",
+    "accountlocked",
+    "passwordexpired",
+    "passwordmustchange",
+    "unwillingtoperform",
+    "constraintviolation",
+    "530",  # AD sub-code: not permitted to logon at this time
+    "531",  # AD sub-code: not permitted to logon from this workstation
+    "532",  # AD sub-code: password expired
+    "533",  # AD sub-code: account disabled
+    "701",  # AD sub-code: account expired
+    "773",  # AD sub-code: user must reset password
+    "775",  # AD sub-code: account locked out
+)
+
+
+def _is_hard_stop_bind_error(message: str) -> bool:
+    """Return True when the error is a definitive AD rejection that should
+    surface immediately rather than being retried or replaced with a generic
+    message."""
+    msg = (message or "").lower()
+    return any(marker in msg for marker in _AD_HARD_STOP_MARKERS)
 
 
 def _is_ldaps_protocol(protocol: str) -> bool:
@@ -197,12 +238,24 @@ def _collect_ldap_environment_for_target(
             return {"success": True, "data": env}
         except (LDAPInvalidCredentialsResult, LDAPBindError) as exc:
             last_error = exc
+            exc_msg = str(exc)
             logger.error(
                 "LDAP bind RAW error | target=%s bind_user=%s exc_type=%s message=%s",
-                ldap_target, bind_user, type(exc).__name__, str(exc),
+                ldap_target, bind_user, type(exc).__name__, exc_msg,
                 exc_info=True,
             )
-            if _is_ldap_bind_failure(str(exc)):
+            # Hard-stop errors (strongerAuthRequired, accountLocked, etc.)
+            # are definitive AD rejections — surface them immediately with
+            # the real reason instead of retrying other username formats.
+            if _is_hard_stop_bind_error(exc_msg):
+                subcode = extract_ad_bind_subcode(exc_msg)
+                detail = f" {subcode[0]} — {subcode[1]}" if subcode else f" {exc_msg}"
+                return {
+                    "success": False,
+                    "error": f"LDAP bind rejected by AD: {detail.strip()}",
+                    "code": 401,
+                }
+            if _is_ldap_bind_failure(exc_msg):
                 continue
             break
         except Exception as exc:
@@ -216,19 +269,27 @@ def _collect_ldap_environment_for_target(
                 return {"success": False, "error": str(exc), "code": 503}
             break
 
-    if last_error and _is_ldap_bind_failure(str(last_error)):
-        subcode = extract_ad_bind_subcode(str(last_error))
-        detail = f" AD sub-error: {subcode[0]} — {subcode[1]}." if subcode else ""
-        return {
-            "success": False,
-            "error": (
-                f"LDAP bind failed for {username}; tried UPN, NETBIOS, and raw username formats. "
-                f"Verify the AD logon name (for example user@domain or DOMAIN\\user).{detail}"
-            ),
-            "code": 401,
-        }
+    if last_error:
+        exc_msg = str(last_error)
+        subcode = extract_ad_bind_subcode(exc_msg)
+        if subcode:
+            # We have a machine-readable AD sub-code — always prefer it.
+            detail = f"{subcode[0]} — {subcode[1]}"
+            return {"success": False, "error": f"LDAP bind failed: {detail}", "code": 401}
+        if _is_ldap_bind_failure(exc_msg):
+            # Generic wrong-format failure after exhausting all username formats.
+            return {
+                "success": False,
+                "error": (
+                    f"LDAP bind failed for {username}; tried UPN, NETBIOS, and raw username "
+                    f"formats. Verify the AD logon name (for example user@domain or DOMAIN\\user)."
+                ),
+                "code": 401,
+            }
+        # Any other error (network, TLS, etc.) — keep the original message.
+        return {"success": False, "error": exc_msg, "code": 503}
 
-    return {"success": False, "error": str(last_error) if last_error else "LDAP env probe failed"}
+    return {"success": False, "error": "LDAP env probe failed"}
 
 
 def _run_enumeration_with_target_fallback(req: dict, enum_fn):
