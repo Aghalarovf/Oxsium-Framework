@@ -756,6 +756,11 @@ async function doConnect(connectMode = 'deep') {
         protocol: state.ssl ? 'ldaps' : state.protocol,
         use_ssl:  !!state.ssl,
         domain, ip, username, password, hash, dc: dcHost, ldap_host: dcHost,
+        ccache_filename: state._ccacheName || null,
+        ccache_data:     state._ccacheData || null,
+        pfx_filename:    state._pfxName || null,
+        pfx_data:        state._pfxData || null,
+        pfx_password:    (document.getElementById('f-pfx-pass')?.value || '').trim() || null,
       }),
     });
     const data = await resp.json();

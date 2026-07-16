@@ -241,8 +241,34 @@ async function handlePfxFileSelect(evt) {
   }
 }
 
-function buildEnumerationPayload() {
+async function checkAuthMethodPlatformSupport() {
+  const ccacheBtn  = document.getElementById('btn-ccache');
+  const pfxBtn     = document.getElementById('btn-pfx');
+  const ccacheNote = document.getElementById('ccache-os-note');
+  const pfxNote    = document.getElementById('pfx-os-note');
+  const pfxPassEl  = document.getElementById('f-pfx-pass');
 
+  try {
+    const resp = await fetch(`${API_BASE}/api/platform`);
+    const data = await resp.json();
+    const platform = (data && data.platform) || '';
+
+    if (platform === 'Windows') {
+      if (ccacheBtn)  { ccacheBtn.disabled = true; ccacheBtn.classList.add('api-locked'); }
+      if (pfxBtn)     { pfxBtn.disabled = true; pfxBtn.classList.add('api-locked'); }
+      if (pfxPassEl)  pfxPassEl.disabled = true;
+      if (ccacheNote) ccacheNote.style.display = 'block';
+      if (pfxNote)    pfxNote.style.display = 'block';
+    }
+  } catch (_err) {
+    // Backend not reachable yet — leave buttons as-is, will retry on next ping.
+  }
+}
+
+document.addEventListener('DOMContentLoaded', checkAuthMethodPlatformSupport);
+
+
+function buildEnumerationPayload() {
   if (state.mode === 'local' || state.protocol === 'local') {
     return { mode: 'local' };
   }

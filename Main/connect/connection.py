@@ -231,6 +231,12 @@ signal.signal(signal.SIGINT,  _signal_handler)
 signal.signal(signal.SIGTERM, _signal_handler)
 
 
+@app.route("/api/platform", methods=["GET"])
+def get_platform():
+    import platform as _platform
+    return jsonify({"success": True, "platform": _platform.system()}), 200
+
+
 @app.route("/api/start", methods=["POST", "GET"])
 def backend_start():
     """GUI receives this signal: backend just came online."""
@@ -1352,16 +1358,72 @@ def connect():
                 "code": 503,
             }), 503
 
-    result = run_connect_strategy(
-        connect_mode=connect_mode,
-        proto=proto,
-        ip=ip,
-        username=username,
-        password=auth_secret,
-        domain=domain,
-        connect_ldap_fast=connect_ldap_fast,
-        protocol_handlers=PROTOCOL_HANDLERS,
-    )
+    if using_alt_auth:
+        # connect_ldap_fast/PROTOCOL_HANDLERS only know how to do a SIMPLE/NTLM
+        # bind with a password string. With ccache/PFX auth_secret is "", which
+        # ldap3 rejects outright ("password is mandatory in simple bind").
+        # Do the initial probe with the same LdapSession path used for the
+        # shared session instead, so ccache/PFX creds never touch the
+        # password-based bind code.
+        probe_targets = _build_ldap_targets({
+            "protocol": proto, "ip": ip, "domain": domain,
+            "ldap_host": req.get("ldap_host", ""), "dc": req.get("dc", ""),
+        })
+        probe_error = None
+        result = None
+        for target in probe_targets:
+            probe_session = None
+            try:
+                probe_session = LdapSession(
+                    target, domain, username, "", Config,
+                    use_ssl=use_ssl,
+                    ccache_bytes=ccache_bytes,
+                    pfx_bytes=pfx_bytes,
+                    pfx_password=pfx_password,
+                ).open()
+                result = {
+                    "success":          True,
+                    "domain":           domain,
+                    "username":         username.split("\\")[-1].split("@")[0].upper(),
+                    "dc":               target,
+                    "dnsHostName":      target,
+                    "os_version":       "Unknown",
+                    "domain_level":     "Unknown",
+                    "kerberos_enabled": True,
+                    "smb_enabled":      None,
+                    "counts": {
+                        "users": 0, "computers": 0, "groups": 0,
+                        "ous": 0,   "gpos": 0,      "trusts": 0,
+                    },
+                    "protocol_used": "ldaps" if use_ssl else "ldap",
+                }
+                break
+            except LdapSessionError as exc:
+                probe_error = exc
+                logger.warning("/api/connect: alt-auth probe failed on %s: %s", target, exc)
+                continue
+            finally:
+                if probe_session is not None:
+                    probe_session.close()
+
+        if result is None:
+            auth_kind = "ccache" if ccache_bytes else "PFX certificate"
+            return jsonify({
+                "success": False,
+                "error": f"{auth_kind} bind failed: {probe_error}" if probe_error else f"{auth_kind} bind failed",
+                "code": getattr(probe_error, "code", 401),
+            }), getattr(probe_error, "code", 401)
+    else:
+        result = run_connect_strategy(
+            connect_mode=connect_mode,
+            proto=proto,
+            ip=ip,
+            username=username,
+            password=auth_secret,
+            domain=domain,
+            connect_ldap_fast=connect_ldap_fast,
+            protocol_handlers=PROTOCOL_HANDLERS,
+        )
 
     if result.get("success"):
         profile = _collect_powershell_profile(req, result)
@@ -2153,6 +2215,8 @@ if __name__ == "__main__":
     print(f"  {'-' * 36}")
     print()
 
+    # Notify the GUI that the backend has started.
+    # Runs in a daemon thread so it does not block Flask from binding first.
     threading.Thread(target=_startup_notify, daemon=True).start()
 
     try:

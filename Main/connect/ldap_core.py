@@ -1,5 +1,6 @@
 import inspect
 import logging
+import os
 import re
 
 from ldap3 import Server, Connection, ALL, BASE, SUBTREE, AUTO_BIND_NO_TLS
