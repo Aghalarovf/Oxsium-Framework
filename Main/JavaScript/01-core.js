@@ -558,6 +558,14 @@ function validate() {
   const hashErr = document.getElementById('err-hash');
   const hasPass = !!passEl.value.trim();
   const hasHash = !!(hashEl?.value || '').trim();
+  const hasCcache = !!state._ccacheData;
+  const hasPfx     = !!state._pfxData;
+
+  if (hasCcache || hasPfx) {
+    passEl.classList.remove('error'); hashEl?.classList.remove('error');
+    passErr.classList.remove('show'); hashErr?.classList.remove('show');
+    return ok;
+  }
 
   if (hasPass && hasHash) {
     passEl.classList.add('error'); hashEl?.classList.add('error');

@@ -90,13 +90,25 @@ function toggleHash() {
   f.type = f.type === 'password' ? 'text' : 'password';
 }
 
+function togglePfxPass() {
+  const f = document.getElementById('f-pfx-pass');
+  if (!f) return;
+  f.type = f.type === 'password' ? 'text' : 'password';
+}
+
 
 function clearForm() {
-  ['f-domain','f-ip','f-dc','f-user','f-pass','f-hash'].forEach(id => {
+  ['f-domain','f-ip','f-dc','f-user','f-pass','f-hash','f-pfx-pass'].forEach(id => {
     const el = document.getElementById(id);
     el.value = '';
     el.classList.remove('error');
   });
+  state._ccacheName = null; state._ccacheData = null;
+  state._pfxName = null; state._pfxData = null;
+  const ccacheLbl = document.getElementById('ccache-filename');
+  const pfxLbl    = document.getElementById('pfx-filename');
+  if (ccacheLbl) ccacheLbl.textContent = '';
+  if (pfxLbl) pfxLbl.textContent = '';
   ['err-domain','err-ip','err-user','err-pass','err-hash'].forEach(id =>
     document.getElementById(id).classList.remove('show')
   );

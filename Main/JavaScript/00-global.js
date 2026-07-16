@@ -279,6 +279,7 @@ function buildEnumerationPayload() {
     ccache_data:     state._ccacheData || null,
     pfx_filename:    state._pfxName || null,
     pfx_data:        state._pfxData || null,
+    pfx_password:    (document.getElementById('f-pfx-pass')?.value || '').trim() || null,
   };
 }
 
