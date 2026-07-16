@@ -114,7 +114,7 @@ from dominfo import get_domain_info
 from acl import AclFilterConfig, get_domain_acls
 from acl.constants import _DEFAULT_TRUSTEE_RIDS, _DEFAULT_TRUSTEE_SIDS
 
-from connect.utils         import validate_ip, validate_domain, validate_username
+from connect.utils         import validate_ip, validate_domain, validate_username, decode_base64_upload
 from connect.network       import _tcp_probe, check_port
 from connect.ldap_core     import (
     _collect_ldap_environment_with_fallback,
@@ -1304,14 +1304,34 @@ def connect():
     skip_counts  = bool(req.get("skip_counts_probe", False))
     use_ssl      = (proto == "ldaps")
 
+    ccache_b64   = req.get("ccache_data")
+    pfx_b64      = req.get("pfx_data")
+    pfx_password = str(req.get("pfx_password", "")).strip() or None
+
+    try:
+        ccache_bytes = decode_base64_upload(ccache_b64, "ccache_data")
+        pfx_bytes    = decode_base64_upload(pfx_b64, "pfx_data")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    using_alt_auth = bool(ccache_bytes or pfx_bytes)
+
     logger.info("/api/connect called: ip=%s proto=%s connect_mode=%s skip_counts_probe=%s", ip, proto, connect_mode, skip_counts)
 
-    if password and hash_value:
-        return jsonify({"error": "Use either password or NTLM hash, not both"}), 400
-    if not password and not hash_value:
-        return jsonify({"error": "Missing fields: password or hash"}), 400
-
-    auth_secret = password or hash_value
+    if using_alt_auth:
+        if ccache_bytes and pfx_bytes:
+            return jsonify({"error": "Use either a ccache file or a PFX certificate, not both"}), 400
+        if password or hash_value:
+            return jsonify({"error": "Do not supply a password/hash together with a ccache or PFX file"}), 400
+        if pfx_bytes and not use_ssl:
+            return jsonify({"error": "Certificate-based auth (PFX) requires LDAPS"}), 400
+        auth_secret = ""
+    else:
+        if password and hash_value:
+            return jsonify({"error": "Use either password or NTLM hash, not both"}), 400
+        if not password and not hash_value:
+            return jsonify({"error": "Missing fields: password, hash, ccache file, or PFX certificate"}), 400
+        auth_secret = password or hash_value
 
     if not validate_ip(ip) or not validate_domain(domain) or not validate_username(username):
         return jsonify({"error": "Invalid input formats"}), 400
@@ -1371,6 +1391,9 @@ def connect():
                     shared_session = LdapSession(
                         target, domain, username, auth_secret, Config,
                         use_ssl=use_ssl,
+                        ccache_bytes=ccache_bytes,
+                        pfx_bytes=pfx_bytes,
+                        pfx_password=pfx_password,
                     ).open()
                     logger.info("/api/connect: shared LDAP session established on %s", target)
                     break
@@ -2130,8 +2153,6 @@ if __name__ == "__main__":
     print(f"  {'-' * 36}")
     print()
 
-    # Notify the GUI that the backend has started.
-    # Runs in a daemon thread so it does not block Flask from binding first.
     threading.Thread(target=_startup_notify, daemon=True).start()
 
     try:

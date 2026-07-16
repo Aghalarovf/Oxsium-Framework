@@ -2,11 +2,16 @@ import logging
 
 from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
 
-from connect.utils import build_ldap_bind_users, domain_to_dn, is_ntlm_hash
+from connect.utils import (
+    build_ldap_bind_users, domain_to_dn, is_ntlm_hash,
+    pfx_bytes_to_pem, write_temp_pem_pair, write_temp_ccache, cleanup_temp_paths,
+)
 from connect.ldap_core import (
     _is_ldap_bind_failure,
     _is_hard_stop_bind_error,
     _open_ldap_connection,
+    _open_ldap_connection_gssapi,
+    _open_ldap_connection_certificate,
 )
 from connect.utils import extract_ad_bind_subcode
 
@@ -21,13 +26,20 @@ class LdapSessionError(Exception):
 
 
 class LdapSession:
-    def __init__(self, ip, domain, username, password, config, use_ssl: bool = False):
+    def __init__(
+        self, ip, domain, username, password, config, use_ssl: bool = False,
+        ccache_bytes: bytes | None = None, pfx_bytes: bytes | None = None,
+        pfx_password: str | None = None,
+    ):
         self.ip = ip
         self.domain = domain
         self.username = username
         self.password = password
         self.config = config
         self.use_ssl = use_ssl
+        self.ccache_bytes = ccache_bytes
+        self.pfx_bytes = pfx_bytes
+        self.pfx_password = pfx_password
 
         self.conn = None
         self.server = None
@@ -35,7 +47,70 @@ class LdapSession:
         self.auth_type = "SIMPLE"
         self.base_dn = domain_to_dn(domain)
 
+        # Temp material cleaned up in close()
+        self._ccache_path: str | None = None
+        self._cert_path: str | None = None
+        self._key_path: str | None = None
+
+    def _open_via_ccache(self) -> "LdapSession":
+        try:
+            self._ccache_path = write_temp_ccache(self.ccache_bytes)
+        except Exception as exc:
+            raise LdapSessionError(f"Could not stage ccache file: {exc}", code=400) from exc
+
+        try:
+            conn = _open_ldap_connection_gssapi(
+                ldap_target=self.ip,
+                ccache_path=self._ccache_path,
+                use_ssl=self.use_ssl,
+            )
+        except (LDAPInvalidCredentialsResult, LDAPBindError) as exc:
+            raise LdapSessionError(
+                f"Kerberos ccache bind rejected by AD: {exc}", code=401
+            ) from exc
+        except Exception as exc:
+            raise LdapSessionError(f"Kerberos ccache bind failed: {exc}", code=503) from exc
+
+        self.conn = conn
+        self.server = conn.server
+        self.auth_type = "GSSAPI"
+        self.bind_user = self.username or "(ccache)"
+        return self
+
+    def _open_via_pfx(self) -> "LdapSession":
+        try:
+            cert_pem, key_pem = pfx_bytes_to_pem(self.pfx_bytes, self.pfx_password)
+            self._cert_path, self._key_path = write_temp_pem_pair(cert_pem, key_pem)
+        except ValueError as exc:
+            raise LdapSessionError(str(exc), code=400) from exc
+        except Exception as exc:
+            raise LdapSessionError(f"Could not stage PFX certificate: {exc}", code=400) from exc
+
+        try:
+            conn = _open_ldap_connection_certificate(
+                ldap_target=self.ip,
+                cert_file=self._cert_path,
+                key_file=self._key_path,
+            )
+        except (LDAPInvalidCredentialsResult, LDAPBindError) as exc:
+            raise LdapSessionError(
+                f"Certificate bind rejected by AD: {exc}", code=401
+            ) from exc
+        except Exception as exc:
+            raise LdapSessionError(f"Certificate bind failed: {exc}", code=503) from exc
+
+        self.conn = conn
+        self.server = conn.server
+        self.auth_type = "EXTERNAL"
+        self.bind_user = self.username or "(certificate)"
+        return self
+
     def open(self) -> "LdapSession":
+        if self.ccache_bytes:
+            return self._open_via_ccache()
+        if self.pfx_bytes:
+            return self._open_via_pfx()
+
         secret = self.password
         if is_ntlm_hash(self.password):
             secret = f"00000000000000000000000000000000:{self.password}"
@@ -105,6 +180,8 @@ class LdapSession:
             finally:
                 self.conn = None
                 self.server = None
+        cleanup_temp_paths(self._ccache_path, self._cert_path, self._key_path)
+        self._ccache_path = self._cert_path = self._key_path = None
 
     def __enter__(self) -> "LdapSession":
         return self.open()

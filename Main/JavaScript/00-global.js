@@ -194,7 +194,55 @@ async function copyTextValue(text, label) {
   }
 }
 
+function _readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result || '';
+      const b64 = String(result).split(',')[1] || '';
+      resolve(b64);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleCcacheFileSelect(evt) {
+  const file = evt.target.files && evt.target.files[0];
+  const nameEl = document.getElementById('ccache-filename');
+  if (!file) return;
+  try {
+    const b64 = await _readFileAsBase64(file);
+    state._ccacheName = file.name;
+    state._ccacheData = b64;
+    if (nameEl) nameEl.textContent = file.name;
+    showToast(`Loaded ccache: ${file.name}`, 'success');
+    addLog(`Kerberos ccache file loaded: ${file.name}`, 'info');
+  } catch (err) {
+    showToast('Failed to read ccache file', 'error');
+    addLog(`ccache read error: ${err.message}`, 'error');
+  }
+}
+
+async function handlePfxFileSelect(evt) {
+  const file = evt.target.files && evt.target.files[0];
+  const nameEl = document.getElementById('pfx-filename');
+  if (!file) return;
+  try {
+    const b64 = await _readFileAsBase64(file);
+    state._pfxName = file.name;
+    state._pfxData = b64;
+    if (nameEl) nameEl.textContent = file.name;
+    showToast(`Loaded PFX: ${file.name}`, 'success');
+    addLog(`PFX certificate loaded: ${file.name}`, 'info');
+  } catch (err) {
+    showToast('Failed to read PFX file', 'error');
+    addLog(`PFX read error: ${err.message}`, 'error');
+  }
+}
+
 function buildEnumerationPayload() {
+
   if (state.mode === 'local' || state.protocol === 'local') {
     return { mode: 'local' };
   }
@@ -227,8 +275,13 @@ function buildEnumerationPayload() {
     username:  document.getElementById('f-user')?.value.trim()   || state.user,
     password:  finalPass,
     hash:      finalHash,
+    ccache_filename: state._ccacheName || null,
+    ccache_data:     state._ccacheData || null,
+    pfx_filename:    state._pfxName || null,
+    pfx_data:        state._pfxData || null,
   };
 }
+
 
 
 document.addEventListener('submit', (e) => e.preventDefault(), true);

@@ -513,5 +513,4 @@ async function _pollLifecycle() {
   }
 }
 
-// Fast 2-second poll on page load until backend answers, then normal pingApi takes over
 _lifecyclePollId = setInterval(_pollLifecycle, 2000);

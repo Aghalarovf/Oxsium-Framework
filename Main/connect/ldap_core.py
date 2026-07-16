@@ -420,6 +420,92 @@ def _paged_count(conn: Connection, base_dn: str, ldap_filter: str) -> int:
     return count
 
 
+def _open_ldap_connection_gssapi(
+    *,
+    ldap_target: str,
+    ccache_path: str,
+    use_ssl: bool,
+) -> Connection:
+    """Bind using an existing Kerberos ticket cache (SASL GSSAPI) instead of
+    a username/password. KRB5CCNAME must point at the supplied ccache file
+    before ldap3/gssapi opens the security context."""
+    from ldap3 import SASL, GSSAPI
+
+    prev_ccache = os.environ.get("KRB5CCNAME")
+    os.environ["KRB5CCNAME"] = ccache_path
+    try:
+        port = 636 if use_ssl else 389
+        label = "LDAPS:636 (GSSAPI)" if use_ssl else "LDAP:389 (GSSAPI)"
+        server = Server(
+            ldap_target,
+            port=port,
+            use_ssl=use_ssl,
+            get_info=ALL,
+            connect_timeout=Config.LDAP_CONNECT_TIMEOUT,
+        )
+        conn = Connection(
+            server,
+            authentication=SASL,
+            sasl_mechanism=GSSAPI,
+            auto_bind=AUTO_BIND_NO_TLS,
+            receive_timeout=Config.LDAP_RECEIVE_TIMEOUT,
+        )
+        logger.info("LDAP connection established [%s] target=%s", label, ldap_target)
+        return conn
+    except (LDAPInvalidCredentialsResult, LDAPBindError):
+        raise
+    except Exception as exc:
+        logger.warning("LDAP GSSAPI connect error target=%s: %s", ldap_target, exc)
+        raise
+    finally:
+        if prev_ccache is None:
+            os.environ.pop("KRB5CCNAME", None)
+        else:
+            os.environ["KRB5CCNAME"] = prev_ccache
+
+
+def _open_ldap_connection_certificate(
+    *,
+    ldap_target: str,
+    cert_file: str,
+    key_file: str,
+) -> Connection:
+    """Bind over LDAPS using a client certificate (from a supplied PFX) for
+    mutual-TLS. Requires the DC to accept certificate-mapped authentication
+    (Schannel / SASL EXTERNAL)."""
+    from ldap3 import Tls, SASL, EXTERNAL
+    import ssl as _ssl
+
+    tls = Tls(
+        local_certificate_file=cert_file,
+        local_private_key_file=key_file,
+        validate=_ssl.CERT_NONE,
+    )
+    try:
+        server = Server(
+            ldap_target,
+            port=636,
+            use_ssl=True,
+            tls=tls,
+            get_info=ALL,
+            connect_timeout=Config.LDAP_CONNECT_TIMEOUT,
+        )
+        conn = Connection(
+            server,
+            authentication=SASL,
+            sasl_mechanism=EXTERNAL,
+            auto_bind=AUTO_BIND_NO_TLS,
+            receive_timeout=Config.LDAP_RECEIVE_TIMEOUT,
+        )
+        logger.info("LDAP connection established [LDAPS:636 (cert/EXTERNAL)] target=%s", ldap_target)
+        return conn
+    except (LDAPInvalidCredentialsResult, LDAPBindError):
+        raise
+    except Exception as exc:
+        logger.warning("LDAP certificate connect error target=%s: %s", ldap_target, exc)
+        raise
+
+
 def _open_ldap_connection(
     *,
     ldap_target: str,

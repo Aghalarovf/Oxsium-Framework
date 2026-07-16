@@ -180,6 +180,10 @@
               <label class="form-label">Username</label>
               <input class="form-input" id="f-user" type="text" placeholder="administrator" autocomplete="off" spellcheck="false">
               <span class="field-error" id="err-user">Username is required</span>
+              <label class="form-label" style="margin-top:8px;">.CCACHE</label>
+              <input type="file" id="f-ccache-file" accept=".ccache" style="display:none" onchange="handleCcacheFileSelect(event)">
+              <button class="btn-ssl" id="btn-ccache" type="button" onclick="document.getElementById('f-ccache-file').click()" title="Load a Kerberos ccache file" style="height:26px;font-size:11px;padding:0 10px;">Browse...</button>
+              <span id="ccache-filename" style="font-size:10px;color:var(--text-dim);margin-top:2px;"></span>
             </div>
             <div class="form-group">
               <label class="form-label">Password</label>
@@ -193,6 +197,10 @@
                 </button>
               </div>
               <span class="field-error" id="err-pass">Password or NTLM hash is required</span>
+              <label class="form-label" style="margin-top:8px;">.PFX</label>
+              <input type="file" id="f-pfx-file" accept=".pfx,.p12" style="display:none" onchange="handlePfxFileSelect(event)">
+              <button class="btn-ssl" id="btn-pfx" type="button" onclick="document.getElementById('f-pfx-file').click()" title="Load a PFX/PKCS12 certificate" style="height:26px;font-size:11px;padding:0 10px;">Browse...</button>
+              <span id="pfx-filename" style="font-size:10px;color:var(--text-dim);margin-top:2px;"></span>
             </div>
           </div>
         </div>
