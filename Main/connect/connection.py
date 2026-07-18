@@ -1380,6 +1380,7 @@ def connect():
                     ccache_bytes=ccache_bytes,
                     pfx_bytes=pfx_bytes,
                     pfx_password=pfx_password,
+                    dc_host=target,
                 ).open()
                 result = {
                     "success":          True,
@@ -1456,6 +1457,7 @@ def connect():
                         ccache_bytes=ccache_bytes,
                         pfx_bytes=pfx_bytes,
                         pfx_password=pfx_password,
+                        dc_host=target,
                     ).open()
                     logger.info("/api/connect: shared LDAP session established on %s", target)
                     break
