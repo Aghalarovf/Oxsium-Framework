@@ -426,13 +426,39 @@ def _open_ldap_connection_gssapi(
     ldap_target: str,
     ccache_path: str,
     use_ssl: bool,
+    dc_fqdn: str | None = None,
 ) -> Connection:
-    """Bind using an existing Kerberos ticket cache (SASL GSSAPI) instead of
-    a username/password. KRB5CCNAME must point at the supplied ccache file
-    before ldap3/gssapi opens the security context."""
+    """Bind using an existing Kerberos ticket cache (SASL GSSAPI).
+
+    ldap_target  – host/IP that the TCP connection goes to (may be an IP).
+    dc_fqdn      – FQDN used to build the Kerberos SPN (ldap/<dc_fqdn>).
+                   Must match what the KDC has registered.  If omitted,
+                   ldap_target is used as the SPN host, which fails whenever
+                   ldap_target is a bare IP address.
+    ccache_path  – path to the Kerberos ccache file.
+
+    Two things are required for a successful GSSAPI bind:
+      1. The SPN must be a resolvable FQDN, not an IP address.
+         We pass it explicitly via sasl_credentials=(spn_host,) so ldap3's
+         kerberos.py uses that value instead of connection.server.host.
+      2. The gssapi library must read tickets from our ccache file, not from
+         whatever KRB5CCNAME the calling process inherited.
+         We pass cred_store={"ccache": "FILE:<path>"} so gssapi.Credentials
+         opens our file directly; the env-var fallback is kept as a backup.
+    """
     from ldap3 import SASL, GSSAPI, AUTO_BIND_NONE
     from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
 
+    # The SPN host: prefer the explicit FQDN, fall back to ldap_target.
+    spn_host = (dc_fqdn or "").strip() or ldap_target
+
+    logger.debug(
+        "GSSAPI bind attempt: tcp_target=%s spn_host=%s ccache=%s",
+        ldap_target, spn_host, ccache_path,
+    )
+
+    # Keep env-var set as a belt-and-braces fallback (some gssapi builds
+    # ignore cred_store and still read KRB5CCNAME from the environment).
     prev_ccache = os.environ.get("KRB5CCNAME")
     os.environ["KRB5CCNAME"] = ccache_path
     try:
@@ -451,23 +477,36 @@ def _open_ldap_connection_gssapi(
             sasl_mechanism=GSSAPI,
             auto_bind=AUTO_BIND_NONE,
             receive_timeout=Config.LDAP_RECEIVE_TIMEOUT,
+            # sasl_credentials[0]: hostname for SPN construction inside ldap3's
+            # kerberos.py (_common_determine_target_name). Without this, ldap3
+            # uses connection.server.host which is ldap_target — fine for FQDNs
+            # but wrong for IP addresses (Kerberos has no SPN for an IP).
+            sasl_credentials=(spn_host,),
+            # cred_store: tells gssapi.Credentials to read from our ccache
+            # file directly instead of relying on the process-level KRB5CCNAME.
+            cred_store={"ccache": f"FILE:{ccache_path}"},
         )
-        # AUTO_BIND_NONE means we must call bind() ourselves so that the
-        # GSSAPI/Kerberos handshake actually takes place. Without this the
-        # security context is never established and every subsequent LDAP
-        # operation silently fails or raises "Server not found in Kerberos
-        # database" because ldap3 never sent the SASL token to the DC.
+        # AUTO_BIND_NONE → we call bind() ourselves so the GSSAPI handshake
+        # actually executes. ldap3 only sends the SASL token on an explicit
+        # bind() call; skipping it leaves the context unestablished and every
+        # subsequent LDAP operation silently fails.
         if not conn.bind():
             raise LDAPBindError(
-                f"GSSAPI bind returned False for {ldap_target}: {conn.result}"
+                f"GSSAPI bind returned False for {ldap_target} "
+                f"(spn_host={spn_host}): {conn.result}"
             )
-        logger.info("LDAP connection established [%s] target=%s", label, ldap_target)
+        logger.info(
+            "LDAP connection established [%s] tcp=%s spn_host=%s",
+            label, ldap_target, spn_host,
+        )
         return conn
     except (LDAPInvalidCredentialsResult, LDAPBindError):
         raise
     except Exception as exc:
-        logger.warning("LDAP GSSAPI connect error target=%s spn=ldap/%s ccache=%s: %s",
-                       ldap_target, ldap_target, ccache_path, exc, exc_info=True)
+        logger.warning(
+            "LDAP GSSAPI connect error tcp=%s spn_host=%s ccache=%s: %s",
+            ldap_target, spn_host, ccache_path, exc, exc_info=True,
+        )
         raise
     finally:
         if prev_ccache is None:

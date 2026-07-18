@@ -69,39 +69,42 @@ class LdapSession:
         return self.dc_host or self.ip
 
     def _open_via_ccache(self) -> "LdapSession":
-        if not self.dc_host:
-            raise LdapSessionError(
-                "A Domain Controller hostname is required for Kerberos (ccache) "
-                "authentication. Kerberos resolves its service principal name "
-                "(ldap/<hostname>) from a hostname, not an IP address — supply "
-                "the DC's FQDN (e.g. dc01.corp.local).",
-                code=400,
-            )
-
         try:
             self._ccache_path = write_temp_ccache(self.ccache_bytes)
         except Exception as exc:
             raise LdapSessionError(f"Could not stage ccache file: {exc}", code=400) from exc
 
+        # TCP bağlantısı üçün ip (və ya dc_host varsa o), SPN üçün isə
+        # mütləq dc_host (FQDN) lazımdır. Hər ikisini ayrı-ayrı veririk:
+        # _open_ldap_connection_gssapi ldap_target-ə TCP açır,
+        # dc_fqdn-dən isə "ldap/<dc_fqdn>" SPN-ini qurur.
+        tcp_target = self.ip           # TCP bağlantısı hara gedir
+        spn_host   = self.dc_host      # SPN üçün FQDN (None ola bilər)
+
+        logger.debug(
+            "GSSAPI ccache bind: tcp_target=%s spn_host=%s ccache=%s",
+            tcp_target, spn_host, self._ccache_path,
+        )
+
         try:
             conn = _open_ldap_connection_gssapi(
-                ldap_target=self._gssapi_target,
+                ldap_target=tcp_target,
                 ccache_path=self._ccache_path,
                 use_ssl=self.use_ssl,
+                dc_fqdn=spn_host,
             )
         except (LDAPInvalidCredentialsResult, LDAPBindError) as exc:
             logger.error(
-                "GSSAPI ccache bind rejected by AD | target=%s ccache=%s: %s",
-                self._gssapi_target, self._ccache_path, exc, exc_info=True,
+                "GSSAPI ccache bind rejected by AD | tcp=%s spn_host=%s ccache=%s: %s",
+                tcp_target, spn_host, self._ccache_path, exc, exc_info=True,
             )
             raise LdapSessionError(
                 f"Kerberos ccache bind rejected by AD: {exc}", code=401
             ) from exc
         except Exception as exc:
             logger.error(
-                "GSSAPI ccache bind failed | target=%s ccache=%s | "
-                "%s: %s",
-                self._gssapi_target, self._ccache_path,
+                "GSSAPI ccache bind failed | tcp=%s spn_host=%s ccache=%s | %s: %s",
+                tcp_target, spn_host, self._ccache_path,
                 type(exc).__name__, exc, exc_info=True,
             )
             raise LdapSessionError(f"Kerberos ccache bind failed: {exc}", code=503) from exc

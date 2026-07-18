@@ -55,6 +55,11 @@ _db_build_lock  = threading.Lock()
 _DB_BUILD_DELAY = 3.0
 
 
+def _is_ip(v: str) -> bool:
+    """Return True if v looks like a bare IPv4 address (not a hostname)."""
+    return bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", str(v or "").strip()))
+
+
 def _run_sqlite_engine() -> None:
 
     if _SQLITE_ENGINE_PATH is None:
@@ -1365,29 +1370,42 @@ def connect():
         # Do the initial probe with the same LdapSession path used for the
         # shared session instead, so ccache/PFX creds never touch the
         # password-based bind code.
-        probe_targets = _build_ldap_targets({
-            "protocol": proto, "ip": ip, "domain": domain,
-            "ldap_host": req.get("ldap_host", ""), "dc": req.get("dc", ""),
-        })
+        # Kerberos üçün SPN mütləq FQDN olmalıdır — IP ilə KDC SPN tapa bilmir.
+        # TCP bağlantısı həmişə istifadəçinin daxil etdiyi `ip`-ə gedir.
+        # SPN üçün isə sıraya görə sınayırıq: ldap_host → dc → domain.
+        # IP heç vaxt SPN host kimi istifadə edilmir.
+        _fqdn_candidates: list[str] = []
+        for _candidate in (
+            req.get("ldap_host", ""),
+            req.get("dc", ""),
+            domain,
+        ):
+            _v = str(_candidate or "").strip()
+            if _v and not _is_ip(_v) and _v not in _fqdn_candidates:
+                _fqdn_candidates.append(_v)
+
+        # Heç FQDN yoxdursa ip-i fallback kimi sına (uğursuz olacaq, amma xəta mesajı görünəcək)
+        probe_spn_hosts: list[str | None] = _fqdn_candidates or [None]
+
         probe_error = None
         result = None
-        for target in probe_targets:
+        for spn_host in probe_spn_hosts:
             probe_session = None
             try:
                 probe_session = LdapSession(
-                    target, domain, username, "", Config,
+                    ip, domain, username, "", Config,
                     use_ssl=use_ssl,
                     ccache_bytes=ccache_bytes,
                     pfx_bytes=pfx_bytes,
                     pfx_password=pfx_password,
-                    dc_host=target,
+                    dc_host=spn_host,
                 ).open()
                 result = {
                     "success":          True,
                     "domain":           domain,
                     "username":         username.split("\\")[-1].split("@")[0].upper(),
-                    "dc":               target,
-                    "dnsHostName":      target,
+                    "dc":               spn_host or ip,
+                    "dnsHostName":      spn_host or ip,
                     "os_version":       "Unknown",
                     "domain_level":     "Unknown",
                     "kerberos_enabled": True,
@@ -1403,8 +1421,8 @@ def connect():
                 probe_error = exc
                 cause = exc.__cause__
                 logger.warning(
-                    "/api/connect: alt-auth probe failed on %s: %s%s",
-                    target, exc,
+                    "/api/connect: alt-auth probe failed (tcp=%s spn_host=%s): %s%s",
+                    ip, spn_host, exc,
                     f" (caused by {type(cause).__name__}: {cause})" if cause else "",
                     exc_info=True,
                 )
@@ -1453,24 +1471,32 @@ def connect():
 
         shared_session = None
         try:
-            session_targets = _build_ldap_targets(enum_req)
+            # Kerberos/ccache üçün: TCP həmişə `ip`-ə, SPN isə FQDN-ə gedir.
+            # result["dc"] probe mərhələsində seçilmiş FQDN-dir (spn_host or domain).
+            _shared_dc_fqdn = result.get("dc") or domain or None
+            if _shared_dc_fqdn and _is_ip(_shared_dc_fqdn):
+                _shared_dc_fqdn = domain or None
+
             last_session_error = None
-            for target in session_targets:
-                try:
-                    shared_session = LdapSession(
-                        target, domain, username, auth_secret, Config,
-                        use_ssl=use_ssl,
-                        ccache_bytes=ccache_bytes,
-                        pfx_bytes=pfx_bytes,
-                        pfx_password=pfx_password,
-                        dc_host=target,
-                    ).open()
-                    logger.info("/api/connect: shared LDAP session established on %s", target)
-                    break
-                except LdapSessionError as exc:
-                    last_session_error = exc
-                    logger.warning("/api/connect: shared session bind failed on %s: %s", target, exc)
-                    continue
+            try:
+                shared_session = LdapSession(
+                    ip, domain, username, auth_secret, Config,
+                    use_ssl=use_ssl,
+                    ccache_bytes=ccache_bytes,
+                    pfx_bytes=pfx_bytes,
+                    pfx_password=pfx_password,
+                    dc_host=_shared_dc_fqdn,
+                ).open()
+                logger.info(
+                    "/api/connect: shared LDAP session established tcp=%s spn_host=%s",
+                    ip, _shared_dc_fqdn,
+                )
+            except LdapSessionError as exc:
+                last_session_error = exc
+                logger.warning(
+                    "/api/connect: shared session bind failed tcp=%s spn_host=%s: %s",
+                    ip, _shared_dc_fqdn, exc,
+                )
             if shared_session is not None:
                 session_manager.set_active_session(shared_session, ip, domain, username)
             else:
