@@ -430,7 +430,8 @@ def _open_ldap_connection_gssapi(
     """Bind using an existing Kerberos ticket cache (SASL GSSAPI) instead of
     a username/password. KRB5CCNAME must point at the supplied ccache file
     before ldap3/gssapi opens the security context."""
-    from ldap3 import SASL, GSSAPI
+    from ldap3 import SASL, GSSAPI, AUTO_BIND_NONE
+    from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
 
     prev_ccache = os.environ.get("KRB5CCNAME")
     os.environ["KRB5CCNAME"] = ccache_path
@@ -448,9 +449,18 @@ def _open_ldap_connection_gssapi(
             server,
             authentication=SASL,
             sasl_mechanism=GSSAPI,
-            auto_bind=AUTO_BIND_NO_TLS,
+            auto_bind=AUTO_BIND_NONE,
             receive_timeout=Config.LDAP_RECEIVE_TIMEOUT,
         )
+        # AUTO_BIND_NONE means we must call bind() ourselves so that the
+        # GSSAPI/Kerberos handshake actually takes place. Without this the
+        # security context is never established and every subsequent LDAP
+        # operation silently fails or raises "Server not found in Kerberos
+        # database" because ldap3 never sent the SASL token to the DC.
+        if not conn.bind():
+            raise LDAPBindError(
+                f"GSSAPI bind returned False for {ldap_target}: {conn.result}"
+            )
         logger.info("LDAP connection established [%s] target=%s", label, ldap_target)
         return conn
     except (LDAPInvalidCredentialsResult, LDAPBindError):
