@@ -426,35 +426,12 @@ def _open_ldap_connection_gssapi(
     ldap_target: str,
     ccache_path: str,
     use_ssl: bool,
-    realm: str | None = None,
 ) -> Connection:
-    """Bind using an existing Kerberos ticket cache (SASL GSSAPI).
-
-    ldap_target must be the DC's FQDN (e.g. dc01.corp.local) — the GUI
-    enforces this via the mandatory Domain Controller field when a ccache
-    is loaded.
-
-    Why we build the GSSAPI Name explicitly:
-    ldap3's default hostbased_service NameType converts 'ldap@dc01.corp.local'
-    to 'ldap/corp.local' (drops the dc01 prefix), so the KDC cannot find the
-    SPN and returns "Server not found in Kerberos database".  Using
-    krb5_nt_principal_name sends the full 'ldap/dc01.corp.local@REALM'
-    principal verbatim.
-    """
-    import gssapi as _gssapi
+    """Bind using an existing Kerberos ticket cache (SASL GSSAPI) instead of
+    a username/password. KRB5CCNAME must point at the supplied ccache file
+    before ldap3/gssapi opens the security context."""
     from ldap3 import SASL, GSSAPI, AUTO_BIND_NONE
     from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
-
-    # Realm: caller may pass it explicitly; otherwise derive from ccache.
-    if not realm:
-        try:
-            cc = _gssapi.Credentials(usage="initiate")
-            realm = str(cc.name).split("@", 1)[-1]
-        except Exception:
-            realm = ldap_target.split(".", 1)[-1].upper()
-
-    spn = f"ldap/{ldap_target}@{realm}"
-    gss_name = _gssapi.Name(spn, _gssapi.NameType.krb5_nt_principal_name)
 
     prev_ccache = os.environ.get("KRB5CCNAME")
     os.environ["KRB5CCNAME"] = ccache_path
@@ -472,20 +449,25 @@ def _open_ldap_connection_gssapi(
             server,
             authentication=SASL,
             sasl_mechanism=GSSAPI,
-            sasl_credentials=(gss_name,),
             auto_bind=AUTO_BIND_NONE,
             receive_timeout=Config.LDAP_RECEIVE_TIMEOUT,
         )
+        # AUTO_BIND_NONE means we must call bind() ourselves so that the
+        # GSSAPI/Kerberos handshake actually takes place. Without this the
+        # security context is never established and every subsequent LDAP
+        # operation silently fails or raises "Server not found in Kerberos
+        # database" because ldap3 never sent the SASL token to the DC.
         if not conn.bind():
             raise LDAPBindError(
                 f"GSSAPI bind returned False for {ldap_target}: {conn.result}"
             )
-        logger.info("LDAP connection established [%s] target=%s spn=%s", label, ldap_target, spn)
+        logger.info("LDAP connection established [%s] target=%s", label, ldap_target)
         return conn
     except (LDAPInvalidCredentialsResult, LDAPBindError):
         raise
     except Exception as exc:
-        logger.warning("LDAP GSSAPI connect error target=%s spn=%s: %s", ldap_target, spn, exc)
+        logger.warning("LDAP GSSAPI connect error target=%s spn=ldap/%s ccache=%s: %s",
+                       ldap_target, ldap_target, ccache_path, exc, exc_info=True)
         raise
     finally:
         if prev_ccache is None:

@@ -1401,7 +1401,13 @@ def connect():
                 break
             except LdapSessionError as exc:
                 probe_error = exc
-                logger.warning("/api/connect: alt-auth probe failed on %s: %s", target, exc)
+                cause = exc.__cause__
+                logger.warning(
+                    "/api/connect: alt-auth probe failed on %s: %s%s",
+                    target, exc,
+                    f" (caused by {type(cause).__name__}: {cause})" if cause else "",
+                    exc_info=True,
+                )
                 continue
             finally:
                 if probe_session is not None:

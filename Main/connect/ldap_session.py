@@ -90,10 +90,20 @@ class LdapSession:
                 use_ssl=self.use_ssl,
             )
         except (LDAPInvalidCredentialsResult, LDAPBindError) as exc:
+            logger.error(
+                "GSSAPI ccache bind rejected by AD | target=%s ccache=%s: %s",
+                self._gssapi_target, self._ccache_path, exc, exc_info=True,
+            )
             raise LdapSessionError(
                 f"Kerberos ccache bind rejected by AD: {exc}", code=401
             ) from exc
         except Exception as exc:
+            logger.error(
+                "GSSAPI ccache bind failed | target=%s ccache=%s | "
+                "%s: %s",
+                self._gssapi_target, self._ccache_path,
+                type(exc).__name__, exc, exc_info=True,
+            )
             raise LdapSessionError(f"Kerberos ccache bind failed: {exc}", code=503) from exc
 
         self.conn = conn
