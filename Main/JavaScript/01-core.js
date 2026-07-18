@@ -564,6 +564,24 @@ function validate() {
   if (hasCcache || hasPfx) {
     passEl.classList.remove('error'); hashEl?.classList.remove('error');
     passErr.classList.remove('show'); hashErr?.classList.remove('show');
+
+    if (hasCcache) {
+      // Kerberos/GSSAPI resolves its SPN (ldap/<hostname>) against a
+      // hostname, not an IP — without an explicit DC hostname the bind
+      // will fail with "Server not found in Kerberos database" even when
+      // the ccache and realm config are correct. Enforce it here.
+      const dcEl  = document.getElementById('f-dc');
+      const errEl = document.getElementById('err-dc');
+      const dcVal = (dcEl?.value || '').trim();
+      if (!dcVal) {
+        dcEl?.classList.add('error');
+        errEl?.classList.add('show');
+        ok = false;
+      } else {
+        dcEl?.classList.remove('error');
+        errEl?.classList.remove('show');
+      }
+    }
     return ok;
   }
 

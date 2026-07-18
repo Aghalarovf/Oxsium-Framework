@@ -109,9 +109,10 @@ function clearForm() {
   const pfxLbl    = document.getElementById('pfx-filename');
   if (ccacheLbl) ccacheLbl.textContent = '';
   if (pfxLbl) pfxLbl.textContent = '';
-  ['err-domain','err-ip','err-user','err-pass','err-hash'].forEach(id =>
+  ['err-domain','err-ip','err-user','err-pass','err-hash','err-dc'].forEach(id =>
     document.getElementById(id).classList.remove('show')
   );
+  if (typeof updateDcRequiredState === 'function') updateDcRequiredState();
   updateAuthInputLockState();
   addLog('Form cleared', 'info');
 

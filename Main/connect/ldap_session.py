@@ -29,7 +29,7 @@ class LdapSession:
     def __init__(
         self, ip, domain, username, password, config, use_ssl: bool = False,
         ccache_bytes: bytes | None = None, pfx_bytes: bytes | None = None,
-        pfx_password: str | None = None,
+        pfx_password: str | None = None, dc_host: str | None = None,
     ):
         self.ip = ip
         self.domain = domain
@@ -40,6 +40,12 @@ class LdapSession:
         self.ccache_bytes = ccache_bytes
         self.pfx_bytes = pfx_bytes
         self.pfx_password = pfx_password
+
+        # Explicit DC hostname (e.g. dc01.corp.local), as opposed to `ip`
+        # which may be a bare IP address. Kerberos/GSSAPI resolves its SPN
+        # (ldap/<hostname>) against a hostname, so any GSSAPI bind must
+        # target dc_host rather than ip whenever one was supplied.
+        self.dc_host = (dc_host or "").strip() or None
 
         self.conn = None
         self.server = None
@@ -52,7 +58,26 @@ class LdapSession:
         self._cert_path: str | None = None
         self._key_path: str | None = None
 
+    @property
+    def _gssapi_target(self) -> str:
+        """Host used for Kerberos/GSSAPI SASL binds. Must be a resolvable
+        hostname (not a bare IP) so the KDC can find the matching
+        ldap/<hostname> service principal. Falls back to `ip` only if no
+        explicit DC hostname was provided (this will fail Kerberos lookups
+        against most real environments, but preserves prior behavior for
+        callers that already pass a hostname in `ip`)."""
+        return self.dc_host or self.ip
+
     def _open_via_ccache(self) -> "LdapSession":
+        if not self.dc_host:
+            raise LdapSessionError(
+                "A Domain Controller hostname is required for Kerberos (ccache) "
+                "authentication. Kerberos resolves its service principal name "
+                "(ldap/<hostname>) from a hostname, not an IP address — supply "
+                "the DC's FQDN (e.g. dc01.corp.local).",
+                code=400,
+            )
+
         try:
             self._ccache_path = write_temp_ccache(self.ccache_bytes)
         except Exception as exc:
@@ -60,7 +85,7 @@ class LdapSession:
 
         try:
             conn = _open_ldap_connection_gssapi(
-                ldap_target=self.ip,
+                ldap_target=self._gssapi_target,
                 ccache_path=self._ccache_path,
                 use_ssl=self.use_ssl,
             )
@@ -88,7 +113,7 @@ class LdapSession:
 
         try:
             conn = _open_ldap_connection_certificate(
-                ldap_target=self.ip,
+                ldap_target=self._gssapi_target,
                 cert_file=self._cert_path,
                 key_file=self._key_path,
             )

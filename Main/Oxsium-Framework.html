@@ -157,8 +157,9 @@
 
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Domain Controller (Optional)</label>
-              <input class="form-input" id="f-dc" type="text" placeholder="dc01.corp.local or 192.168.1.5" autocomplete="off" spellcheck="false">
+              <label class="form-label" id="lbl-dc">Domain Controller (Optional)</label>
+              <input class="form-input" id="f-dc" type="text" placeholder="dc01.corp.local" autocomplete="off" spellcheck="false" oninput="updateDcRequiredState()">
+              <span class="field-error" id="err-dc">Domain Controller hostname is required for Kerberos (ccache) authentication</span>
             </div>
             <div class="form-group">
               <label class="form-label">NTLM Hash (Optional)</label>

@@ -218,9 +218,38 @@ async function handleCcacheFileSelect(evt) {
     if (nameEl) nameEl.textContent = file.name;
     showToast(`Loaded ccache: ${file.name}`, 'success');
     addLog(`Kerberos ccache file loaded: ${file.name}`, 'info');
+    updateDcRequiredState();
   } catch (err) {
     showToast('Failed to read ccache file', 'error');
     addLog(`ccache read error: ${err.message}`, 'error');
+  }
+}
+
+// Kerberos (GSSAPI) SASL bind resolves its SPN from a hostname, not an IP —
+// so once a ccache is loaded, the Domain Controller field stops being
+// optional. This keeps the label/error state in sync as the user types.
+function updateDcRequiredState() {
+  const lblEl = document.getElementById('lbl-dc');
+  const dcEl  = document.getElementById('f-dc');
+  const errEl = document.getElementById('err-dc');
+  if (!lblEl || !dcEl) return;
+
+  const hasCcache = !!state._ccacheData;
+  const dcVal = dcEl.value.trim();
+
+  if (hasCcache) {
+    lblEl.textContent = 'Domain Controller (Required for Kerberos)';
+    if (!dcVal) {
+      dcEl.classList.add('error');
+      errEl?.classList.add('show');
+    } else {
+      dcEl.classList.remove('error');
+      errEl?.classList.remove('show');
+    }
+  } else {
+    lblEl.textContent = 'Domain Controller (Optional)';
+    dcEl.classList.remove('error');
+    errEl?.classList.remove('show');
   }
 }
 
