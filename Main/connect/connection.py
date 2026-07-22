@@ -1134,14 +1134,24 @@ def _run_full_collector_pipeline(enum_req: dict, shared_session: "LdapSession | 
 
     _clear_domain_object_dir()
 
-    session = shared_session
-
     # ccache / PFX məlumatlarını enum_req-dən çıxar (pipeline-a ötürülüb)
     _ccache_b64    = enum_req.get("ccache_data")
     _pfx_b64       = enum_req.get("pfx_data")
     _pfx_password  = enum_req.get("pfx_password") or None
     _dc_host       = enum_req.get("dc_host") or None
     _using_alt_auth = bool(_ccache_b64 or _pfx_b64)
+
+    # ccache / PFX auth ilə shared session thread-safe deyil:
+    # ldap3 SYNC strategiyası + KRB5CCNAME prosess-səviyyəli env var
+    # eyni anda birdən çox collector tərəfindən istifadə ediləndə
+    # "Failed" cavabları verir. Bu hallarda pipeline özü fresh session açır.
+    if _using_alt_auth:
+        session = None
+        logger.info(
+            "collector pipeline: ccache/PFX auth — skipping shared session, "            "will open fresh connection per-pipeline"
+        )
+    else:
+        session = shared_session
 
     if session is not None:
         logger.info("collector pipeline: reusing shared LDAP session (ip=%s)", ip)
@@ -1375,6 +1385,11 @@ def connect():
     if proto not in PROTOCOL_HANDLERS:
         return jsonify({"error": f"Unsupported protocol: {proto}"}), 400
 
+    # ccache/PFX branch-da probe loop-u tərəfindən doldurulur.
+    # Parol/hash branch-ında None qalır — shared session qurularkən
+    # result["dc"]-dən götürülür.
+    _shared_dc_fqdn: str | None = None
+
     if proto in ("ldap", "ldaps"):
         ldap_ports = _probe_ldap_ports(ip, timeout=Config.LDAP_CONNECT_TIMEOUT)
         if _ldap_ports_refused(ldap_ports):
@@ -1442,6 +1457,8 @@ def connect():
                     },
                     "protocol_used": "ldaps" if use_ssl else "ldap",
                 }
+                # Probe uğurlu oldu — bu SPN hostunu shared session üçün saxla.
+                _shared_dc_fqdn = spn_host
                 break
             except LdapSessionError as exc:
                 probe_error = exc

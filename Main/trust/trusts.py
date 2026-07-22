@@ -234,7 +234,11 @@ def _parse_forest_trust_info(raw) -> list:
     return []
 
 
-def get_domain_trusts(ip, domain, username, password, config, conn=None, base_dn=None):
+def get_domain_trusts(ip, domain, username, password, config, conn=None, base_dn=None,
+                      ccache_bytes: bytes | None = None,
+                      pfx_bytes: bytes | None = None,
+                      pfx_password: str | None = None,
+                      dc_host: str | None = None):
     owns_connection = conn is None
 
     if not owns_connection:
@@ -242,7 +246,13 @@ def get_domain_trusts(ip, domain, username, password, config, conn=None, base_dn
 
     try:
         if owns_connection:
-            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
+            conn, base_dn = open_standalone_connection(
+                ip, username, password, domain, config,
+                ccache_bytes=ccache_bytes,
+                pfx_bytes=pfx_bytes,
+                pfx_password=pfx_password,
+                dc_host=dc_host,
+            )
 
         attrs = [
             "cn", "distinguishedName", "flatName", "trustPartner",

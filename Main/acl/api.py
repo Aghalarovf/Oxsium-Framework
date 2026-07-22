@@ -117,6 +117,10 @@ def get_domain_acls(
     conn=None,
     base_dn: str | None = None,
     use_ssl: bool = False,
+    ccache_bytes: bytes | None = None,
+    pfx_bytes: bytes | None = None,
+    pfx_password: str | None = None,
+    dc_host: str | None = None,
 ) -> dict:
 
     flt      = acl_filter or AclFilterConfig()
@@ -150,7 +154,12 @@ def get_domain_acls(
             LDAPSocketOpenError,
         )
         if owns_connection:
-            backend = Ldap3Backend(ip, bind_user, password, auth_type, ldap_cfg, use_ssl=use_ssl)
+            backend = Ldap3Backend(
+                ip, bind_user, password, auth_type, ldap_cfg, use_ssl=use_ssl,
+                ccache_bytes=ccache_bytes, pfx_bytes=pfx_bytes,
+                pfx_password=pfx_password, dc_host=dc_host,
+                username=username, domain=domain,
+            )
         else:
             backend = Ldap3Backend.from_connection(conn)
     except LDAPInvalidCredentialsResult as e:
@@ -176,8 +185,14 @@ def get_domain_acls(
                 _guid_map = None
                 pre_errors.append(_capture_error("build_guid_map", base_dn, e))
 
+        # Parallel workers must use the same auth method as the main connection.
+        # When ccache/pfx is active, pass the credentials so each worker opens
+        # a GSSAPI/EXTERNAL connection instead of a passwordless SIMPLE bind.
         conn_factory = None if sequential else make_conn_factory(
             ip, bind_user, password, auth_type, ldap_cfg, use_ssl=use_ssl,
+            ccache_bytes=ccache_bytes, pfx_bytes=pfx_bytes,
+            pfx_password=pfx_password, dc_host=dc_host,
+            username=username, domain=domain,
         )
 
         collector = AclCollector(

@@ -124,22 +124,54 @@ class ImpacketParser:
 class Ldap3Backend:
     def __init__(self, ip: str = None, bind_user: str = None, password: str = None,
                  auth_type: str = None, cfg: LdapConfig = None, use_ssl: bool = False,
-                 _conn=None) -> None:
+                 _conn=None,
+                 # Alt-auth params: pass these when Kerberos ccache or certificate
+                 # (PFX) is in use so every code path — including parallel workers
+                 # spawned by make_conn_factory — authenticates via GSSAPI/EXTERNAL
+                 # rather than falling back to an empty SIMPLE bind (error 49/9).
+                 ccache_bytes: bytes | None = None,
+                 pfx_bytes: bytes | None = None,
+                 pfx_password: str | None = None,
+                 dc_host: str | None = None,
+                 # Separate username / domain required for the alt-auth path because
+                 # LdapSession expects them split; bind_user (user@domain) is kept
+                 # for the SIMPLE/NTLM path.
+                 username: str | None = None,
+                 domain: str | None = None) -> None:
         if _conn is not None:
             self._conn = _conn
             return
 
-        # Route through connect.ldap_core._open_ldap_connection instead of a
-        # raw ldap3.Connection(auto_bind=True) call. That raw call skips
-        # StartTLS-before-bind, so on any DC that enforces LDAP signing it
-        # fails with "automatic bind not successful - strongerAuthRequired"
-        # even though the exact same credentials work fine through
-        # /api/connect (which does StartTLS first, LDAPS fallback second).
-        # This keeps every ACL code path (owns_connection here, and each
-        # parallel worker created via make_conn_factory below) on the same
-        # signing-safe bind logic as the rest of the app.
-        from connect.ldap_core import _open_ldap_connection
         from ldap3.core.exceptions import LDAPBindError, LDAPInvalidCredentialsResult
+
+        # ── Alt-auth (ccache / PFX) path ────────────────────────────────────
+        # open_standalone_connection handles GSSAPI (ccache) and EXTERNAL
+        # (certificate / PFX) authentication via LdapSession.  It never tries
+        # a plaintext SIMPLE bind, so it works even when the DC enforces
+        # LDAP signing / channel binding.
+        if ccache_bytes or pfx_bytes:
+            if not username or not domain:
+                raise ValueError(
+                    "username and domain are required when ccache_bytes or "
+                    "pfx_bytes are provided"
+                )
+            from connect.ldap_core import open_standalone_connection
+            conn, _base_dn = open_standalone_connection(
+                ip, username, password or "", domain, cfg,
+                use_ssl=use_ssl,
+                ccache_bytes=ccache_bytes,
+                pfx_bytes=pfx_bytes,
+                pfx_password=pfx_password,
+                dc_host=dc_host,
+            )
+            self._conn = conn
+            return
+
+        # ── SIMPLE / NTLM path ───────────────────────────────────────────────
+        # Route through _open_ldap_connection (StartTLS-first, LDAPS fallback)
+        # instead of a raw ldap3.Connection(auto_bind=True) call, so DCs that
+        # enforce LDAP signing don't reject the bind.
+        from connect.ldap_core import _open_ldap_connection
 
         self._conn = _open_ldap_connection(
             ldap_target=ip,
@@ -181,7 +213,30 @@ class Ldap3Backend:
 
 
 def make_conn_factory(ip: str, bind_user: str, password: str,
-                       auth_type: str, cfg: LdapConfig, use_ssl: bool = False):
+                       auth_type: str, cfg: LdapConfig, use_ssl: bool = False,
+                       ccache_bytes: bytes | None = None,
+                       pfx_bytes: bytes | None = None,
+                       pfx_password: str | None = None,
+                       dc_host: str | None = None,
+                       username: str | None = None,
+                       domain: str | None = None):
+    """Return a zero-argument callable that opens a fresh Ldap3Backend.
+
+    Each parallel ACL worker calls factory() to get its own connection.
+    When ccache_bytes or pfx_bytes are supplied the factory produces
+    GSSAPI/EXTERNAL connections; without them it falls back to the
+    SIMPLE/NTLM path.  The caller must supply username + domain when
+    passing alt-auth credentials (they are forwarded to open_standalone_connection).
+    """
     def factory() -> Ldap3Backend:
-        return Ldap3Backend(ip, bind_user, password, auth_type, cfg, use_ssl=use_ssl)
+        return Ldap3Backend(
+            ip, bind_user, password, auth_type, cfg,
+            use_ssl=use_ssl,
+            ccache_bytes=ccache_bytes,
+            pfx_bytes=pfx_bytes,
+            pfx_password=pfx_password,
+            dc_host=dc_host,
+            username=username,
+            domain=domain,
+        )
     return factory

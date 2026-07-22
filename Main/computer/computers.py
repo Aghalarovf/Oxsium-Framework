@@ -283,7 +283,12 @@ def _is_potential_privileged_by_rid(primary_group_id: int) -> bool:
 
 
 
-def get_domain_computers(ip, domain, username, password, config, conn=None, base_dn=None):
+def get_domain_computers(ip, domain, username, password, config, conn=None, base_dn=None,
+                         ccache_bytes: bytes | None = None,
+                         pfx_bytes: bytes | None = None,
+                         pfx_password: str | None = None,
+                         dc_host: str | None = None,
+                         use_ssl: bool = False):
     owns_connection = conn is None
 
     if not owns_connection:
@@ -291,7 +296,14 @@ def get_domain_computers(ip, domain, username, password, config, conn=None, base
 
     try:
         if owns_connection:
-            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
+            conn, base_dn = open_standalone_connection(
+                ip, username, password, domain, config,
+                use_ssl=use_ssl,
+                ccache_bytes=ccache_bytes,
+                pfx_bytes=pfx_bytes,
+                pfx_password=pfx_password,
+                dc_host=dc_host,
+            )
 
         laps_attr_names = [
             "ms-Mcs-AdmPwd", "msLAPS-Password", "msLAPS-PasswordHistory",

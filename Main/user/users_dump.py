@@ -1191,7 +1191,12 @@ def _build_user_admin_ctx(
 def get_domain_users(ip: str, domain: str, username: str,
                      password: str, config,
                      proto_output_path: str | None = None,
-                     conn=None, base_dn: str | None = None) -> dict:
+                     conn=None, base_dn: str | None = None,
+                     ccache_bytes: bytes | None = None,
+                     pfx_bytes: bytes | None = None,
+                     pfx_password: str | None = None,
+                     dc_host: str | None = None,
+                     use_ssl: bool = False) -> dict:
 
     owns_connection = conn is None
 
@@ -1204,7 +1209,14 @@ def get_domain_users(ip: str, domain: str, username: str,
 
     try:
         if owns_connection:
-            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
+            conn, base_dn = open_standalone_connection(
+                ip, username, password, domain, config,
+                use_ssl=use_ssl,
+                ccache_bytes=ccache_bytes,
+                pfx_bytes=pfx_bytes,
+                pfx_password=pfx_password,
+                dc_host=dc_host,
+            )
 
 
         admin_group_dns = _resolve_admin_membership(conn, base_dn, page_size)

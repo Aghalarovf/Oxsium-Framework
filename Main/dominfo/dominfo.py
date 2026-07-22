@@ -1383,7 +1383,11 @@ def get_domain_info_unauth(ip: str, domain: str, config) -> dict:
 	return result
 
 
-def get_domain_info(ip: str, domain: str, username: str, password: str, config, conn=None, base_dn=None, use_ssl: bool = False) -> dict:
+def get_domain_info(ip: str, domain: str, username: str, password: str, config, conn=None, base_dn=None, use_ssl: bool = False,
+                    ccache_bytes: bytes | None = None,
+                    pfx_bytes: bytes | None = None,
+                    pfx_password: str | None = None,
+                    dc_host: str | None = None) -> dict:
 	generated_at = datetime.now(timezone.utc).isoformat()
 	base_dn = base_dn or domain_to_dn(domain)
 	owns_connection = conn is None
@@ -1446,7 +1450,22 @@ def get_domain_info(ip: str, domain: str, username: str, password: str, config, 
 
 	try:
 		if owns_connection:
-			conn = _connect(ip, domain, username, password, config, netbios_name=resolved_netbios_name, use_ssl=use_ssl)
+			if ccache_bytes or pfx_bytes:
+				# Alt-auth (Kerberos ccache / certificate): use open_standalone_connection
+				# which routes through LdapSession → GSSAPI/EXTERNAL bind.
+				# _connect() only knows SIMPLE/NTLM, so it must be bypassed here.
+				from connect.ldap_core import open_standalone_connection as _osc
+				from ldap3.core.exceptions import LDAPBindError
+				conn, _base_dn = _osc(
+					ip, username, password or "", domain, config,
+					use_ssl=use_ssl,
+					ccache_bytes=ccache_bytes,
+					pfx_bytes=pfx_bytes,
+					pfx_password=pfx_password,
+					dc_host=dc_host,
+				)
+			else:
+				conn = _connect(ip, domain, username, password, config, netbios_name=resolved_netbios_name, use_ssl=use_ssl)
 	except (LDAPInvalidCredentialsResult, LDAPSocketOpenError, LDAPException, OSError, ValueError) as exc:
 		result["error"] = str(exc)
 		if diagnostics:

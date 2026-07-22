@@ -59,40 +59,69 @@ class Config:
     RATE_LIMIT_DCSYNC:  str = os.getenv("RATE_LIMIT_DCSYNC",  "60 per minute")
 
 
-_LOG_FORMAT  = "%(asctime)s  %(levelname)-8s  %(message)s"
+# ─── Log format ───────────────────────────────────────────────────────────────
+# Faylda modul adı da görünsün ki, xətanın haradan gəldiyi bəlli olsun.
+_LOG_FORMAT_FILE    = "%(asctime)s  %(levelname)-8s  [%(name)s]  %(message)s"
+_LOG_FORMAT_CONSOLE = "%(asctime)s  %(levelname)-8s  %(message)s"
 _LOG_DATEFMT = "%H:%M:%S"
 
 _LOG_FILE_PATH = Path(os.getenv("CONNECTION_LOG_PATH", str(Config.PROJECT_ROOT / "Logs" / "connection.log")))
 _LOG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-_console_handler = logging.StreamHandler()
-_console_handler.setLevel(logging.DEBUG if DEBUG_MODE else logging.CRITICAL)
-_console_handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
-
-logging.basicConfig(handlers=[_console_handler], level=logging.DEBUG)
-
-logging.getLogger("werkzeug").setLevel(logging.ERROR)
-
 if not DEBUG_MODE:
     warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-logger = logging.getLogger("ad_api")
-logger.setLevel(logging.DEBUG)
+# ─── Konsol handler ───────────────────────────────────────────────────────────
+# DEBUG_MODE=false olduqda konsola yalnız CRITICAL səviyyəsi çıxır;
+# bütün digər məlumatlar faylda olur.
+_console_handler = logging.StreamHandler()
+_console_handler.setLevel(logging.DEBUG if DEBUG_MODE else logging.CRITICAL)
+_console_handler.setFormatter(logging.Formatter(_LOG_FORMAT_CONSOLE, datefmt=_LOG_DATEFMT))
 
+# ─── Root logger-i birbaşa konfiqurasiya et ───────────────────────────────────
+# logging.basicConfig() yalnız root-un heç bir handler-i olmadıqda işləyir.
+# Buna görə birbaşa root logger-ə handler əlavə edirik — bu həmişə işləyir,
+# hətta başqa kitabxana basicConfig-i əvvəlcədən çağırmış olsa belə.
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.DEBUG)
+
+# Mövcud handler-ləri sil — köhnə, yarımçıq konfiqurasiyaların qarışmasının
+# qarşısını alır (məsələn Flask-ın özü basicConfig çağırır).
+for _h in _root_logger.handlers[:]:
+    _root_logger.removeHandler(_h)
+
+# Konsol handler-i root-a qoş
+_root_logger.addHandler(_console_handler)
+
+# ─── Fayl handler — ROOT logger-ə qoşulur ────────────────────────────────────
+# Root-a qoşmaq vacibdir: ldap3, impacket kimi kitabxanalar öz logger-lərini
+# istifadə edir, onlar ad_api logger-indən keçmir. Root-a qoşsaq hamısı
+# connection.log-a düşər.
 try:
     _file_handler = logging.FileHandler(_LOG_FILE_PATH, encoding="utf-8")
     _file_handler.setLevel(logging.DEBUG)
-    _file_handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
-    logger.addHandler(_file_handler)
-
-    if not DEBUG_MODE:
-        _flask_file_handler = logging.FileHandler(_LOG_FILE_PATH, encoding="utf-8")
-        _flask_file_handler.setLevel(logging.DEBUG)
-        _flask_file_handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
-        _flask_logger = logging.getLogger("flask.app")
-        _flask_logger.addHandler(_flask_file_handler)
-        _flask_logger.setLevel(logging.DEBUG)
-        _flask_logger.propagate = False
+    _file_handler.setFormatter(logging.Formatter(_LOG_FORMAT_FILE, datefmt=_LOG_DATEFMT))
+    _root_logger.addHandler(_file_handler)
 
 except Exception as _log_exc:
     logging.getLogger().critical("Could not attach file handler for connection.log: %s", _log_exc)
+
+# ─── Küylü kitabxana logger-ləri ─────────────────────────────────────────────
+# Bu logger-lər çox verbose məlumat verir; WARNING-ə qoyuruq ki,
+# log oxuna bilsin, amma xətaları itirməyək.
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("charset_normalizer").setLevel(logging.WARNING)
+
+# ldap3-ün öz logger-ini DEBUG-da saxlayırıq — LDAP protokol xətaları
+# connection.log-a düşsün.
+logging.getLogger("ldap3").setLevel(logging.DEBUG)
+
+# ─── Əsas tətbiq logger-i ─────────────────────────────────────────────────────
+logger = logging.getLogger("ad_api")
+logger.setLevel(logging.DEBUG)
+
+# Flask tətbiq logger-i də faylda görünsün.
+_flask_logger = logging.getLogger("flask.app")
+_flask_logger.setLevel(logging.DEBUG)
+_flask_logger.propagate = True  

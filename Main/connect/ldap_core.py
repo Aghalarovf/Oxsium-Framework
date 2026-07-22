@@ -25,6 +25,10 @@ def open_standalone_connection(
     domain: str,
     config,
     use_ssl: bool = False,
+    ccache_bytes: bytes | None = None,
+    pfx_bytes: bytes | None = None,
+    pfx_password: str | None = None,
+    dc_host: str | None = None,
 ) -> tuple[Connection, str]:
     """Single source of truth for collector modules that need to open their
     OWN LDAP connection (i.e. no shared session was available/reused).
@@ -41,15 +45,36 @@ def open_standalone_connection(
     directly, so every code path -- shared session AND standalone fallback
     -- authenticates the same way.
 
+    ccache_bytes / pfx_bytes / pfx_password / dc_host are passed through to
+    LdapSession so that alt-auth collectors can also open their own connection
+    without falling back to an empty-password SIMPLE bind.
+
     Returns (conn, base_dn). Caller is responsible for conn.unbind().
     """
+    base_dn = domain_to_dn(domain)
+
+    # ccache veya PFX varsa LdapSession üzerinden aç — SIMPLE bind yapmaz.
+    if ccache_bytes or pfx_bytes:
+        from connect.ldap_session import LdapSession, LdapSessionError
+        from connect.utils import write_temp_pem_pair, pfx_bytes_to_pem, write_temp_ccache, cleanup_temp_paths
+        try:
+            session = LdapSession(
+                ip, domain, username, "", config,
+                use_ssl=use_ssl,
+                ccache_bytes=ccache_bytes,
+                pfx_bytes=pfx_bytes,
+                pfx_password=pfx_password,
+                dc_host=dc_host,
+            ).open()
+            return session.conn, base_dn
+        except LdapSessionError as exc:
+            raise LDAPBindError(str(exc)) from exc
+
     secret = password
     auth_type = "SIMPLE"
     if is_ntlm_hash(password):
         secret = f"00000000000000000000000000000000:{password}"
         auth_type = "NTLM"
-
-    base_dn = domain_to_dn(domain)
 
     last_error: Exception | None = None
     for bind_user in build_ldap_bind_users(username, domain):
@@ -87,6 +112,22 @@ def enum_fn_supports_shared_session(enum_fn) -> bool:
     if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
         return True
     return "conn" in params and "base_dn" in params
+
+
+def enum_fn_supports_alt_auth(enum_fn) -> bool:
+    """Return True if enum_fn's signature accepts ccache_bytes/pfx_bytes kwargs.
+
+    Used by _run_enumeration_with_target_fallback to decide whether to forward
+    alt-auth credentials even when conn= is already provided (e.g. get_domain_acls
+    still spawns parallel workers that open their own connections and need these).
+    """
+    try:
+        params = inspect.signature(enum_fn).parameters
+    except (TypeError, ValueError):
+        return False
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return True
+    return "ccache_bytes" in params
 
 
 def _normalize_ldap_target(value: str) -> str:
@@ -323,10 +364,27 @@ def _run_enumeration_with_target_fallback(req: dict, enum_fn):
                 # session proved reachable, every one of those extra
                 # connections fails with "invalid server address", even
                 # though the shared session itself is healthy.
+                # Some collectors (e.g. get_domain_acls) spawn parallel workers
+                # that open their own connections even when conn= is provided.
+                # Forward alt-auth credentials so those workers can authenticate
+                # via GSSAPI/EXTERNAL instead of falling back to SIMPLE bind.
+                _ss_ccache_b64   = req.get("ccache_data")
+                _ss_pfx_b64      = req.get("pfx_data")
+                _ss_alt_auth     = bool(_ss_ccache_b64 or _ss_pfx_b64)
+                _ss_alt_kwargs: dict = {}
+                if _ss_alt_auth and enum_fn_supports_alt_auth(enum_fn):
+                    from connect.utils import decode_base64_upload
+                    _ss_alt_kwargs = {
+                        "ccache_bytes":  decode_base64_upload(_ss_ccache_b64, "ccache_data") if _ss_ccache_b64 else None,
+                        "pfx_bytes":     decode_base64_upload(_ss_pfx_b64,    "pfx_data")    if _ss_pfx_b64    else None,
+                        "pfx_password":  req.get("pfx_password") or None,
+                        "dc_host":       req.get("dc_host") or None,
+                    }
                 result = enum_fn(
                     shared_session.ip or req.get("ip"),
                     req["domain"], req["username"], req["password"], Config,
                     conn=shared_session.conn, base_dn=shared_session.base_dn,
+                    **_ss_alt_kwargs,
                 )
                 if result.get("success"):
                     result.setdefault("meta", {})
@@ -395,9 +453,21 @@ def _run_enumeration_with_target_fallback(req: dict, enum_fn):
                     )
                     _owns_conn = True
 
+                # Forward alt-auth bytes so collectors that spawn parallel
+                # workers (e.g. get_domain_acls → make_conn_factory) can
+                # authenticate those workers via GSSAPI/EXTERNAL too.
+                _fallback_alt_kwargs: dict = {}
+                if _using_alt_auth and enum_fn_supports_alt_auth(enum_fn):
+                    _fallback_alt_kwargs = {
+                        "ccache_bytes": _ccache_bytes,
+                        "pfx_bytes":    _pfx_bytes,
+                        "pfx_password": _pfx_password,
+                        "dc_host":      _dc_host,
+                    }
                 result = enum_fn(
                     target, req["domain"], req["username"], req["password"], Config,
                     conn=conn, base_dn=base_dn,
+                    **_fallback_alt_kwargs,
                 )
                 if _owns_conn:
                     try:
@@ -454,6 +524,9 @@ def _paged_count(conn: Connection, base_dn: str, ldap_filter: str) -> int:
     return count
 
 
+_gssapi_env_lock = __import__('threading').Lock()
+
+
 def _open_ldap_connection_gssapi(
     *,
     ldap_target: str,
@@ -492,8 +565,9 @@ def _open_ldap_connection_gssapi(
 
     # Keep env-var set as a belt-and-braces fallback (some gssapi builds
     # ignore cred_store and still read KRB5CCNAME from the environment).
-    prev_ccache = os.environ.get("KRB5CCNAME")
-    os.environ["KRB5CCNAME"] = ccache_path
+    with _gssapi_env_lock:
+      prev_ccache = os.environ.get("KRB5CCNAME")
+      os.environ["KRB5CCNAME"] = ccache_path
     try:
         port = 636 if use_ssl else 389
         label = "LDAPS:636 (GSSAPI)" if use_ssl else "LDAP:389 (GSSAPI)"
@@ -542,10 +616,11 @@ def _open_ldap_connection_gssapi(
         )
         raise
     finally:
-        if prev_ccache is None:
-            os.environ.pop("KRB5CCNAME", None)
-        else:
-            os.environ["KRB5CCNAME"] = prev_ccache
+        with _gssapi_env_lock:
+            if prev_ccache is None:
+                os.environ.pop("KRB5CCNAME", None)
+            else:
+                os.environ["KRB5CCNAME"] = prev_ccache
 
 
 def _open_ldap_connection_certificate(

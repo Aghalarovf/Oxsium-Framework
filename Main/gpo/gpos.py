@@ -359,7 +359,11 @@ def _resolve_sid_to_name(sid: str, conn, domain_dn: str) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-def get_domain_gpos(ip, domain, username, password, config, conn=None, base_dn=None):
+def get_domain_gpos(ip, domain, username, password, config, conn=None, base_dn=None,
+                    ccache_bytes: bytes | None = None,
+                    pfx_bytes: bytes | None = None,
+                    pfx_password: str | None = None,
+                    dc_host: str | None = None):
     if not all([ip, domain, username, password]):
         return {
             "success": False,
@@ -372,7 +376,13 @@ def get_domain_gpos(ip, domain, username, password, config, conn=None, base_dn=N
 
     try:
         if owns_connection:
-            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
+            conn, base_dn = open_standalone_connection(
+                ip, username, password, domain, config,
+                ccache_bytes=ccache_bytes,
+                pfx_bytes=pfx_bytes,
+                pfx_password=pfx_password,
+                dc_host=dc_host,
+            )
             conn_cm = conn
         else:
             conn_cm = contextlib.nullcontext(conn)
@@ -620,13 +630,23 @@ def get_domain_gpos(ip, domain, username, password, config, conn=None, base_dn=N
         return {"success": False, "error": f"Error: {e}", "count": 0, "gpos": []}
 
 
-def get_gpo_scope(ip, gpo_guid, domain, username, password, config, conn=None, base_dn=None):
+def get_gpo_scope(ip, gpo_guid, domain, username, password, config, conn=None, base_dn=None,
+                  ccache_bytes: bytes | None = None,
+                  pfx_bytes: bytes | None = None,
+                  pfx_password: str | None = None,
+                  dc_host: str | None = None):
     if not all([ip, gpo_guid, domain, username, password]):
         return []
     owns_connection = conn is None
     try:
         if owns_connection:
-            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
+            conn, base_dn = open_standalone_connection(
+                ip, username, password, domain, config,
+                ccache_bytes=ccache_bytes,
+                pfx_bytes=pfx_bytes,
+                pfx_password=pfx_password,
+                dc_host=dc_host,
+            )
             conn_cm = conn
         else:
             conn_cm = contextlib.nullcontext(conn)

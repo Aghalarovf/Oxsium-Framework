@@ -331,6 +331,16 @@ function setDeepEnumProgress(percent, label = '') {
   fill.style.width   = `${bounded}%`;
   ptxt.textContent   = `${Math.round(bounded)}%`;
   if (label) ltxt.textContent = label;
+
+  // Bar 100%-e catanda connecting animasiyasini dayandır
+  if (bounded >= 100) {
+    _stopConnectingDotsAnimation();
+    const deepBtn = document.getElementById('btn-connect-deep');
+    const deepTxt = document.getElementById('btn-connect-deep-text');
+    if (deepBtn) deepBtn.classList.remove('connecting');
+    if (deepTxt) deepTxt.textContent = 'DEEP CONNECT';
+    updateConnectButtonState();
+  }
 }
 function resetDeepEnumProgress() {
   const fill = document.getElementById('enum-progress-fill');
@@ -601,6 +611,37 @@ function validate() {
   return ok;
 }
 
+// Interval ID for the animated dots on the connect button
+let _connectingDotsInterval = null;
+
+function _startConnectingDotsAnimation(deepTxt) {
+  // Clear any previous interval
+  if (_connectingDotsInterval) {
+    clearInterval(_connectingDotsInterval);
+    _connectingDotsInterval = null;
+  }
+  const frames = ['Connecting .', 'Connecting ..', 'Connecting ...'];
+  let frameIdx = 0;
+  // Set first frame immediately
+  deepTxt.textContent = frames[frameIdx];
+  _connectingDotsInterval = setInterval(() => {
+    frameIdx = (frameIdx + 1) % frames.length;
+    if (deepTxt && document.contains(deepTxt)) {
+      deepTxt.textContent = frames[frameIdx];
+    } else {
+      clearInterval(_connectingDotsInterval);
+      _connectingDotsInterval = null;
+    }
+  }, 450);
+}
+
+function _stopConnectingDotsAnimation() {
+  if (_connectingDotsInterval) {
+    clearInterval(_connectingDotsInterval);
+    _connectingDotsInterval = null;
+  }
+}
+
 function setBtnLoading(loading, connectMode = 'deep') {
   const sslBtn  = document.getElementById('btn-ssl-toggle');
   const deepBtn = document.getElementById('btn-connect-deep');
@@ -612,8 +653,9 @@ function setBtnLoading(loading, connectMode = 'deep') {
       deepBtn.disabled = true;
       deepBtn.classList.add('connecting');
     }
-    if (deepTxt) deepTxt.innerHTML = '<span class="spinner"></span>&nbsp;CONNECTING...';
+    if (deepTxt) _startConnectingDotsAnimation(deepTxt);
   } else {
+    _stopConnectingDotsAnimation();
     if (deepBtn) deepBtn.classList.remove('connecting');
     updateConnectButtonState();
   }
@@ -781,7 +823,66 @@ async function doConnect(connectMode = 'deep') {
         pfx_password:    (document.getElementById('f-pfx-pass')?.value || '').trim() || null,
       }),
     });
-    const data = await resp.json();
+    // resp.json() may throw if the backend returned an empty body or an
+    // HTML error page (e.g. a Flask 500 before our JSON handler fires).
+    const data = await resp.json().catch(() => null);
+    if (!data) {
+      throw new Error(`Server returned an invalid response (HTTP ${resp.status}). Check the backend log.`);
+    }
+
+    // Backend returns HTTP 202 + { status: "processing_db" } when the
+    // ccache/PFX bind succeeded and the collector pipeline started.
+    // This is a SUCCESS path — handle it here instead of falling into
+    // the else-branch which would throw "LDAP Authentication Failed!".
+    if (resp.status === 202 && data.status === 'processing_db') {
+      resetSecurityCheckerCacheForSession();
+      state.mode     = 'remote';
+      state.ip       = data.ip     || ip;
+      state.domain   = data.domain || domain;
+      state.dc       = dcHost || data.dc || ip;
+      state.user     = data.user   || username;
+      state.protocol = data.protocol || state.protocol;
+      state._pass    = password || '';
+      state._hash    = hash     || '';
+
+      const savedEntry = { domain: state.domain, ip: state.ip, username, protocol: state.protocol };
+      if (dcHost)   savedEntry.dc       = dcHost;
+      if (password) savedEntry.password = password;
+      if (hash)     savedEntry.hash     = hash;
+      saveSuccessfulUser(savedEntry);
+
+      showToast('Authentication successful. Preparing the database...', 'info');
+      addLog('Collector started, building domain_data.db...', 'info');
+
+      pollForDbReady(() => {
+        resetSecurityCheckerCacheForSession();
+        state.connected          = true;
+        state.connecting         = false;
+        state.justConnectedUntil = Date.now() + 5000;
+        state.sessionStart       = state.sessionStart || Date.now();
+        setConnState('connected');
+        addLog(`Connected as <span class="log-upn">${username}@${state.domain}</span> via <span class="log-proto">${state.protocol.toUpperCase()}</span>`, 'ok');
+        addLog(`Domain Controller: <span class="log-dc">${state.dc || 'N/A'}</span>`, 'ok');
+        startSessionTimer();
+        showToast(`Connected to ${state.domain}`, 'success');
+        state.connectMode = connectMode;
+        if (connectMode === 'deep') {
+          addLog('Deep connect: running object discovery checks...', 'info');
+          runDeepDiscoveryCounts().then(() => {
+            addLog('Deep connect: object discovery completed.', 'ok');
+            setBtnLoading(false, connectMode);
+          }).catch(() => {
+            setBtnLoading(false, connectMode);
+          });
+        } else {
+          hideDeepEnumProgress();
+          addLog('Fast connect: enumeration deferred — click Enumeration tab to scan.', 'info');
+          setBtnLoading(false, connectMode);
+        }
+      });
+      // Leave button in loading state until DB is ready; return early.
+      return;
+    }
 
     if (resp.ok && data.success) {
       resetSecurityCheckerCacheForSession();
@@ -805,7 +906,6 @@ async function doConnect(connectMode = 'deep') {
       if (password) savedEntry.password = password;
       if (hash)     savedEntry.hash     = hash;
       saveSuccessfulUser(savedEntry);
-
 
       showToast(`Connected to ${state.domain}`, 'success');
       state.connectMode = connectMode;

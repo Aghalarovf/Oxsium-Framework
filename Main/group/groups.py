@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ldap3 import Server, Connection, ALL, BASE, SUBTREE
+from ldap3 import BASE, SUBTREE
 from ldap3.core.exceptions import LDAPInvalidCredentialsResult, LDAPSocketOpenError
 from ldap3.utils.conv import escape_filter_chars
 
@@ -138,30 +138,24 @@ def _is_potential_privileged_by_rid(rid: int | None) -> bool:
     return rid in potential_privileged_rids
 
 
-def get_domain_groups(ip, domain, username, password, config, conn=None, base_dn=None):
+def get_domain_groups(ip, domain, username, password, config, conn=None, base_dn=None,
+                      ccache_bytes: bytes | None = None,
+                      pfx_bytes: bytes | None = None,
+                      pfx_password: str | None = None,
+                      dc_host: str | None = None):
     owns_connection = conn is None
 
-    if owns_connection:
-        auth_type = "SIMPLE"
-        if is_ntlm_hash(password):
-            password = f"00000000000000000000000000000000:{password}"
-            auth_type = "NTLM"
-
-        base_dn = domain_to_dn(domain)
-        bind_user = get_bind_user(username, domain)
-    else:
+    if not owns_connection:
         base_dn = base_dn or domain_to_dn(domain)
 
     try:
         if owns_connection:
-            server = Server(ip, get_info=ALL, connect_timeout=config.LDAP_CONNECT_TIMEOUT)
-            conn = Connection(
-                server,
-                user=bind_user,
-                password=password,
-                authentication=auth_type,
-                auto_bind=True,
-                receive_timeout=config.LDAP_RECEIVE_TIMEOUT,
+            conn, base_dn = open_standalone_connection(
+                ip, username, password, domain, config,
+                ccache_bytes=ccache_bytes,
+                pfx_bytes=pfx_bytes,
+                pfx_password=pfx_password,
+                dc_host=dc_host,
             )
 
         attrs = [

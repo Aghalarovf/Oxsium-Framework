@@ -243,11 +243,21 @@ def _is_high_value(ou_name: str, ou_path: str) -> bool:
     return any(p in name_lower or p in path_lower for p in _HIGH_VALUE_OU_PATTERNS)
 
 
-def get_domain_ous(ip, domain, username, password, config, conn=None, base_dn=None):
+def get_domain_ous(ip, domain, username, password, config, conn=None, base_dn=None,
+                   ccache_bytes: bytes | None = None,
+                   pfx_bytes: bytes | None = None,
+                   pfx_password: str | None = None,
+                   dc_host: str | None = None):
     owns_connection = conn is None
     try:
         if owns_connection:
-            conn, base_dn = open_standalone_connection(ip, username, password, domain, config)
+            conn, base_dn = open_standalone_connection(
+                ip, username, password, domain, config,
+                ccache_bytes=ccache_bytes,
+                pfx_bytes=pfx_bytes,
+                pfx_password=pfx_password,
+                dc_host=dc_host,
+            )
 
         domain_dn  = base_dn or ("DC=" + ",DC=".join(domain.split(".")))
         page_size  = getattr(config, "LDAP_PAGE_SIZE", 500)
