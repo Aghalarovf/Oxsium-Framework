@@ -1136,14 +1136,40 @@ def _run_full_collector_pipeline(enum_req: dict, shared_session: "LdapSession | 
 
     session = shared_session
 
+    # ccache / PFX məlumatlarını enum_req-dən çıxar (pipeline-a ötürülüb)
+    _ccache_b64    = enum_req.get("ccache_data")
+    _pfx_b64       = enum_req.get("pfx_data")
+    _pfx_password  = enum_req.get("pfx_password") or None
+    _dc_host       = enum_req.get("dc_host") or None
+    _using_alt_auth = bool(_ccache_b64 or _pfx_b64)
+
     if session is not None:
         logger.info("collector pipeline: reusing shared LDAP session (ip=%s)", ip)
     else:
         targets = _build_ldap_targets(enum_req)
         last_error = None
+
         for target in targets:
             try:
-                session = LdapSession(target, domain, username, password, Config, use_ssl=use_ssl).open()
+                if _using_alt_auth:
+                    # ccache / PFX ilə autentifikasiya — boş şifrə ilə
+                    # SIMPLE bind etmə, LdapSession GSSAPI/EXTERNAL istifadə edər.
+                    from connect.utils import decode_base64_upload
+                    _ccache_bytes = decode_base64_upload(_ccache_b64, "ccache_data") if _ccache_b64 else None
+                    _pfx_bytes    = decode_base64_upload(_pfx_b64,    "pfx_data")    if _pfx_b64    else None
+                    session = LdapSession(
+                        target, domain, username, "", Config,
+                        use_ssl=use_ssl,
+                        ccache_bytes=_ccache_bytes,
+                        pfx_bytes=_pfx_bytes,
+                        pfx_password=_pfx_password,
+                        dc_host=_dc_host,
+                    ).open()
+                else:
+                    session = LdapSession(
+                        target, domain, username, password, Config,
+                        use_ssl=use_ssl,
+                    ).open()
                 logger.info("collector pipeline: LDAP session established on %s", target)
                 break
             except LdapSessionError as exc:
@@ -1459,15 +1485,21 @@ def connect():
             apply_deep_defaults(result, ip, check_port=check_port)
 
         enum_req = dict(req)
-        enum_req["mode"]     = "remote"
-        enum_req["ip"]       = ip
-        enum_req["domain"]   = domain
-        enum_req["username"] = username
-        enum_req["password"] = password
-        enum_req["hash"]     = hash_value
-        enum_req["protocol"] = proto
-        enum_req["dc"]       = result.get("dc") or ip
-        enum_req["use_ssl"]  = use_ssl 
+        enum_req["mode"]        = "remote"
+        enum_req["ip"]          = ip
+        enum_req["domain"]      = domain
+        enum_req["username"]    = username
+        enum_req["password"]    = password
+        enum_req["hash"]        = hash_value
+        enum_req["protocol"]    = proto
+        enum_req["dc"]          = result.get("dc") or ip
+        enum_req["use_ssl"]     = use_ssl
+        # ccache / PFX auth bilgilərini pipeline-a ötür ki, shared session
+        # ölsə belə fallback bağlantı düzgün auth metodunu istifadə etsin.
+        enum_req["ccache_data"]  = ccache_b64    or None
+        enum_req["pfx_data"]     = pfx_b64       or None
+        enum_req["pfx_password"] = pfx_password  or None
+        enum_req["dc_host"]      = _shared_dc_fqdn or None
 
         shared_session = None
         try:

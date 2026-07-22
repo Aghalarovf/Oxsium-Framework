@@ -351,26 +351,59 @@ def _run_enumeration_with_target_fallback(req: dict, enum_fn):
         or str(req.get("protocol", "")).strip().lower() == "ldaps"
     )
 
+    # ccache / PFX alt-auth məlumatları (pipeline tərəfindən enum_req-ə əlavə edilib)
+    _ccache_b64   = req.get("ccache_data")
+    _pfx_b64      = req.get("pfx_data")
+    _pfx_password = req.get("pfx_password") or None
+    _dc_host      = req.get("dc_host") or None
+    _using_alt_auth = bool(_ccache_b64 or _pfx_b64)
+
     for target in targets:
         if enum_fn_supports_shared_session(enum_fn):
             # Open a standalone SSL-aware connection for this fallback attempt.
             try:
-                conn, base_dn = open_standalone_connection(
-                    target,
-                    req["username"],
-                    req["password"],
-                    req["domain"],
-                    Config,
-                    use_ssl=req_use_ssl,
-                )
+                if _using_alt_auth:
+                    # ccache / PFX ilə: LdapSession GSSAPI/EXTERNAL bind edir,
+                    # boş şifrə ilə SIMPLE bind etmirik.
+                    from connect.utils import decode_base64_upload
+                    from connect.ldap_session import LdapSession, LdapSessionError
+                    _ccache_bytes = decode_base64_upload(_ccache_b64, "ccache_data") if _ccache_b64 else None
+                    _pfx_bytes    = decode_base64_upload(_pfx_b64,    "pfx_data")    if _pfx_b64    else None
+                    _ls = LdapSession(
+                        target,
+                        req["domain"],
+                        req["username"],
+                        "",
+                        Config,
+                        use_ssl=req_use_ssl,
+                        ccache_bytes=_ccache_bytes,
+                        pfx_bytes=_pfx_bytes,
+                        pfx_password=_pfx_password,
+                        dc_host=_dc_host,
+                    ).open()
+                    conn     = _ls.conn
+                    base_dn  = _ls.base_dn
+                    _owns_conn = True
+                else:
+                    conn, base_dn = open_standalone_connection(
+                        target,
+                        req["username"],
+                        req["password"],
+                        req["domain"],
+                        Config,
+                        use_ssl=req_use_ssl,
+                    )
+                    _owns_conn = True
+
                 result = enum_fn(
                     target, req["domain"], req["username"], req["password"], Config,
                     conn=conn, base_dn=base_dn,
                 )
-                try:
-                    conn.unbind()
-                except Exception:
-                    pass
+                if _owns_conn:
+                    try:
+                        conn.unbind()
+                    except Exception:
+                        pass
             except Exception as exc:
                 last_result = {"success": False, "error": str(exc), "code": 503}
                 logger.warning(

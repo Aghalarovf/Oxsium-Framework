@@ -164,6 +164,7 @@ def start_api_server(port=PORT, host="localhost", base_dir=None):
         resp.headers["Expires"]       = "0"
         return resp
 
+    @app.route("/analyze", methods=["POST", "OPTIONS"])
     @app.route("/api/analyze-root", methods=["POST", "OPTIONS"])
     def api_analyze_root():
         if request.method == "OPTIONS":
@@ -205,10 +206,8 @@ def start_api_server(port=PORT, host="localhost", base_dir=None):
         cmd += ["--pwd-not-required"]
         cmd += ["--encryption"]
         cmd += ["--key-credential-link"]
-        cmd += ["--managed-by"]
         cmd += ["--rbcd"]
         cmd += ["--member-of"]
-        cmd += ["--unconstrained"]
         
         cmd += ["--out", str(out_file)]
 

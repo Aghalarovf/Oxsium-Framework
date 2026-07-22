@@ -1386,7 +1386,20 @@ function buildGraphDataFromEngine(engineData, selected) {
             }
         }
 
-        addEdge(parentNode.id, targetNode.id, record);
+        // If the record has a principal that differs from the current parent
+        // (e.g. a kerberoasting record whose principal is backup_admin while
+        // the selected root is linked_sql), draw the edge from the real
+        // principal node, not from the root/parent node.
+        let edgeSourceId = parentNode.id;
+        if (record.principal_sid) {
+            const principalKey = String(record.principal_sid).toLowerCase();
+            const rootKey      = String(rootNode.id).toLowerCase();
+            if (principalKey !== rootKey) {
+                const principalNode = seenNodes.get(principalKey);
+                if (principalNode) edgeSourceId = principalNode.id;
+            }
+        }
+        addEdge(edgeSourceId, targetNode.id, record);
 
         const nested = Array.isArray(record.next_step) ? record.next_step : [];
         for (const child of nested) {
@@ -1395,7 +1408,78 @@ function buildGraphDataFromEngine(engineData, selected) {
     }
 
     const graphObjects = Array.isArray(engineData?.graph_objects) ? engineData.graph_objects : [];
+
+    // First pass: collect all SIDs reachable from root via normal ACE records
+    // (records where principal_sid == root SID).
+    const rootSidKey = String(rootNode.id).toLowerCase();
+    const reachableSids = new Set([rootSidKey]);
     for (const record of graphObjects) {
+        const recPrincipal = String(record.principal_sid || '').toLowerCase();
+        if (recPrincipal === rootSidKey) {
+            if (record.target_sid) reachableSids.add(String(record.target_sid).toLowerCase());
+        }
+    }
+
+    // Second pass: render records.
+    // Kerberoasting records are always rendered with a forced 'Kerberoast'
+    // edge from root → kerberoastable account, then their outgoing ACE chain
+    // continues normally from that account.
+    // Other attack-vector records whose principal_sid differs from root are
+    // only shown if that principal is reachable from root.
+    for (const record of graphObjects) {
+        const recPrincipal = String(record.principal_sid || '').toLowerCase();
+        const isKerberoasting = (record._source || '').toLowerCase().includes('kerberoasting')
+                             || (record.object_acetype || '').toLowerCase().includes('kerberoast');
+
+        if (isKerberoasting) {
+            // Structure: root -[Kerberoast]-> kerbNode -[ACE right]-> target
+            // principal_sid/name = kerberoastable account (e.g. backup_admin)
+            // target_sid/name    = the object it has rights over (e.g. oxsium domain)
+
+            // 1. Create the kerberoastable account node
+            const kerbNode = ensureNode(
+                {
+                    target_sid:        record.principal_sid  || '',
+                    target_name:       record.principal_name || record.principal_sid,
+                    target_type:       'User',
+                    target_attributes: record.principal_attributes ?? null
+                },
+                record.principal_sid || `kerb-${nodes.length}`,
+                record.principal_name || record.principal_sid,
+                'User',
+                1
+            );
+
+            // 2. root -[Kerberoast]-> kerberoastable account
+            addEdge(rootNode.id, kerbNode.id, {
+                edge_rights: ['Kerberoast'],
+                rights:      ['Kerberoast']
+            });
+
+            // 3. If the kerberoastable account has outgoing rights, add them:
+            //    kerbNode -[GenericAll/...]-> target
+            if (record.target_sid || record.target_name) {
+                const targetNode = ensureNode(
+                    record,
+                    record.target_sid || `target-${nodes.length}`,
+                    record.target_name || record.target_dn || record.target_sid,
+                    record.target_type || 'object',
+                    2
+                );
+                addEdge(kerbNode.id, targetNode.id, record);
+
+                // 4. Walk any deeper next_step chains from the target
+                const nested = Array.isArray(record.next_step) ? record.next_step : [];
+                for (const child of nested) {
+                    walkRecord(child, targetNode, 3);
+                }
+            }
+            continue;
+        }
+
+        if (recPrincipal && recPrincipal !== rootSidKey) {
+            if (!reachableSids.has(recPrincipal)) continue;
+        }
         walkRecord(record, rootNode, 1);
     }
 

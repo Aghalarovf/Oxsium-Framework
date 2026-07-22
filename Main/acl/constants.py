@@ -138,6 +138,14 @@ INTERESTING_RIGHTS = frozenset(
     | set(OBJECT_TYPE_RIGHTS.values())
 )
 
+_TOMBSTONE_REANIMATE_RIGHTS = frozenset({"Reanimate-Tombstone", "GenericAll"})
+_TOMBSTONE_VISIBILITY_RIGHTS = frozenset({"ListChildObjects", "ReadProperty", "GenericAll"})
+
+# Without this control, AD hides the Deleted Objects container itself from a
+# normal LDAP search (even a base-scope search against its exact DN), so its
+# nTSecurityDescriptor can never be read and no ACEs ever get recorded for it.
+LDAP_SERVER_SHOW_DELETED_OID = "1.2.840.113556.1.4.417"
+
 DANGEROUS_RIGHTS = frozenset({
     "GenericAll", "GenericWrite", "WriteDACL", "WriteOwner",
     "WriteProperty", "CreateChild", "DeleteChild", "Delete", "Self",

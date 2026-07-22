@@ -33,7 +33,16 @@ def _is_session_alive(session: LdapSession) -> bool:
     if session is None or session.conn is None:
         return False
     try:
-        return not session.conn.closed
+        # ldap3-ün conn.closed xassəsi həmişə etibarlı deyil —
+        # bəzən aktiv bağlantını "closed" kimi göstərir.
+        # Əlavə olaraq conn.bound-u yoxlayırıq.
+        conn = session.conn
+        if conn.closed:
+            return False
+        # bound=True varsa bağlantı qurulub və autentifikasiya edilib
+        if hasattr(conn, "bound") and not conn.bound:
+            return False
+        return True
     except Exception:
         return False
 

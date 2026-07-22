@@ -25,6 +25,8 @@ from .constants import (
     ACE_FLAG_INHERIT_ONLY,
     _DEFAULT_TRUSTEE_SIDS,
     _DEFAULT_TRUSTEE_RIDS,
+    _TOMBSTONE_REANIMATE_RIGHTS,
+    _TOMBSTONE_VISIBILITY_RIGHTS,
 )
 from .models import LdapBackend, SecurityDescriptorParser, AclFilterConfig
 from .backends import normalize_value, ldap_ts_to_iso, search_with_retry
@@ -738,6 +740,38 @@ def _parse_rights(ace_data, parser: SecurityDescriptorParser) -> list[str]:
         ordered.append("Other Rights")
 
     return ordered
+
+
+def _flag_tombstone_reanimation_risk(records: list[dict]) -> None:
+    """Mark ACE records on the Deleted Objects container with whether the
+    principal actually poses a tombstone-reanimation risk.
+
+    Holding the Reanimate-Tombstone extended right by itself is not enough:
+    without a right that lets the principal see/enumerate the container's
+    children (ListChildObjects, ReadProperty, or GenericAll which implies
+    both), they have no way to find a tombstone DN to reanimate. This
+    aggregates all Allow ACEs per principal (rights can be split across
+    multiple ACEs on the same object) and requires BOTH capabilities to be
+    present before flagging the risk.
+    """
+    rights_by_principal: dict[str, set[str]] = {}
+    for rec in records:
+        if rec.get("ace_qualifier") != "Allow":
+            continue
+        rights_by_principal.setdefault(rec["principal_sid"], set()).update(
+            rec.get("rights", [])
+        )
+
+    risk_by_principal = {
+        sid: bool(rights & _TOMBSTONE_REANIMATE_RIGHTS) and bool(rights & _TOMBSTONE_VISIBILITY_RIGHTS)
+        for sid, rights in rights_by_principal.items()
+    }
+
+    for rec in records:
+        rec["tombstone_reanimation_risk"] = (
+            rec.get("ace_qualifier") == "Allow"
+            and risk_by_principal.get(rec["principal_sid"], False)
+        )
 
 
 def _parse_dacl_to_records(

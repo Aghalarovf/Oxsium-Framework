@@ -7,7 +7,6 @@
 #include <filesystem>
 #include <map>
 #include <set>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -182,13 +181,6 @@ static JsonVal parseJson(const std::string& src) {
     return parseValue(p);
 }
 
-static std::string readFile(const std::string& path) {
-    std::ifstream f(path);
-    if (!f) throw std::runtime_error("Cannot open file: " + path);
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    return ss.str();
-}
 
 static std::string jsonEsc(const std::string& s) {
     std::string r;
@@ -252,21 +244,6 @@ struct AceRecord {
     std::string              special_edge;
 };
 
-static JsonVal loadAcls(const std::string& path) {
-    std::string raw;
-    try {
-        raw = readFile(path);
-    } catch (const std::exception& e) {
-        std::cerr << "[WARN] " << e.what() << " — skipping.\n";
-        return JsonVal{};
-    }
-    try {
-        return parseJson(raw);
-    } catch (const std::exception& e) {
-        std::cerr << "[ERROR] Parse error in " << path << ": " << e.what() << "\n";
-        return JsonVal{};
-    }
-}
 
 /* ══════════════════════════════════════════════════════════════════════
  * SQLite → JsonVal loading layer.
@@ -750,6 +727,49 @@ static std::vector<AceRecord> extractMatching(
     }
 
     return results;
+}
+
+
+/* ── Machine-account filter ────────────────────────────────────────────────
+ * Returns true when a name ends with '$', which identifies machine accounts
+ * (computer accounts joined to the domain, e.g. WARZONE$, CERTIFICATE$).
+ * These are suppressed from the final graph output because they clutter the
+ * attack-path view and are rarely the subject of ACE-based privilege paths.
+ * ────────────────────────────────────────────────────────────────────────── */
+/* ── Machine-account filter ────────────────────────────────────────────────
+ * Targets only User-typed objects whose name ends with '$'.
+ * Computer-typed objects (target_type == "Computer") are left untouched —
+ * they may appear legitimately in ACE chains (e.g. RBCD paths).
+ * ────────────────────────────────────────────────────────────────────────── */
+static bool isDollarUser(const std::string& name, const std::string& type) {
+    if (name.empty() || name.back() != '$') return false;
+    /* Case-insensitive compare for target_type */
+    std::string t = type;
+    std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+    return t == "user" || t.empty();   /* empty type defaults to User context */
+}
+
+static void pruneMachineAccountSteps(std::vector<AceStep>& steps) {
+    steps.erase(
+        std::remove_if(steps.begin(), steps.end(),
+            [](AceStep& s) { return isDollarUser(s.target_name, s.target_type); }),
+        steps.end());
+    for (AceStep& s : steps)
+        pruneMachineAccountSteps(s.next_step);
+}
+
+static std::vector<AceRecord> filterMachineAccounts(std::vector<AceRecord> in) {
+    std::vector<AceRecord> out;
+    for (AceRecord& rec : in) {
+        if (isDollarUser(rec.target_name, rec.target_type)) {
+            std::cout << "  [FILTER] Skipping $-user: " << rec.target_name
+                      << " (type=" << rec.target_type << ")\n";
+            continue;
+        }
+        pruneMachineAccountSteps(rec.next_step);
+        out.push_back(std::move(rec));
+    }
+    return out;
 }
 
 static std::vector<AceRecord> mergeAceRecords(std::vector<AceRecord> in) {
@@ -2436,6 +2456,14 @@ int main(int argc, char* argv[]) {
         std::cout << " + " << memberOfEdgesAttached << " memberof edge(s)";
     std::cout << " to " << outFile << "...\n";
     try {
+        /* ── Apply machine-account filter before writing output ── */
+        std::cout << "[*] Filtering machine accounts (names ending with '$')...\n";
+        all                  = filterMachineAccounts(std::move(all));
+        kerberoastingRecords = filterMachineAccounts(std::move(kerberoastingRecords));
+        asrepRecords         = filterMachineAccounts(std::move(asrepRecords));
+        pwdNotRequiredRecords= filterMachineAccounts(std::move(pwdNotRequiredRecords));
+        encryptionRecords    = filterMachineAccounts(std::move(encryptionRecords));
+
         writeGraphObjects(outFile, sid, name, all, kerberoastingRecords, asrepRecords, pwdNotRequiredRecords, encryptionRecords);
     } catch (const std::exception& e) {
         std::cerr << "[ERROR] " << e.what() << "\n";

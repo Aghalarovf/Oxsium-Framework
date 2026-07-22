@@ -14,12 +14,14 @@ from .constants import (
     _DEEP_SCAN_CRITICAL_SUBTREES,
     WELL_KNOWN_SIDS,
     _SD_FLAGS,
+    LDAP_SERVER_SHOW_DELETED_OID,
 )
 from .models import AclFilterConfig, LdapBackend, ObjectScope, SecurityDescriptorParser
 from .parsers import (
     _apply_filters,
     _entry_to_sd_payload,
     _fetch_object_sd,
+    _flag_tombstone_reanimation_risk,
     _normalize_controls,
     _paged_search_iter,
     _parse_dacl_payloads_batch,
@@ -202,22 +204,52 @@ class AclCollector:
         records: list[dict] = []
         objects_with_sd = 0
 
+        deleted_objects_template = _AD_SENSITIVE_TEMPLATES.get("Deleted Objects")
+        deleted_objects_dn = (
+            deleted_objects_template[0].format(base_dn=self._base_dn)
+            if deleted_objects_template else None
+        )
+
         for dn in dns:
             try:
-                self._conn.search(
-                    dn,
-                    "(objectClass=*)",
-                    search_scope="BASE",
-                    attributes=[
-                        "name",
-                        "distinguishedName",
-                        "objectClass",
-                        "whenChanged",
-                        "objectSid",
-                        "nTSecurityDescriptor",
-                    ],
-                    controls=controls,
-                )
+                is_deleted_objects_dn = bool(deleted_objects_dn and dn == deleted_objects_dn)
+
+                if is_deleted_objects_dn:
+                    # A BASE-scope bind straight to "CN=Deleted Objects,..."
+                    # is rejected by AD (noSuchObject) even with the
+                    # SHOW_DELETED control -- the container has to be found
+                    # via a SUBTREE search from the domain root instead,
+                    # the same way tombstoned objects are (see users_dump.py
+                    # _get_deleted_users, which uses this exact pattern).
+                    self._conn.search(
+                        self._base_dn,
+                        "(&(objectClass=container)(name=Deleted Objects))",
+                        search_scope="SUBTREE",
+                        attributes=[
+                            "name",
+                            "distinguishedName",
+                            "objectClass",
+                            "whenChanged",
+                            "objectSid",
+                            "nTSecurityDescriptor",
+                        ],
+                        controls=list(controls) + [(LDAP_SERVER_SHOW_DELETED_OID, True, None)],
+                    )
+                else:
+                    self._conn.search(
+                        dn,
+                        "(objectClass=*)",
+                        search_scope="BASE",
+                        attributes=[
+                            "name",
+                            "distinguishedName",
+                            "objectClass",
+                            "whenChanged",
+                            "objectSid",
+                            "nTSecurityDescriptor",
+                        ],
+                        controls=controls,
+                    )
                 if not self._conn.entries:
                     continue
 
@@ -238,6 +270,8 @@ class AclCollector:
                     skip_inherit_only=False,
                 )
                 if parsed:
+                    if deleted_objects_dn and dn == deleted_objects_dn:
+                        _flag_tombstone_reanimation_risk(parsed)
                     records.extend(parsed)
                     self._emit_records(parsed, on_records, "stream_records", entry_dn)
                 objects_with_sd += 1
